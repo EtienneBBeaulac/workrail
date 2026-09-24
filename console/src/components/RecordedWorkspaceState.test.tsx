@@ -10,7 +10,8 @@ describe('recorded workspace evidence', () => {
     expect(container.innerHTML).toBe('');
   });
   it.each([
-    [{ kind: 'cleanup_fenced', resource: { kind: 'recorded', phase: 'running' } }, 'Execution fenced for cleanup; Start acknowledged'],
+    [{ kind: 'cleanup_fenced', cleanupPhase: 'removed', resource: { kind: 'recorded', phase: 'create_pending' } }, 'Resource removal recorded; execution settlement unresolved'],
+    [{ kind: 'cleanup_fenced', cleanupPhase: 'unbound', resource: { kind: 'recorded', phase: 'running' } }, 'Execution fenced for cleanup; Resource identity unresolved; prior history: Start acknowledged'],
     [{ kind: 'recorded', phase: 'create_pending' }, 'Creation requested'],
     [{ kind: 'recorded', phase: 'created' }, 'Creation acknowledged'],
     [{ kind: 'recorded', phase: 'start_pending' }, 'Start requested'],

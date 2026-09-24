@@ -9,6 +9,12 @@ const PHASE_LABELS = {
   process_stopped: 'Process stop acknowledged',
 } as const satisfies Record<Extract<ConsoleSupervisorStatus, { kind: 'recorded' }>['phase'], string>;
 
+const CLEANUP_LABELS = {
+  unbound: 'Resource identity unresolved', bound: 'Resource identity retained',
+  stop_pending: 'Cleanup stop requested', stopped: 'Stopped resource observed',
+  remove_pending: 'Removal requested', removed: 'Resource removal recorded; execution settlement unresolved',
+} as const satisfies Record<Extract<ConsoleSupervisorStatus, { kind: 'cleanup_fenced' }>['cleanupPhase'], string>;
+
 function describe(status: ConsoleSupervisorStatus): string {
   switch (status.kind) {
     case 'recorded': return PHASE_LABELS[status.phase];
@@ -16,7 +22,7 @@ function describe(status: ConsoleSupervisorStatus): string {
       const action = { create: 'Creation', start: 'Start', stop: 'Stop' } as const;
       return `${action[status.operation]} unconfirmed: ${status.reason === 'ack_unknown' ? 'acknowledgment unknown' : 'backend refused the request'}`;
     }
-    case 'cleanup_fenced': return `Execution fenced for cleanup; ${describe(status.resource)}`;
+    case 'cleanup_fenced': return `Execution fenced for cleanup; ${CLEANUP_LABELS[status.cleanupPhase]}; prior history: ${describe(status.resource)}`;
     case 'invalid_history': return 'Conflicting workspace records';
     default: { const unreachable: never = status; return unreachable; }
   }

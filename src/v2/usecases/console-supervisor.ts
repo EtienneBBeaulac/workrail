@@ -1,3 +1,4 @@
+import { foldCleanupResource } from '../durable-core/projections/cleanup-resource.js';
 import { foldAnswerOwnership } from '../durable-core/projections/answer-ownership.js';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
 import { foldSupervisor } from '../durable-core/projections/supervisor-state.js';
@@ -11,7 +12,8 @@ export function projectConsoleSupervisor(events:readonly DomainEventV1[], runId:
     .sort((a,b)=>a.eventIndex-b.eventIndex).map(event=>event.data);
   const projection=foldSupervisor(records);
   const ownership=foldAnswerOwnership(records);
-  if(projection.kind==='invalid'||ownership.kind==='invalid')return {kind:'invalid_history'};
+  const cleanup=foldCleanupResource(records);
+  if(projection.kind==='invalid'||ownership.kind==='invalid'||cleanup.kind==='invalid')return {kind:'invalid_history'};
   const state=projection.state;
   let resource:ConsoleSupervisorObservation;
   switch(state.kind) {
@@ -21,5 +23,9 @@ export function projectConsoleSupervisor(events:readonly DomainEventV1[], runId:
       resource={kind:'recorded',phase:state.kind};break;
     default: {const unreachable:never=state;return unreachable;}
   }
-  return ownership.ownership.kind==='cleanup'?{kind:'cleanup_fenced',resource}:resource;
+  if(ownership.ownership.kind==='cleanup') {
+    if(cleanup.state.kind==='inactive')return {kind:'invalid_history'};
+    return {kind:'cleanup_fenced',resource,cleanupPhase:cleanup.state.kind};
+  }
+  return resource;
 }

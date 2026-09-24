@@ -26,12 +26,17 @@ function parse<T>(bytes: Buffer, schema: z.ZodType<T>): T | undefined {
  * absence observation does not prove that an earlier create cannot settle later. No
  * result grants teardown, owner release, inference, or deadline continuity. */
 export async function observeScratchResource(state: SupervisorState,
-  docker: Pick<DockerCli, 'run'>, signal: AbortSignal): Promise<ScratchObservation> {
+  docker: Pick<DockerCli, 'run'>, signal: AbortSignal,
+  retainedBinding?: Readonly<{ daemon: string; container: string }>): Promise<ScratchObservation> {
   if (signal.aborted) return { kind: 'unavailable' };
   if (state.kind === 'absent') return { kind: 'no_intent' };
   const prior = state.kind === 'unconfirmed' ? state.pending : state;
   const { supervisor } = prior.intent;
-  const binding = 'binding' in prior ? prior.binding : undefined;
+  const original = 'binding' in prior ? prior.binding : undefined;
+  if (retainedBinding && original && (retainedBinding.daemon !== original.daemon
+    || retainedBinding.container !== original.environment)) return { kind: 'identity_mismatch' };
+  // A cleanup observation is a separate durable identity, never a fabricated create receipt.
+  const binding = retainedBinding ? { daemon: retainedBinding.daemon, environment: retainedBinding.container } : original;
   const daemon = prior.intent.daemon ?? binding?.daemon;
   if (!daemon) return { kind: 'missing_daemon_identity' };
   if (binding && (binding.daemon !== daemon || !ContainerId.safeParse(binding.environment).success)) return { kind: 'identity_mismatch' };

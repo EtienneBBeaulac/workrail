@@ -269,7 +269,7 @@ export type ConsoleSupervisorObservation =
   | Readonly<{kind:'recorded';phase:'create_pending'|'created'|'start_pending'|'running'|'stop_pending'|'process_stopped'}>
   | Readonly<{kind:'unconfirmed';operation:'create'|'start'|'stop';reason:'ack_unknown'|'backend_refused'}>;
 export type ConsoleSupervisorStatus = ConsoleSupervisorObservation
-  | Readonly<{kind:'cleanup_fenced';resource:ConsoleSupervisorObservation}>
+  | Readonly<{kind:'cleanup_fenced';resource:ConsoleSupervisorObservation;cleanupPhase:'unbound'|'bound'|'stop_pending'|'stopped'|'remove_pending'|'removed'}>
   | Readonly<{kind:'invalid_history'}>;
 
 export interface ConsoleDagRun {

@@ -172,6 +172,25 @@ it.skipIf(process.platform === 'win32').each([
         if (cleanup === 'create_unknown') {
           expect(await host.scheduler.inspectResource(operation, new AbortController().signal)).toMatchObject({ kind: 'observation', result: { kind: 'present', daemon: 'fixture-daemon', container: cid, phase: 'stopped' } });
           expect(await readHostState(reopened, result.enrollment.result.enrollment)).toEqual(retained);
+          const intent = retained.state.records.find(record => record.kind === 'supervisor_create_intended');
+          if (intent?.kind !== 'supervisor_create_intended') throw new Error('Missing intent');
+          const beforeCleanup = [...commands];
+          expect(await host.scheduler.cleanupResource({ ...operation, request: { ...operation.request, goal: 'wrong' } },
+            result.enrollment.result.owner, intent.supervisor, new AbortController().signal))
+            .toMatchObject({ kind: 'admission', result: { kind: 'refused', reason: 'request_conflict' } });
+          expect(commands).toEqual(beforeCleanup);
+          expect(await host.scheduler.cleanupResource(operation, result.enrollment.result.owner, 'wrong', new AbortController().signal))
+            .toEqual({ kind: 'claim', result: { kind: 'refused', reason: 'invalid_scope' } });
+          expect(commands).toEqual(beforeCleanup);
+          expect(await host.scheduler.cleanupResource(operation, result.enrollment.result.owner, intent.supervisor, new AbortController().signal))
+            .toEqual({ kind: 'cleanup', result: { kind: 'resource_removed', executionSettlement: 'unresolved' } });
+          const afterCleanup = [...commands];
+          expect(await host.scheduler.cleanupResource(operation, result.enrollment.result.owner, intent.supervisor, new AbortController().signal))
+            .toEqual({ kind: 'cleanup', result: { kind: 'resource_removed', executionSettlement: 'unresolved' } });
+          expect(commands).toEqual(afterCleanup);
+          expect(await readHostState(reopened, result.enrollment.result.enrollment))
+            .toMatchObject({ kind: 'loaded', state: { ownership: { kind: 'cleanup' } } });
+
         }
         expect(commands.filter(command => command === 'create')).toHaveLength(1);
         expect(commands).not.toContain('start');

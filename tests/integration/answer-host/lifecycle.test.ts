@@ -504,3 +504,191 @@ it.each(['normal', 'lost_ack'] as const)('cleanup claim survives %s and reopenin
   expect(await readHostState(reopened, enrolled.enrollment)).toEqual(retained);
   await scheduler.close(signal());
 }));
+
+
+it.each(['normal', 'lost_ack'] as const)('cleanup resource ledger retains %s across cold retries without releasing execution', scenario => fixture(async config => {
+  const { scheduler, enrolled } = await enroll(config);
+  const { composeAnswerEngine } = await import('../../../src/answer-v1/engine-composition.js');
+  const { SessionJournal } = await import('../../../src/answer-v1/journal.js');
+  const { reserveSupervisor } = await import('../../../src/answer-v1/supervisor-journal.js');
+  const { claimCleanupOwnership } = await import('../../../src/answer-v1/cleanup-ownership.js');
+  const { recordCleanupResource } = await import('../../../src/answer-v1/cleanup-journal.js');
+  const { readHostState } = await import('../../../src/answer-v1/host-state.js');
+  const engine = await composeAnswerEngine(config);
+  if (engine.kind !== 'ready') throw new Error(engine.kind);
+  const journal = new SessionJournal(engine, enrolled.enrollment, {}, s => !s.aborted);
+  const reserved = await reserveSupervisor(journal, enrolled.owner, { configurationDigest: 'a'.repeat(64), daemon: 'fixture' }, signal());
+  if (reserved.kind !== 'reserved') throw new Error(reserved.kind);
+  const claim = await claimCleanupOwnership(journal, enrolled.owner, reserved.supervisor, signal());
+  if (claim.kind !== 'claimed') throw new Error(claim.kind);
+  const scope = { epoch: claim.fence.epoch.toString(), supervisor: reserved.supervisor, daemon: 'fixture', container: 'a'.repeat(64) };
+  const records = [
+    { kind: 'cleanup_resource_bound', ...scope }, { kind: 'cleanup_stop_intended', ...scope },
+    { kind: 'cleanup_stopped', ...scope }, { kind: 'cleanup_remove_intended', ...scope },
+    // A late start raced the first removal. A retained new stop targets the same ID.
+    { kind: 'cleanup_stop_intended', ...scope }, { kind: 'cleanup_stopped', ...scope },
+    { kind: 'cleanup_remove_intended', ...scope },
+    { kind: 'cleanup_removed', ...scope, evidence: 'absent_after_remove_intent' },
+  ] as const;
+  const losing = new class extends SessionJournal {
+    override async append(...args: Parameters<SessionJournal['append']>) {
+      const saved = await super.append(...args);
+      return args[2].kind.startsWith('cleanup_') ? false : saved;
+    }
+  }(engine, enrolled.enrollment, {}, s => !s.aborted);
+  for (const record of records) {
+    const attempt = await recordCleanupResource(scenario === 'lost_ack' ? losing : journal, claim.fence, record, signal());
+    expect(attempt.kind).toBe(scenario === 'lost_ack' ? 'unconfirmed' : 'retained');
+    const reopened = await composeAnswerEngine(config);
+    if (reopened.kind !== 'ready') throw new Error(reopened.kind);
+    const cold = new SessionJournal(reopened, enrolled.enrollment, {}, s => !s.aborted);
+    const before = await readHostState(reopened, enrolled.enrollment);
+    expect((await recordCleanupResource(cold, claim.fence, record, signal())).kind).toBe('retained');
+    expect(await readHostState(reopened, enrolled.enrollment)).toEqual(before);
+    expect(await recordCleanupResource(cold, { ...claim.fence, epoch: 3n }, record, signal()))
+      .toEqual({ kind: 'refused', reason: 'ownership_changed' });
+    expect(await recordCleanupResource(cold, claim.fence, { ...record, container: 'c'.repeat(64) }, signal()))
+      .toEqual({ kind: 'refused', reason: 'invalid_transition' });
+    expect(await readHostState(reopened, enrolled.enrollment)).toEqual(before);
+  }
+  const final = await readHostState(engine, enrolled.enrollment);
+  expect(final).toMatchObject({ kind: 'loaded', state: { ownership: { kind: 'cleanup', epoch: 2n } } });
+  expect(await scheduler.releaseOwnership(enrolled.enrollment, enrolled.owner, signal())).toEqual({ kind: 'stale_owner' });
+  await scheduler.close(signal());
+}));
+
+
+it.each(['normal', 'lost_remove_reply', 'late_start', 'late_create', 'foreign_daemon', 'cancelled', 'binding_commit_failure', 'stop_intent_failure', 'remove_intent_failure', 'delayed_remove_during_restop'] as const)(
+  'reconciles scratch cleanup with %s while preserving unresolved execution', scenario => fixture(async config => {
+  const { scheduler, enrolled } = await enroll(config);
+  const { composeAnswerEngine } = await import('../../../src/answer-v1/engine-composition.js');
+  const { SessionJournal } = await import('../../../src/answer-v1/journal.js');
+  const { reserveSupervisor } = await import('../../../src/answer-v1/supervisor-journal.js');
+  const { claimCleanupOwnership } = await import('../../../src/answer-v1/cleanup-ownership.js');
+  const { reconcileScratchCleanup } = await import('../../../src/daemon/runner/linux-scratch/reconciliation.js');
+  const { scratchContainerName } = await import('../../../src/daemon/runner/linux-scratch/identity.js');
+  const { readHostState } = await import('../../../src/answer-v1/host-state.js');
+  const engine = await composeAnswerEngine(config);
+  if (engine.kind !== 'ready') throw new Error(engine.kind);
+  const journal = new SessionJournal(engine, enrolled.enrollment, {}, s => !s.aborted);
+  const reserved = await reserveSupervisor(journal, enrolled.owner, { configurationDigest: 'a'.repeat(64), daemon: 'fixture' }, signal());
+  if (reserved.kind !== 'reserved') throw new Error(reserved.kind);
+  const claim = await claimCleanupOwnership(journal, enrolled.owner, reserved.supervisor, signal());
+  if (claim.kind !== 'claimed') throw new Error(claim.kind);
+  const id = 'a'.repeat(64);
+  let present = scenario !== 'late_create', running = true, removals = 0;
+  const calls: string[][] = [];
+  const docker = { async run(args: readonly string[]) {
+    calls.push([...args]);
+    const completed = (value: unknown) => ({ kind: 'completed' as const, bytes: Buffer.from(JSON.stringify(value)) });
+    switch (args[0]) {
+      case 'info': return completed({ ID: scenario === 'foreign_daemon' ? 'wrong' : 'fixture', OSType: 'linux' });
+      case 'ps': return present ? completed(id) : { kind: 'completed' as const, bytes: Buffer.alloc(0) };
+      case 'inspect': return completed([{ Id: id, Name: '/' + scratchContainerName(reserved.supervisor),
+        State: { Running: running }, Config: { Labels: { 'workrail.linux-scratch': reserved.supervisor } } }]);
+      case 'stop':
+        running = false;
+        if (scenario === 'delayed_remove_during_restop' && removals === 1) { present = false; return { kind: 'unknown' as const }; }
+        return completed(id);
+      case 'rm':
+        removals++;
+        if ((scenario === 'late_start' || scenario === 'delayed_remove_during_restop') && removals === 1) { running = true; return { kind: 'unknown' as const }; }
+        if (running) return { kind: 'unknown' as const };
+        present = false;
+        return scenario === 'lost_remove_reply' ? { kind: 'unknown' as const } : completed(id);
+      default: throw new Error('Unexpected cleanup command: ' + args.join(' '));
+    }
+  } };
+  const cancelled = new AbortController(); cancelled.abort();
+  const refusingJournal = new class extends SessionJournal {
+    override async append(...args: Parameters<SessionJournal['append']>) {
+      const refused = { binding_commit_failure: 'cleanup_resource_bound', stop_intent_failure: 'cleanup_stop_intended', remove_intent_failure: 'cleanup_remove_intended' };
+      return scenario in refused && args[2].kind === refused[scenario as keyof typeof refused] ? false : super.append(...args);
+    }
+  }(engine, enrolled.enrollment, {}, s => !s.aborted);
+  const first = await reconcileScratchCleanup(['binding_commit_failure', 'stop_intent_failure', 'remove_intent_failure'].includes(scenario) ? refusingJournal : journal, claim.fence, docker, scenario === 'cancelled' ? cancelled.signal : signal());
+  if (scenario === 'binding_commit_failure' || scenario === 'stop_intent_failure') expect(calls.some(c => c[0] === 'stop' || c[0] === 'rm')).toBe(false);
+  if (scenario === 'remove_intent_failure') expect(calls.some(c => c[0] === 'rm')).toBe(false);
+  if (scenario === 'normal') expect(first).toEqual({ kind: 'resource_removed', executionSettlement: 'unresolved' });
+  else if (scenario === 'foreign_daemon') {
+    expect(first).toEqual({ kind: 'refused', reason: 'identity_mismatch' });
+    expect(calls.map(c => c[0])).toEqual(['info']);
+  } else if (scenario === 'late_create') {
+    expect(first).toEqual({ kind: 'unresolved', reason: 'resource_absent_without_removal_intent' });
+    expect(calls.some(c => c[0] === 'rm' || c[0] === 'stop')).toBe(false);
+    present = true;
+  } else expect(first).toEqual({ kind: 'unconfirmed' });
+  if (scenario === 'cancelled') expect(calls).toEqual([]);
+  if (scenario !== 'foreign_daemon') {
+    const reopened = await composeAnswerEngine(config);
+    if (reopened.kind !== 'ready') throw new Error(reopened.kind);
+    const cold = new SessionJournal(reopened, enrolled.enrollment, {}, s => !s.aborted);
+    if (scenario === 'delayed_remove_during_restop')
+      expect(await reconcileScratchCleanup(cold, claim.fence, docker, signal())).toEqual({ kind: 'unconfirmed' });
+    expect(await reconcileScratchCleanup(cold, claim.fence, docker, signal()))
+      .toEqual({ kind: 'resource_removed', executionSettlement: 'unresolved' });
+    expect(present).toBe(false);
+  }
+  expect(calls.filter(c => c[0] === 'rm').every(c => c.length === 2 && c[1] === id)).toBe(true);
+  expect(calls.filter(c => c[0] === 'stop').every(c => c.join(' ') === 'stop --time 1 ' + id)).toBe(true);
+  expect(await readHostState(engine, enrolled.enrollment))
+    .toMatchObject({ kind: 'loaded', state: { ownership: { kind: 'cleanup', epoch: 2n } } });
+  await scheduler.close(signal());
+}));
+
+it.skipIf(process.env.WORKRAIL_TEST_LINUX_SCRATCH !== '1').each(['stopped', 'running_lost_remove'] as const)(
+  'reconciles an actual isolated Docker fixture after %s across reopen', scenario => fixture(async config => {
+  const { scheduler, enrolled } = await enroll(config);
+  const { composeAnswerEngine } = await import('../../../src/answer-v1/engine-composition.js');
+  const { SessionJournal } = await import('../../../src/answer-v1/journal.js');
+  const { reserveSupervisor } = await import('../../../src/answer-v1/supervisor-journal.js');
+  const { claimCleanupOwnership } = await import('../../../src/answer-v1/cleanup-ownership.js');
+  const { reconcileScratchCleanup } = await import('../../../src/daemon/runner/linux-scratch/reconciliation.js');
+  const { scratchContainerName } = await import('../../../src/daemon/runner/linux-scratch/identity.js');
+  const { DockerCli } = await import('../../../src/daemon/runner/linux-scratch/docker-cli.js');
+  const docker = DockerCli.local(process.env.WORKRAIL_TEST_DOCKER_BINARY ?? '', process.env.WORKRAIL_TEST_DOCKER_SOCKET ?? '');
+  if (!docker) throw new Error('Explicit local Docker fixture endpoint required');
+  const info = await docker.run(['info', '--format', '{{json .}}'], signal());
+  if (info.kind !== 'completed') throw new Error('Fixture Docker unavailable');
+  const daemon = JSON.parse(info.bytes.toString()) as { ID: string; OSType: string };
+  expect(daemon.OSType).toBe('linux');
+  const engine = await composeAnswerEngine(config);
+  if (engine.kind !== 'ready') throw new Error(engine.kind);
+  const journal = new SessionJournal(engine, enrolled.enrollment, {}, s => !s.aborted);
+  const reserved = await reserveSupervisor(journal, enrolled.owner, { configurationDigest: 'a'.repeat(64), daemon: daemon.ID }, signal());
+  if (reserved.kind !== 'reserved') throw new Error(reserved.kind);
+  let container: string | undefined;
+  try {
+    const created = await docker.run(['create', '--pull=never', '--network=none', '--read-only', '--cap-drop=ALL',
+      '--security-opt=no-new-privileges', '--name', scratchContainerName(reserved.supervisor),
+      '--label', 'workrail.linux-scratch=' + reserved.supervisor,
+      'python@sha256:eb5be8e5b4d0a159c237946bbdd06356dda5d19c30fc4f7843e8046d3a590333',
+      'python', '-c', 'import time; time.sleep(30)'], signal());
+    if (created.kind !== 'completed') throw new Error('Fixture creation failed');
+    container = created.bytes.toString().trim();
+    expect(container).toMatch(/^[a-f0-9]{64}$/);
+    if (scenario === 'running_lost_remove') expect((await docker.run(['start', container], signal())).kind).toBe('completed');
+    // Deliberately retain only create intent, as if its original acknowledgment was lost.
+    const claim = await claimCleanupOwnership(journal, enrolled.owner, reserved.supervisor, signal());
+    if (claim.kind !== 'claimed') throw new Error(claim.kind);
+    const losingReply = { async run(...args: Parameters<typeof docker.run>) {
+      const reply = await docker.run(...args);
+      return args[0][0] === 'rm' ? { kind: 'unknown' as const } : reply;
+    } };
+    expect(await reconcileScratchCleanup(journal, claim.fence, scenario === 'running_lost_remove' ? losingReply : docker, signal()))
+      .toEqual(scenario === 'running_lost_remove' ? { kind: 'unconfirmed' } : { kind: 'resource_removed', executionSettlement: 'unresolved' });
+    const reopened = await composeAnswerEngine(config);
+    if (reopened.kind !== 'ready') throw new Error(reopened.kind);
+    const cold = new SessionJournal(reopened, enrolled.enrollment, {}, s => !s.aborted);
+    expect(await reconcileScratchCleanup(cold, claim.fence, docker, signal()))
+      .toEqual({ kind: 'resource_removed', executionSettlement: 'unresolved' });
+    const absent = await docker.run(['ps', '--all', '--no-trunc', '--filter', 'id=' + container, '--format', '{{.ID}}'], signal());
+    expect(absent.kind === 'completed' && absent.bytes.toString().trim()).toBe('');
+  } finally {
+    if (container && /^[a-f0-9]{64}$/.test(container)) {
+      await docker.run(['stop', '--time', '1', container], signal());
+      await docker.run(['rm', container], signal());
+    }
+    await scheduler.close(signal());
+  }
+}));

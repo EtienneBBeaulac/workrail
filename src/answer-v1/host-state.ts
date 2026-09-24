@@ -1,3 +1,4 @@
+import { foldCleanupResource } from '../v2/durable-core/projections/cleanup-resource.js';
 import { foldAnswerOwnership, type AnswerOwnership } from '../v2/durable-core/projections/answer-ownership.js';
 import { reviewHistory } from './review-history.js';
 import { reviewQuestions } from './review-answer.js';
@@ -64,6 +65,8 @@ export async function readHostState(engine: AnswerReadEngine, enrollment: HostEn
         return { kind: 'unavailable', reason: 'corrupt', detail: `Invalid supervisor history at record ${supervisor.recordIndex}: ${supervisor.reason}` };
     const ownership = foldAnswerOwnership(records);
     if (ownership.kind === 'invalid') return { kind: 'unavailable', reason: 'corrupt', detail: 'Invalid ownership history' };
+    if (foldCleanupResource(records).kind === 'invalid')
+        return { kind: 'unavailable', reason: 'corrupt', detail: 'Invalid cleanup resource history' };
     const committed = [...records].reverse().find(e => (e.kind === 'committed' || e.kind === 'review_committed'));
     return { kind: 'loaded', state: { truth: loaded.value, mode: entry.data.mode, enrollment, run, records,
             node: (committed?.kind === 'committed' || committed?.kind === 'review_committed') ? committed.successorNode : entry.data.initialNode,

@@ -1,3 +1,6 @@
+import type { OwnerFence } from '../../answer-v1/contracts/invocation-contract.js';
+import { claimCleanupOwnership } from '../../answer-v1/cleanup-ownership.js';
+import { reconcileScratchCleanup } from './linux-scratch/reconciliation.js';
 import { observeScratchResource } from './linux-scratch/observation.js';
 import { foldSupervisor } from '../../answer-v1/supervisor-state.js';
 import { createAnswerWorkflowReader } from '../../answer-v1/workflow-reader.js';
@@ -147,6 +150,21 @@ export async function createSupervisedAnswerHost(config: SharedAuthorityConfig &
           const projected = foldSupervisor(state.state.records);
           if (projected.kind !== 'valid') return { kind: 'unavailable' } as const;
           return { kind: 'observation', result: await observeScratchResource(projected.state, config.docker, combined) } as const;
+        })());
+      },
+      /** Explicit privileged operator action, never called by inference or inspection.
+       * The original owner and supervisor are supplied for compare-and-swap fencing. */
+      cleanupResource(operation: SupervisedOperation, expectedOwner: OwnerFence, supervisor: string, signal: AbortSignal) {
+        return track((async () => {
+          const checked = validate(operation);
+          if (checked.kind !== 'valid') return { kind: 'refused', reason: 'invalid_request' } as const;
+          const combined = AbortSignal.any([signal, parent]);
+          const located = await inspectHostAdmission(engine, directory.root, checked, combined);
+          if (located.kind !== 'located') return { kind: 'admission', result: located } as const;
+          const journal = new SessionJournal(engine, located.enrollment, config, s => !s.aborted);
+          const claim = await claimCleanupOwnership(journal, expectedOwner, supervisor, combined);
+          if (claim.kind !== 'claimed') return { kind: 'claim', result: claim } as const;
+          return { kind: 'cleanup', result: await reconcileScratchCleanup(journal, claim.fence, config.docker, combined) } as const;
         })());
       },
       reconcileAdmission(operation: SupervisedOperation, signal: AbortSignal) {

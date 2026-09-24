@@ -40,9 +40,30 @@ it('shows cleanup fencing separately from resource history and never exposes aut
     ? { ...record, daemon: 'private-daemon' } : record);
   const status = projectConsoleSupervisor(events([...retained,
     { kind: 'cleanup_claimed', epoch: '2', previousEpoch: '1', supervisor: 'private-id' }]), 'run1');
-  expect(status).toEqual({ kind: 'cleanup_fenced', resource: { kind: 'recorded', phase: 'created' } });
+  expect(status).toEqual({ kind: 'cleanup_fenced', cleanupPhase: 'unbound', resource: { kind: 'recorded', phase: 'created' } });
   expect(JSON.stringify(status)).not.toMatch(/private|epoch|lease|receipt/);
   expect(projectConsoleSupervisor(events([...retained,
     { kind: 'cleanup_claimed', epoch: '1', previousEpoch: '1', supervisor: 'private-id' }]), 'run1'))
     .toEqual({ kind: 'invalid_history' });
+});
+
+it('shows exact cleanup progress without converting removal into execution completion', () => {
+  const history: AnswerHostRecord[] = [records[0]!,
+    { kind: 'supervisor_create_intended', epoch: '1', supervisor: 'private-id', daemon: 'private-daemon', configurationDigest: 'a'.repeat(64) },
+    { kind: 'cleanup_claimed', epoch: '2', previousEpoch: '1', supervisor: 'private-id' }];
+  const scope = { epoch: '2', supervisor: 'private-id', daemon: 'private-daemon', container: 'a'.repeat(64) };
+  for (const [record, phase] of [
+    [{ kind: 'cleanup_resource_bound', ...scope }, 'bound'],
+    [{ kind: 'cleanup_stop_intended', ...scope }, 'stop_pending'],
+    [{ kind: 'cleanup_stopped', ...scope }, 'stopped'],
+    [{ kind: 'cleanup_remove_intended', ...scope }, 'remove_pending'],
+    [{ kind: 'cleanup_removed', ...scope, evidence: 'absent_after_remove_intent' }, 'removed'],
+  ] as const) {
+    history.push(record);
+    const status = projectConsoleSupervisor(events(history), 'run1');
+    expect(status).toEqual({ kind: 'cleanup_fenced', cleanupPhase: phase, resource: { kind: 'recorded', phase: 'create_pending' } });
+    expect(JSON.stringify(status)).not.toMatch(/private|epoch|container|receipt/);
+  }
+  history.push({ kind: 'cleanup_stopped', ...scope });
+  expect(projectConsoleSupervisor(events(history), 'run1')).toEqual({ kind: 'invalid_history' });
 });
