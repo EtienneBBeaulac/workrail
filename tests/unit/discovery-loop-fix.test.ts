@@ -8,7 +8,7 @@
  * - Fix 3: Expired sidecar returns 'clear' from checkIdempotency
  */
 
-import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import { ok as nok } from 'neverthrow';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
@@ -36,9 +36,7 @@ vi.mock('../../src/trigger/github-queue-config.js', () => ({
       repo: 'acme/my-project',
       token: 'test-github-token',
       pollIntervalSeconds: 300,
-      // Set very high to avoid the concurrency cap blocking tests.
-      // The real daemon sessions dir may have active sessions on the developer's machine.
-      maxTotalConcurrentSessions: 1000,
+      maxTotalConcurrentSessions: 1,
       excludeLabels: ['worktrain:in-progress'],
     },
   }),
@@ -48,9 +46,16 @@ vi.mock('../../src/trigger/github-queue-config.js', () => ({
 // Helpers
 // ---------------------------------------------------------------------------
 
+const temporaryDirectories: string[] = [];
 async function makeTmpDir(): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-discovery-loop-fix-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'workrail-discovery-loop-fix-'));
+  temporaryDirectories.push(root);
+  return root;
 }
+afterEach(async () => {
+  await Promise.all(temporaryDirectories.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
+  vi.clearAllMocks();
+});
 
 function makeQueuePollTrigger(overrides: Partial<TriggerDefinition> = {}): TriggerDefinition {
   return {
@@ -193,21 +198,7 @@ describe('Fix 1: agentConfig.maxSessionMinutes threads through to dispatch', () 
 // ---------------------------------------------------------------------------
 
 describe('Fix 2: no GitHub label is applied for any pipeline outcome', () => {
-  beforeEach(async () => {
-    // Clean up any sidecar files that may have been written to the real sessions dir
-    // by a previous test (sidecar is written to ~/.workrail/daemon-sessions/).
-    const sessionsDir = path.join(os.homedir(), '.workrail', 'daemon-sessions');
-    const sidecarPath = path.join(sessionsDir, 'queue-issue-393.json');
-    await fs.unlink(sidecarPath).catch(() => {});
-  });
 
-  afterEach(async () => {
-    // Clean up sidecar written during this test.
-    const sessionsDir = path.join(os.homedir(), '.workrail', 'daemon-sessions');
-    const sidecarPath = path.join(sessionsDir, 'queue-issue-393.json');
-    await fs.unlink(sidecarPath).catch(() => {});
-    vi.clearAllMocks();
-  });
 
   it('does NOT apply any label when outcome is escalated', async () => {
     const tmpDir = await makeTmpDir();
@@ -235,15 +226,14 @@ describe('Fix 2: no GitHub label is applied for any pipeline outcome', () => {
     } as unknown as TriggerRouter;
 
     const trigger = makeQueuePollTrigger();
-    const scheduler = new PollingScheduler([trigger], router, store, fetchFn);
+    const scheduler = new PollingScheduler([trigger], router, store, fetchFn, tmpDir);
 
     await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
 
-    // Drain microtasks so .then() handler fires
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(router.dispatchAdaptivePipeline).toHaveBeenCalledTimes(1);
+    await vi.waitFor(async () => {
+      await expect(fs.access(path.join(tmpDir, 'queue-issue-393.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+    });
 
     expect(labelCalls).toHaveLength(0);
   });
@@ -269,13 +259,13 @@ describe('Fix 2: no GitHub label is applied for any pipeline outcome', () => {
     } as unknown as TriggerRouter;
 
     const trigger = makeQueuePollTrigger();
-    const scheduler = new PollingScheduler([trigger], router, store, fetchFn);
+    const scheduler = new PollingScheduler([trigger], router, store, fetchFn, tmpDir);
 
     await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(router.dispatchAdaptivePipeline).toHaveBeenCalledTimes(1);
+    await vi.waitFor(async () => {
+      await expect(fs.access(path.join(tmpDir, 'queue-issue-393.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+    });
 
     expect(labelCalls).toHaveLength(0);
   });
@@ -301,13 +291,13 @@ describe('Fix 2: no GitHub label is applied for any pipeline outcome', () => {
     } as unknown as TriggerRouter;
 
     const trigger = makeQueuePollTrigger();
-    const scheduler = new PollingScheduler([trigger], router, store, fetchFn);
+    const scheduler = new PollingScheduler([trigger], router, store, fetchFn, tmpDir);
 
     await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(router.dispatchAdaptivePipeline).toHaveBeenCalledTimes(1);
+    await vi.waitFor(async () => {
+      await expect(fs.access(path.join(tmpDir, 'queue-issue-393.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+    });
 
     expect(labelCalls).toHaveLength(0);
   });
@@ -318,16 +308,7 @@ describe('Fix 2: no GitHub label is applied for any pipeline outcome', () => {
 // ---------------------------------------------------------------------------
 
 describe('Fix 3: Issue-ownership sidecar lifecycle', () => {
-  beforeEach(async () => {
-    const sessionsDir = path.join(os.homedir(), '.workrail', 'daemon-sessions');
-    await fs.unlink(path.join(sessionsDir, 'queue-issue-393.json')).catch(() => {});
-  });
 
-  afterEach(async () => {
-    const sessionsDir = path.join(os.homedir(), '.workrail', 'daemon-sessions');
-    await fs.unlink(path.join(sessionsDir, 'queue-issue-393.json')).catch(() => {});
-    vi.clearAllMocks();
-  });
 
   it('writes sidecar file before dispatch and deletes it on completion', async () => {
     const tmpDir = await makeTmpDir();
@@ -353,29 +334,17 @@ describe('Fix 3: Issue-ownership sidecar lifecycle', () => {
       }),
     } as unknown as TriggerRouter;
 
-    // Override sessionsDir by controlling the daemon-sessions path
-    // polling-scheduler.ts uses path.join(os.homedir(), '.workrail', 'daemon-sessions').
-    // We can't easily override this without refactoring, so instead we verify
-    // the sidecar file is written to the expected path and then deleted.
-    //
-    // Since we can't inject sessionsDir directly into the scheduler, we verify
-    // the behavior by checking the checkIdempotency function with the actual sidecar path.
-    // The sidecar IS written (to ~/.workrail/daemon-sessions/ in production).
-    // For this test, we verify the dispatch completes and the issue is removed from
-    // dispatchingIssues after completion.
-
     const fetchFn = makeQueueFetch();
     const trigger = makeQueuePollTrigger();
-    const scheduler = new PollingScheduler([trigger], router, store, fetchFn);
+    const scheduler = new PollingScheduler([trigger], router, store, fetchFn, tmpDir);
 
     await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(router.dispatchAdaptivePipeline).toHaveBeenCalledTimes(1);
+    await vi.waitFor(async () => {
+      await expect(fs.access(path.join(tmpDir, 'queue-issue-393.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+    });
 
-    // Dispatch was called
-    expect((router.dispatchAdaptivePipeline as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
+    expect(sidecarExistedAtDispatch).toBe(true);
   });
 });
 

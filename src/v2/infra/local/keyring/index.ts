@@ -53,6 +53,14 @@ export class LocalKeyringV2 implements KeyringPortV2 {
     private readonly entropy: RandomEntropyPortV2
   ) {}
 
+  /** Readers may validate existing authority but must never create or rotate it. */
+  loadExisting(): ResultAsync<KeyringV1, KeyringError> {
+    const path = this.dataDir.keyringPath();
+    return this.fs.readFileUtf8(path)
+      .mapErr(e => ({ code: 'KEYRING_IO_ERROR' as const, message: e.message }))
+      .andThen(raw => this.parseAndValidate(raw, path));
+  }
+
   loadOrCreate(): ResultAsync<KeyringV1, KeyringError> {
     const path = this.dataDir.keyringPath();
     return this.fs

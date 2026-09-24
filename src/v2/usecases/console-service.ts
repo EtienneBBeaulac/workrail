@@ -1,3 +1,4 @@
+import { projectConsoleSupervisor } from './console-supervisor.js';
 /**
  * Console Service — read-only composition of v2 projections for the Console UI.
  *
@@ -184,7 +185,7 @@ async function isSessionLiveFromEventLog(workrailSessionId: string): Promise<boo
         const event = JSON.parse(line) as Record<string, unknown>;
         if (event['workrailSessionId'] !== workrailSessionId) continue;
         hasSeen = true;
-        if (event['kind'] === 'session_completed') hasCompleted = true;
+        if (event['kind'] === 'session_completed' || event['kind'] === 'session_suspended') hasCompleted = true;
       } catch {
         // Malformed line -- skip it
       }
@@ -1268,11 +1269,13 @@ function projectSessionDetail(
       createdAtEventIndex: edge.createdAtEventIndex,
     }));
 
+    const supervisor = projectConsoleSupervisor(events,run.runId);
     const workflow = run.workflow;
     const wfHash = workflow.kind === 'with_workflow' ? workflow.workflowHash : null;
 
     return {
       runId: run.runId,
+      ...(supervisor ? {supervisor} : {}),
       workflowId: workflow.kind === 'with_workflow' ? workflow.workflowId : null,
       workflowName: wfHash ? (workflowNames[wfHash] ?? null) : null,
       workflowHash: wfHash,

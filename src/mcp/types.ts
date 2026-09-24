@@ -265,6 +265,7 @@ export interface V2Dependencies {
  * This makes handlers pure functions that are easy to test.
  */
 export interface ToolContext {
+  readonly backgroundWork: import('./background-work.js').BackgroundWork;
   readonly workflowService: WorkflowService;
   readonly featureFlags: IFeatureFlagProvider;
   // Session-related dependencies are null when session tools are disabled

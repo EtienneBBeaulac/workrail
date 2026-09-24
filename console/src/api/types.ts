@@ -264,7 +264,17 @@ export interface ConsoleExecutionTraceSummary {
   readonly contextFacts: readonly ConsoleExecutionTraceFact[];
 }
 
+/** Retained observations only, never a live-process or lease-release assertion. */
+export type ConsoleSupervisorObservation =
+  | Readonly<{kind:'recorded';phase:'create_pending'|'created'|'start_pending'|'running'|'stop_pending'|'process_stopped'}>
+  | Readonly<{kind:'unconfirmed';operation:'create'|'start'|'stop';reason:'ack_unknown'|'backend_refused'}>;
+export type ConsoleSupervisorStatus = ConsoleSupervisorObservation
+  | Readonly<{kind:'cleanup_fenced';resource:ConsoleSupervisorObservation;cleanupPhase:'unbound'|'bound'|'stop_pending'|'stopped'|'remove_pending'|'removed'}>
+  | Readonly<{kind:'invalid_history'}>;
+
 export interface ConsoleDagRun {
+  /** Absent for legacy runs without supervisor history. */
+  readonly supervisor?: ConsoleSupervisorStatus;
   readonly runId: string;
   readonly workflowId: string | null;
   readonly workflowName: string | null;

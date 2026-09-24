@@ -25,6 +25,7 @@ function makeMinimalScope(overrides: Partial<SessionScope> = {}): SessionScope {
     toMap: vi.fn(() => new Map()),
   };
   return {
+    persistTokens: async () => ({ kind: 'ok', value: undefined }),
     fileTracker: fakeTracker,
     onAdvance: vi.fn(),
     onComplete: vi.fn(),

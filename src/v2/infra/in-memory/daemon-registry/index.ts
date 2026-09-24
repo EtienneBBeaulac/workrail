@@ -83,6 +83,11 @@ export class DaemonRegistry {
    * Callers are responsible for checking entry.lastHeartbeatMs against their own nowMs
    * to determine liveness (see AUTONOMOUS_HEARTBEAT_THRESHOLD_MS in console-service.ts).
    */
+  /** Release ephemeral liveness without declaring durable execution success/failure. */
+  detach(sessionId: string): void {
+    this.entries.delete(sessionId);
+  }
+
   snapshot(): ReadonlyMap<string, DaemonEntry> {
     return new Map(this.entries);
   }

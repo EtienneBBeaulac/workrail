@@ -262,8 +262,8 @@ export function parseSessionEvents(
       continue;
     }
 
-    if (kind === 'session_completed' || kind === 'session_aborted') {
-      const outcome = kind === 'session_aborted'
+    if (kind === 'session_completed' || kind === 'session_aborted' || kind === 'session_suspended') {
+      const outcome = kind === 'session_suspended' ? 'recovery_pending' : kind === 'session_aborted'
         ? 'aborted'
         : (typeof event['outcome'] === 'string' ? event['outcome'] : 'unknown');
       lines.push({

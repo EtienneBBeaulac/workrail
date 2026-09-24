@@ -1383,3 +1383,79 @@ describe('AgentLoop stall timer reset on tool start (C1) and notifyActivity (C2)
     await promptPromise;
   });
 });
+
+
+describe('controlled tool execution', () => {
+  it.each(['refused_intent', 'lost_completion', 'unexpected_rejection'])('halts the batch and next model call after %s', async scenario => {
+    const first = makeTool('Write'), second = makeTool('Bash');
+    const message = makeToolUseMessage('Write', 'first', { filePath: 'example' });
+    const batch = { ...message, content: [...message.content, ...makeToolUseMessage('Bash', 'second').content] };
+    const client = new FakeAnthropicClient([batch, makeEndTurnMessage()]);
+    const visited: string[] = [], events: AgentEvent[] = [];
+    let starts = 0;
+    const loop = new AgentLoop({ client, modelId: 'test', systemPrompt: 'test', tools: [first, second],
+      toolBoundary: { async execute(call, invoke) {
+        visited.push(call.name);
+        if (scenario !== 'refused_intent') await invoke();
+        if (scenario === 'unexpected_rejection') throw new Error('unknown effect');
+        return { kind: 'halted' };
+      } },
+      callbacks: { onToolCallStarted() { starts++; throw new Error('observer cannot grant authority'); }, onToolCallFailed() { throw new Error('observer'); } },
+    });
+    loop.subscribe(event => { events.push(event); });
+    await loop.prompt('execute');
+    expect(visited).toEqual(['Write']);
+    expect(starts).toBe(scenario === 'refused_intent' ? 0 : 1);
+    expect(first.executionCount).toBe(scenario === 'refused_intent' ? 0 : 1);
+    expect(second.executionCount).toBe(0);
+    expect(client.callCount).toBe(1);
+    expect(events.filter(e => e.type === 'agent_end')).toHaveLength(1);
+    expect(events.filter(e => e.type === 'turn_end')).toHaveLength(0);
+  });
+  it('passes acknowledged tool results onward and executes the next controlled call', async () => {
+    const first = makeTool('Read', 'first result'), second = makeTool('Grep', 'second result');
+    const message = makeToolUseMessage('Read', 'first');
+    const batch = { ...message, content: [...message.content, ...makeToolUseMessage('Grep', 'second').content] };
+    const client = new FakeAnthropicClient([batch, makeEndTurnMessage()]);
+    const visited: string[] = [];
+    const loop = new AgentLoop({ client, modelId: 'test', systemPrompt: 'test', tools: [first, second],
+      toolBoundary: { async execute(call, invoke, signal) {
+        visited.push(call.name);
+        if (signal.aborted) return { kind: 'halted' };
+        return { kind: 'completed', result: await invoke() };
+      } },
+    });
+    await loop.prompt('execute');
+    expect(visited).toEqual(['Read', 'Grep']);
+    expect([first.executionCount, second.executionCount, client.callCount]).toEqual([1, 1, 2]);
+    expect(JSON.stringify(client.lastParams?.messages)).toContain('first result');
+    expect(JSON.stringify(client.lastParams?.messages)).toContain('second result');
+  });
+});
+
+
+it('unknown tool names are safe validation feedback, never an admitted invocation', async () => {
+  const client = new FakeAnthropicClient([makeToolUseMessage('not_registered', 'unknown'), makeEndTurnMessage()]);
+  let admitted = 0;
+  const loop = new AgentLoop({ client, modelId: 'test', systemPrompt: 'test', tools: [],
+    toolBoundary: { async execute() { admitted++; return { kind: 'halted' }; } },
+  });
+  await loop.prompt('test');
+  expect(admitted).toBe(0); expect(client.callCount).toBe(2);
+  expect(JSON.stringify(client.lastParams?.messages)).toContain('Unknown tool: not_registered');
+});
+
+it('controlled execution halts when cancellation arrives with the model tool response', async () => {
+  let admitted = 0;
+  const tool = makeTool('Write'), events: AgentEvent[] = [];
+  const client = new FakeAnthropicClient([makeToolUseMessage('Write', 'cancelled')]);
+  const create = client.messages.create;
+  const loop = new AgentLoop({ client, modelId: 'test', systemPrompt: 'test', tools: [tool],
+    toolBoundary: { async execute() { admitted++; return { kind: 'halted' }; } },
+  });
+  client.messages.create = async (...args) => { const result = await create(...args); loop.abort(); return result; };
+  loop.subscribe(event => { events.push(event); });
+  await loop.prompt('test');
+  expect([admitted, tool.executionCount, client.callCount]).toEqual([0, 0, 1]);
+  expect(events.filter(e => e.type === 'turn_end')).toHaveLength(0);
+});

@@ -1,3 +1,4 @@
+import { createStandaloneAnswerReader } from '../answer-v1/console.js';
 /**
  * Standalone Console Server
  *
@@ -168,7 +169,8 @@ export async function startStandaloneConsole(
   // v2ToolContext is intentionally omitted: AUTO dispatch (POST /api/v2/auto/dispatch)
   // requires live session execution infrastructure. The standalone console is
   // read-only; dispatching new workflows is out of scope.
-  const stopWatcher = mountConsoleRoutes(
+  const answerLifetime = new AbortController();
+  const stopRoutes = mountConsoleRoutes(
     app,
     consoleService,
     workflowReader, // workflow catalog (GET /api/v2/workflows)
@@ -176,7 +178,10 @@ export async function startStandaloneConsole(
     undefined,      // toolCallsPerfFile -- same as above
     undefined,      // serverVersion -- no stamping needed
     undefined,      // v2ToolContext -- no autonomous dispatch
+    createStandaloneAnswerReader(dataDir, answerLifetime.signal),
   );
+
+  const stopWatcher = () => { answerLifetime.abort(); stopRoutes(); };
 
   // Redirect / to /console for convenience (must be before 404 catch-all).
   app.get('/', (_req: express.Request, res: express.Response) => {
@@ -213,7 +218,7 @@ export async function startStandaloneConsole(
       // Write lock file so `worktrain spawn` and other tools can discover the port.
       // Non-fatal: if the write fails the server still works.
       const lockDir = path.dirname(lockFilePath);
-      void fs.mkdir(lockDir, { recursive: true })
+      const lockWritten = fs.mkdir(lockDir, { recursive: true })
         .then(() => fs.writeFile(
           lockFilePath,
           JSON.stringify({ pid: process.pid, port: actualPort }),
@@ -244,7 +249,7 @@ export async function startStandaloneConsole(
             // Cancel the safety timer -- server closed in time.
             clearTimeout(safetyTimer);
             // 3. Delete the lock file (best-effort; ignore errors).
-            void fs.unlink(lockFilePath)
+            void lockWritten.then(() => fs.unlink(lockFilePath))
               .catch(() => { /* already gone or never written -- ok */ })
               .finally(() => res());
           });

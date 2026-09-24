@@ -25,25 +25,25 @@ import {
   type FetchNotifyFn,
   type NotificationPayload,
 } from '../../src/trigger/notification-service.js';
-import type { WorkflowRunResult } from '../../src/daemon/types.js';
+import type { WorkflowRunResult, KnownWorkflowRunResult } from '../../src/daemon/types.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeSuccess(workflowId = 'test-workflow'): WorkflowRunResult {
+function makeSuccess(workflowId = 'test-workflow'): KnownWorkflowRunResult {
   return { _tag: 'success', workflowId, stopReason: 'stop' };
 }
 
-function makeError(workflowId = 'test-workflow'): WorkflowRunResult {
+function makeError(workflowId = 'test-workflow'): KnownWorkflowRunResult {
   return { _tag: 'error', workflowId, message: 'Something broke', stopReason: 'error' };
 }
 
-function makeTimeout(workflowId = 'test-workflow'): WorkflowRunResult {
+function makeTimeout(workflowId = 'test-workflow'): KnownWorkflowRunResult {
   return { _tag: 'timeout', workflowId, reason: 'wall_clock', message: 'Timed out after 30 minutes' };
 }
 
-function makeDeliveryFailed(workflowId = 'test-workflow'): WorkflowRunResult {
+function makeDeliveryFailed(workflowId = 'test-workflow'): KnownWorkflowRunResult {
   return { _tag: 'delivery_failed', workflowId, stopReason: 'stop', deliveryError: 'HTTP 503' };
 }
 
@@ -381,4 +381,14 @@ describe('NotificationService: both channels', () => {
     expect(execCalls).toHaveLength(0);
     expect(fetchCalls).toHaveLength(0);
   });
+});
+
+it('never sends completion notifications for recovery-pending results', async () => {
+  const fetch = makeFakeFetch(), exec = makeFakeExecFile();
+  const service = new NotificationService({ webhookUrl: 'https://example.com/notify', macOs: true,
+    fetchFn: fetch.fn, execFileFn: exec.fn, platformFn: () => 'darwin' });
+  service.notify({ _tag: 'recovery_pending', workflowId: 'wr.test', stopReason: 'recovery_pending',
+    operationId: 'operation', reason: 'owner_busy' }, 'goal');
+  await flushNotify();
+  expect(fetch.calls).toEqual([]); expect(exec.calls).toEqual([]);
 });

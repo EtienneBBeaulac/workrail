@@ -1,3 +1,4 @@
+import { AnswerHostRecordSchema } from './answer-host.js';
 import { z } from 'zod';
 import { JsonValueSchema } from '../../canonical/json-zod.js';
 import { asSha256Digest, asWorkflowHash } from '../../ids/index.js';
@@ -160,6 +161,7 @@ const PreferencesChangedDataV1Schema = z
  * to be closed so projections and storage don't drift under "stringly kinds".
  */
 export const DomainEventV1Schema = z.discriminatedUnion('kind', [
+  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('answer_host_recorded'), scope: z.object({ runId: z.string().min(1) }), data: AnswerHostRecordSchema }),
   // parentSessionId is optional -- root sessions (no parent) produce data: {}.
   // Extension is backward-compatible: z.object() uses strip mode (not strict),
   // so existing parsers that expect data: {} silently ignore the new field.

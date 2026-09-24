@@ -1,7 +1,7 @@
 /**
  * Factory for the report_issue tool used in daemon agent sessions.
  *
- * Extracted from workflow-runner.ts. Zero behavior change.
+ * Acknowledges storage before reporting success to the agent or observers.
  */
 
 import * as os from 'node:os';
@@ -26,8 +26,7 @@ import type { SessionId } from '../../v2/durable-core/ids/index.js';
  * @param onIssueSummary - Optional callback called synchronously with the issue summary
  *   string after each successful report_issue call. Used by runWorkflow() to accumulate
  *   issue summaries for the WORKTRAIN_STUCK marker without async file I/O.
- *   WHY optional callback: avoids circular dependency and keeps execute() synchronous
- *   from the caller's perspective. Fire-and-forget writes happen separately.
+ *   The callback runs only after the issue append has been acknowledged.
  */
 export function makeReportIssueTool(
   sessionId: RunId,
@@ -88,7 +87,8 @@ export function makeReportIssueTool(
     label: 'report_issue',
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    execute: async (_toolCallId: string, params: any, _signal: AbortSignal): Promise<AgentToolResult<unknown>> => {
+    execute: async (_toolCallId: string, params: any, signal?: AbortSignal): Promise<AgentToolResult<unknown>> => {
+      signal?.throwIfAborted();
       if (typeof params.kind !== 'string' || !params.kind) throw new Error('report_issue: kind must be a non-empty string');
       if (typeof params.severity !== 'string' || !params.severity) throw new Error('report_issue: severity must be a non-empty string');
       if (typeof params.summary !== 'string' || !params.summary) throw new Error('report_issue: summary must be a non-empty string');
@@ -104,11 +104,9 @@ export function makeReportIssueTool(
         ...(params.continueToken !== undefined && { continueToken: String(params.continueToken) }),
       };
 
-      // Fire-and-forget: write must never block execute() or propagate errors.
-      // WHY void + catch: observability must not affect correctness.
-      void appendIssueAsync(issuesDir, sessionId, record).catch(() => {
-        // Intentionally empty: write failures are silently swallowed.
-      });
+      // Reporting an issue is the requested effect, not optional telemetry. A failed
+      // or cancelled append must never be acknowledged as a successfully recorded issue.
+      await appendIssueAsync(issuesDir, sessionId, record, signal);
 
       // Emit structured event for console/SSE stream visibility.
       emitter?.emit({
@@ -123,8 +121,7 @@ export function makeReportIssueTool(
 
       // Notify the accumulator so runWorkflow() can include issue summaries in
       // the WORKTRAIN_STUCK marker without async file I/O.
-      // WHY synchronous callback: execute() already runs synchronously from the
-      // agent loop's perspective; the callback push is O(1) and never throws.
+      // Storage is already acknowledged; observers do not perform the issue write.
       onIssueSummary?.(record.summary);
 
       const isFatal = record.severity === 'fatal';

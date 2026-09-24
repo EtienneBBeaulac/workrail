@@ -121,6 +121,18 @@ export interface DiagnosticDefault {
   readonly processState: ProcessState;
 }
 
+export interface DiagnosticRecoveryPending {
+  readonly kind: 'RECOVERY_PENDING';
+  readonly sessionId: string;
+  readonly workflowId: string;
+  readonly startedAt: number | null;
+  readonly durationMs: number;
+  readonly reason: string;
+  readonly operationId: string;
+  readonly metrics: SessionMetrics;
+  readonly steps: readonly StepRecord[];
+}
+
 export type DiagnosticResult =
   | DiagnosticNotFound
   | DiagnosticAmbiguous
@@ -130,6 +142,7 @@ export type DiagnosticResult =
   | DiagnosticWorkflowTimeout
   | DiagnosticInfraError
   | DiagnosticOrphaned
+  | DiagnosticRecoveryPending
   | DiagnosticDefault;
 
 // ---------------------------------------------------------------------------
@@ -182,6 +195,7 @@ interface SessionAccumulator {
   stuckArgsSummary: string | null;
   completedEvent: { outcome: string; detail: string; rawLine: string } | null;
   abortedEvent: { reason: string } | null;
+  suspendedEvent: { reason: string; operationId: string } | null;
   lastEventKind: string | null;
   // Track LLM turns per step for step timeline
   turnsAtLastStep: number;
@@ -309,6 +323,11 @@ function classify(acc: SessionAccumulator): DiagnosticResult {
       steps,
       processState,
     };
+  }
+
+  if (acc.suspendedEvent !== null) {
+    return { kind: 'RECOVERY_PENDING', sessionId: acc.sessionId, workflowId: acc.workflowId,
+      startedAt: acc.startedAt, durationMs, ...acc.suspendedEvent, metrics, steps };
   }
 
   // ORPHANED: events exist but no terminal event
@@ -449,6 +468,11 @@ function accumulateEvent(acc: SessionAccumulator, obj: Record<string, unknown>, 
       acc.completedEvent = { outcome, detail, rawLine };
       break;
     }
+    case 'session_suspended': {
+      acc.suspendedEvent = { reason: typeof obj['reason'] === 'string' ? obj['reason'] : 'unknown',
+        operationId: typeof obj['operationId'] === 'string' ? obj['operationId'] : 'unknown' };
+      break;
+    }
     case 'session_aborted': {
       const reason = typeof obj['reason'] === 'string' ? obj['reason'] : 'unknown';
       acc.abortedEvent = { reason };
@@ -543,6 +567,7 @@ function createAccumulator(sessionId: string): SessionAccumulator {
     stuckArgsSummary: null,
     completedEvent: null,
     abortedEvent: null,
+    suspendedEvent: null,
     lastEventKind: null,
     turnsAtLastStep: 0,
     stepTurnCounts: [],
@@ -639,6 +664,8 @@ export function formatDiagnosticCard(result: DiagnosticResult, opts: FormatOptio
       return formatWorkflowTimeout(result, opts);
     case 'INFRA_ERROR':
       return formatInfraError(result, opts);
+    case 'RECOVERY_PENDING':
+      return `Recovery pending: ${result.sessionId} (${result.reason}). Evidence retained for operation ${result.operationId}; execution completion is unconfirmed.`;
     case 'ORPHANED':
       return formatOrphaned(result, opts);
     case 'DEFAULT':
@@ -987,6 +1014,7 @@ export type ResultCategory =
   | 'workflow_stuck'
   | 'workflow_timeout'
   | 'infra_error'
+  | 'recovery_pending'
   | 'orphaned'
   | 'default';
 
@@ -1041,6 +1069,7 @@ export function resultCategory(result: DiagnosticResult): ResultCategory {
     case 'WORKFLOW_STUCK': return 'workflow_stuck';
     case 'WORKFLOW_TIMEOUT': return 'workflow_timeout';
     case 'INFRA_ERROR': return 'infra_error';
+    case 'RECOVERY_PENDING': return 'recovery_pending';
     case 'ORPHANED': return 'orphaned';
     case 'DEFAULT': return 'default';
     case 'NOT_FOUND': return 'default';

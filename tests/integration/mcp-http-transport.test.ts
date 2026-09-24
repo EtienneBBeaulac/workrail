@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { startHttpServer } from '../../src/mcp/transports/http-entry.js';
+import { startHttpServer, type HttpServerHandle } from '../../src/mcp/transports/http-entry.js';
 import { resetContainer } from '../../src/di/container.js';
 import fetch from 'node-fetch';
 import * as os from 'os';
@@ -16,6 +16,7 @@ import * as fs from 'fs/promises';
 describe('MCP HTTP transport integration', () => {
   const HTTP_PORT = 13100; // Ephemeral port for tests
   let tempDataDir: string;
+  let serverHandle: HttpServerHandle;
   let originalEnv: NodeJS.ProcessEnv;
   let mcpSessionId: string; // MCP transport session ID (not WorkRail SessionId)
 
@@ -30,7 +31,7 @@ describe('MCP HTTP transport integration', () => {
     process.env.WORKRAIL_ENABLE_SESSION_TOOLS = 'false'; // HTTP-only, no dashboard
 
     // Start HTTP server
-    await startHttpServer(HTTP_PORT);
+    serverHandle = await startHttpServer(HTTP_PORT);
     
     // Give server time to bind
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -70,6 +71,11 @@ describe('MCP HTTP transport integration', () => {
   });
 
   afterAll(async () => {
+    expect(await serverHandle.close(AbortSignal.timeout(5000))).toBe('closed');
+    const files = await fs.readdir(path.join(tempDataDir, 'sessions'), { recursive: true });
+    const segments = await Promise.all(files.filter(file => file.endsWith('.jsonl'))
+      .map(file => fs.readFile(path.join(tempDataDir, 'sessions', file), 'utf8')));
+    expect(segments.join('\n')).toContain('"kind":"git_start_recorded"');
     // Restore environment
     process.env = originalEnv;
     

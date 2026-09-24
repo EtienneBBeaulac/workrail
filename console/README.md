@@ -13,6 +13,7 @@ Early stage. The basic substrate is implemented but the console is not yet a pri
 - **Node detail panel** -- displays per-node metadata, prompt content, and output
 - **DAG visualization** -- renders the execution graph using `@xyflow/react` with custom layout
 - **Health badge** -- shows session health status
+- **Recorded workspace state** -- per-run journal diagnostics for supervisor lifecycle requests, acknowledgments, uncertainty and conflicting history. This is not a live activity, saved-output or cleanup check. Legacy runs without these records show no panel.
 - **Markdown rendering** -- renders agent notes as markdown
 
 ## Tech stack

@@ -1,3 +1,4 @@
+import { foldAnswerOwnership } from '../../../v2/durable-core/projections/answer-ownership.js';
 /**
  * v2 Advance Core - Public API
  *
@@ -148,6 +149,7 @@ export interface ComputedAdvanceResults {
  */
 export function executeAdvanceCore(args: {
   readonly mode: AdvanceMode;
+  readonly answerOwner?: import('../../../answer-v1/contracts/invocation-contract.js').OwnerFence;
   readonly truth: LoadedSessionTruthV2;
   readonly sessionId: SessionId;
   readonly runId: RunId;
@@ -162,6 +164,17 @@ export function executeAdvanceCore(args: {
   readonly lockedIndex: SessionIndex;
 }): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
   const { mode, truth, sessionId, runId, attemptId, workflowHash, inputContext, inputOutput, lock, pinnedWorkflow, ports } = args;
+  // Answer-enrolled runs can only advance through their fenced coordinator.
+  // Enforce this under the shared session lock, including legacy/token callers.
+  const answerRecords = truth.events.filter(e => e.kind === 'answer_host_recorded' && e.scope.runId === runId);
+  if (answerRecords.length > 0) {
+    const owner = foldAnswerOwnership(answerRecords.flatMap(e => e.kind === 'answer_host_recorded' ? [e.data] : []));
+    const stopped = answerRecords.some(e => e.kind === 'answer_host_recorded' && e.data.kind === 'stopped');
+    if (!lock.assertHeld() || stopped || owner.kind !== 'valid' || owner.ownership.kind !== 'execution'
+      || !args.answerOwner || String(args.answerOwner.execution) !== String(sessionId) || args.answerOwner.epoch !== owner.ownership.epoch) {
+      return errAsync({kind:'answer_owner_required' as const});
+    }
+  }
   const { snapshotStore, sessionStore, sha256, idFactory, gitSnapshot } = ports;
   const currentNodeId = nodeIdOf(mode);
   const snap = snapshotOf(mode);

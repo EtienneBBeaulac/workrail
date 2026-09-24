@@ -110,7 +110,7 @@ export class PollingScheduler {
    * prevention. Cross-restart idempotency is handled by checkIdempotency() (sidecar scan).
    *
    * Lifecycle: issue added BEFORE dispatchAdaptivePipeline() call (I1). Removed in both
-   * .then() and .catch() handlers unconditionally (I2). Never awaited in the poll cycle
+   * settlement handlers after persistence is acknowledged (I2). Never awaited in the poll cycle
    * body to preserve fire-and-forget semantics.
    */
   private readonly dispatchingIssues = new Set<number>();
@@ -632,13 +632,17 @@ export class PollingScheduler {
       ttlMs: DISCOVERY_TIMEOUT_MS + 60_000,
       attemptCount,
     }, null, 2);
-    void fs.writeFile(sidecarPath, sidecarContent, 'utf8').catch((e: unknown) => {
-      console.warn(`[QueuePoll] Failed to write sidecar for issue #${top.issue.number}: ${e instanceof Error ? e.message : String(e)}`);
-    });
+    try {
+      await fs.writeFile(sidecarPath, sidecarContent, 'utf8');
+    } catch (e: unknown) {
+      this.dispatchingIssues.delete(top.issue.number);
+      console.warn(`[QueuePoll] Refused dispatch without sidecar for issue #${top.issue.number}: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
 
     // Capture the Promise without awaiting it (fire-and-forget semantics preserved).
-    // I2: Cleanup in BOTH .then() and .catch() -- unconditional regardless of outcome.
-    const dispatchP = (this.router as {
+    // I2: Keep the fence through outcome persistence, including cleanup failure.
+    const dispatchP = (async () => (this.router as {
       dispatchAdaptivePipeline: (
         goal: string,
         workspace: string,
@@ -648,25 +652,34 @@ export class PollingScheduler {
       workflowTrigger.goal,
       workflowTrigger.workspacePath,
       workflowTrigger.context,
-    );
+    ))();
     const issueNumber = top.issue.number;
     void dispatchP
-      .then(() => {
+      .then(async () => {
+        // Keep the in-process fence until the persistent fence has settled. Otherwise
+        // the next poll can observe either a stale TTL or an older completion deleting
+        // the replacement dispatch's sidecar.
+        await fs.unlink(sidecarPath).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== 'ENOENT') throw error;
+        });
         this.dispatchingIssues.delete(issueNumber);
         console.log(`[QueuePoll] in-flight-clear #${issueNumber} reason=completed`);
-        // Delete sidecar on completion (pipeline resolved).
-        void fs.unlink(sidecarPath).catch(() => {});
-      })
-      .catch(() => {
-        this.dispatchingIssues.delete(issueNumber);
-        console.log(`[QueuePoll] in-flight-clear #${issueNumber} reason=error`);
+      }, async () => {
         // On failure: rewrite sidecar with the SAME attemptCount recorded at dispatch
         // time, zeroed TTL so checkIdempotency() clears immediately on the next poll.
         // WHY NOT incrementSidecarAttemptCount: that function re-reads and adds 1, which
         // would double-count (the sidecar was already written with previousAttemptCount+1
         // at dispatch time). Using attemptCount directly gives exactly N dispatches for
         // maxDispatchAttempts=N.
-        void recordFailedAttempt(sidecarPath, issueNumber, triggerId, attemptCount);
+        const retained = await recordFailedAttempt(sidecarPath, issueNumber, triggerId, attemptCount);
+        if (retained === 'retained') {
+          this.dispatchingIssues.delete(issueNumber);
+          console.log(`[QueuePoll] in-flight-clear #${issueNumber} reason=error`);
+        }
+      }).catch((error: unknown) => {
+        // A successful pipeline with uncertain cleanup is not a failed pipeline and
+        // must not clear the fence or manufacture another dispatch opportunity.
+        console.warn(`[QueuePoll] sidecar settlement unconfirmed #${issueNumber}: ${String(error)}`);
       });
     console.log(`[QueuePoll] dispatched via adaptivePipeline goal="${workflowTrigger.goal.slice(0, 80)}"`);
 
@@ -973,15 +986,14 @@ function describeMaturityReason(maturity: 'idea' | 'specced' | 'ready'): string 
  * dispatches. Passing the already-computed value keeps the semantics exact:
  * maxDispatchAttempts=N gives exactly N dispatches.
  *
- * Fire-and-forget: errors are swallowed and logged; a failed write means the count
- * is not persisted, which is acceptable (one extra dispatch may occur).
+ * The caller retains its in-process fence until persistence is acknowledged.
  */
 async function recordFailedAttempt(
   sidecarPath: string,
   issueNumber: number,
   triggerId: string,
   attemptCount: number,
-): Promise<void> {
+): Promise<'retained' | 'unconfirmed'> {
   const newContent = JSON.stringify({
     issueNumber,
     triggerId,
@@ -996,10 +1008,12 @@ async function recordFailedAttempt(
     await fs.mkdir(path.dirname(sidecarPath), { recursive: true });
     await fs.writeFile(sidecarPath, newContent, 'utf8');
     console.log(`[QueuePoll] sidecar-failure-recorded #${issueNumber} attempts=${attemptCount}`);
+    return 'retained';
   } catch (e: unknown) {
     console.warn(
       `[QueuePoll] Failed to record failed attempt for issue #${issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
     );
+    return 'unconfirmed';
   }
 }
 

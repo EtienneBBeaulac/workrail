@@ -1,3 +1,4 @@
+import { answerInvocationDirectory } from '../../src/daemon/tools/answer-invocation.js';
 /**
  * Unit tests for makeCompleteStepTool().
  *
@@ -165,6 +166,7 @@ afterEach(async () => {
   for (const sessionId of sessionIdsToClean) {
     const filePath = path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`);
     await fs.unlink(filePath).catch(() => { /* ignore if not created */ });
+    await fs.rm(answerInvocationDirectory(DAEMON_SESSIONS_DIR, sessionId), { recursive: true, force: true });
   }
   sessionIdsToClean.length = 0;
 });

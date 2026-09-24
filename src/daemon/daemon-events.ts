@@ -133,6 +133,16 @@ export interface StepAdvancedEvent {
   readonly stepId?: string;
 }
 
+/** This invocation stopped while canonical execution still needs reconciliation. */
+export interface SessionSuspendedEvent {
+  readonly kind: 'session_suspended';
+  readonly sessionId: RunId;
+  readonly workflowId: string;
+  readonly operationId: string;
+  readonly reason: import('./types.js').WorkflowRunRecoveryPending['reason'];
+  readonly workrailSessionId?: string;
+}
+
 /** Workflow run ended (success, error, or timeout). */
 export interface SessionCompletedEvent {
   readonly kind: 'session_completed';
@@ -436,6 +446,7 @@ export type DaemonEvent =
   | ToolCalledEvent
   | ToolErrorEvent
   | StepAdvancedEvent
+  | SessionSuspendedEvent
   | SessionCompletedEvent
   | DaemonSessionAbortedEvent
   | DeliveryAttemptedEvent
@@ -475,6 +486,12 @@ export class DaemonEventEmitter {
     // Chaining serializes writes FIFO; .catch() isolates failures so a bad write
     // never blocks subsequent emits.
     this._tail = this._tail.then(() => this._append(event)).catch(() => {});
+  }
+
+  /** Wait for attempts queued before this call, including swallowed I/O failures.
+   * This is not a persistence/fsync receipt and does not include later emits. */
+  settle(): Promise<void> {
+    return this._tail;
   }
 
   private async _append(event: DaemonEvent): Promise<void> {

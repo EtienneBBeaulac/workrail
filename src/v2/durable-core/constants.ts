@@ -258,6 +258,7 @@ export const DELIMITER_SAFE_ID_PATTERN = /^[a-z0-9_-]+$/;
  */
 export const EVENT_KIND = {
   SESSION_CREATED: 'session_created',
+  ANSWER_HOST_RECORDED: 'answer_host_recorded',
   OBSERVATION_RECORDED: 'observation_recorded',
   RUN_STARTED: 'run_started',
   NODE_CREATED: 'node_created',

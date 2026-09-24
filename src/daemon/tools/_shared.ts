@@ -79,56 +79,65 @@ export interface PersistTokensError {
  * a partial JSON file. The tmp-file + rename pattern ensures the sidecar is always
  * either the previous valid state or the new complete state -- never corrupted.
  */
-export async function persistTokens(
-  sessionId: string,
-  continueToken: string,
-  checkpointToken: string | null,
-  worktreePath?: string,
-  recoveryContext?: {
-    readonly workflowId: string;
-    readonly goal: string;
-    readonly workspacePath: string;
-    readonly branchStrategy?: import('../types.js').BranchStrategy;
-    readonly context?: Readonly<Record<string, unknown>>;
-  },
-  gateState?: {
-    readonly kind: 'gate_checkpoint';
-    readonly gateToken: string;
-    readonly stepId: string;
-  },
-  workrailSessionId?: SessionId | null,
-): Promise<Result<void, PersistTokensError>> {
-  try {
-    await fs.mkdir(DAEMON_SESSIONS_DIR, { recursive: true });
+export const persistTokens = createTokenPersister(DAEMON_SESSIONS_DIR);
 
-    const sessionPath = path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`);
-    const state = JSON.stringify(
-      {
-        continueToken,
-        checkpointToken,
-        ts: Date.now(),
-        ...(worktreePath !== undefined ? { worktreePath } : {}),
-        ...(recoveryContext !== undefined ? {
-          workflowId: recoveryContext.workflowId,
-          goal: recoveryContext.goal,
-          workspacePath: recoveryContext.workspacePath,
-          ...(recoveryContext.branchStrategy !== undefined ? { branchStrategy: recoveryContext.branchStrategy } : {}),
-          ...(recoveryContext.context !== undefined ? { context: recoveryContext.context } : {}),
-        } : {}),
-        ...(gateState !== undefined ? { gateState } : {}),
-        ...(workrailSessionId != null ? { workrailSessionId } : {}),
-      },
-      null,
-      2,
-    );
-    const tmp = `${sessionPath}.tmp`;
-    await fs.writeFile(tmp, state, 'utf8');
-    await fs.rename(tmp, sessionPath);
-    return ok(undefined);
-  } catch (e: unknown) {
-    const nodeErr = e as NodeJS.ErrnoException;
-    return err({ code: nodeErr.code ?? 'UNKNOWN', message: nodeErr.message ?? String(e) });
-  }
+/** All sidecars for a runner use its one resolved directory, including initial and tool writes. */
+export type TokenRecoveryContext = {
+      readonly workflowId: string;
+      readonly goal: string;
+      readonly workspacePath: string;
+      readonly branchStrategy?: import('../types.js').BranchStrategy;
+      readonly context?: Readonly<Record<string, unknown>>;
+    };
+
+export function createTokenPersister(sessionsDir: string, defaults: Readonly<{
+  worktreePath?: string; recoveryContext?: TokenRecoveryContext; workrailSessionId?: SessionId | null;
+}> = {}) {
+  return async function persistTokens(
+    sessionId: string,
+    continueToken: string,
+    checkpointToken: string | null,
+    worktreePath: string | undefined = defaults.worktreePath,
+    recoveryContext: TokenRecoveryContext | undefined = defaults.recoveryContext,
+    gateState?: {
+      readonly kind: 'gate_checkpoint';
+      readonly gateToken: string;
+      readonly stepId: string;
+    },
+    workrailSessionId: SessionId | null | undefined = defaults.workrailSessionId,
+  ): Promise<Result<void, PersistTokensError>> {
+    try {
+      await fs.mkdir(sessionsDir, { recursive: true });
+
+      const sessionPath = path.join(sessionsDir, `${sessionId}.json`);
+      const state = JSON.stringify(
+        {
+          continueToken,
+          checkpointToken,
+          ts: Date.now(),
+          ...(worktreePath !== undefined ? { worktreePath } : {}),
+          ...(recoveryContext !== undefined ? {
+            workflowId: recoveryContext.workflowId,
+            goal: recoveryContext.goal,
+            workspacePath: recoveryContext.workspacePath,
+            ...(recoveryContext.branchStrategy !== undefined ? { branchStrategy: recoveryContext.branchStrategy } : {}),
+            ...(recoveryContext.context !== undefined ? { context: recoveryContext.context } : {}),
+          } : {}),
+          ...(gateState !== undefined ? { gateState } : {}),
+          ...(workrailSessionId != null ? { workrailSessionId } : {}),
+        },
+        null,
+        2,
+      );
+      const tmp = `${sessionPath}.tmp`;
+      await fs.writeFile(tmp, state, 'utf8');
+      await fs.rename(tmp, sessionPath);
+      return ok(undefined);
+    } catch (e: unknown) {
+      const nodeErr = e as NodeJS.ErrnoException;
+      return err({ code: nodeErr.code ?? 'UNKNOWN', message: nodeErr.message ?? String(e) });
+    }
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -177,12 +186,9 @@ export interface IssueRecord {
 /**
  * Append a single JSON issue record to the per-session JSONL file.
  *
- * WHY void + catch: issue recording is purely observational. A failed write
- * (disk full, permission denied) must not propagate to the caller or interrupt
- * the workflow session. Same fire-and-forget contract as DaemonEventEmitter.
- *
- * WHY separate helper: keeps execute() synchronous from the caller's perspective
- * and makes the async write path independently testable via issuesDirOverride.
+ * Resolves after the filesystem append acknowledges the write. Errors propagate so
+ * a caller cannot claim an issue was recorded when storage failed. This is not an
+ * fsync/power-loss durability guarantee. Cancellation can leave a partial write.
  *
  * @param issuesDir - Directory for issue files (override in tests; production uses ~/.workrail/issues).
  * @param sessionId - Session identifier used as the filename.
@@ -192,11 +198,14 @@ export async function appendIssueAsync(
   issuesDir: string,
   sessionId: string,
   record: IssueRecord,
+  signal?: AbortSignal,
 ): Promise<void> {
+  signal?.throwIfAborted();
   await fs.mkdir(issuesDir, { recursive: true });
   const filePath = path.join(issuesDir, `${sessionId}.jsonl`);
   const line = JSON.stringify({ ...record, ts: Date.now() }) + '\n';
-  await fs.appendFile(filePath, line, 'utf8');
+  signal?.throwIfAborted();
+  await fs.writeFile(filePath, line, { encoding: 'utf8', flag: 'a', signal });
 }
 
 // ---------------------------------------------------------------------------
@@ -216,7 +225,7 @@ export interface SignalRecord {
  * Append a single JSON signal record to the per-session JSONL file.
  *
  * Fire-and-forget: errors are swallowed so a failed write never interrupts
- * the session. Same contract as appendIssueAsync and DaemonEventEmitter.
+ * the session. This telemetry contract differs from acknowledged issue recording.
  */
 export async function appendSignalAsync(
   signalsDir: string,

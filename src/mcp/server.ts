@@ -1,3 +1,5 @@
+import { resolveAnswerAuthority } from './answer-authority-config.js';
+import { RequestLifetime } from './request-lifetime.js';
 /**
  * MCP Server Composition Root
  *
@@ -12,6 +14,7 @@
  */
 
 import { z } from 'zod';
+import { BackgroundWork } from './background-work.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { zodToJsonSchema } from './zod-to-json-schema.js';
@@ -84,7 +87,7 @@ interface Tool {
  * Create the tool context from DI container.
  * This provides dependencies to all handlers.
  */
-export async function createToolContext(): Promise<ToolContext> {
+export async function createToolContext(options: {readonly initializeV2?: boolean} = {}): Promise<ToolContext> {
   const workflowService = container.resolve<WorkflowService>(DI.Services.Workflow);
   const featureFlags = container.resolve<IFeatureFlagProvider>(DI.Infra.FeatureFlags);
 
@@ -99,7 +102,7 @@ export async function createToolContext(): Promise<ToolContext> {
 
   let v2: V2Dependencies | null = null;
 
-  if (featureFlags.isEnabled('v2Tools')) {
+  if (options.initializeV2 !== false && featureFlags.isEnabled('v2Tools')) {
     const gate = container.resolve<any>(DI.V2.ExecutionGate);
     const sessionStore = container.resolve<any>(DI.V2.SessionStore);
     const snapshotStore = container.resolve<any>(DI.V2.SnapshotStore);
@@ -194,6 +197,7 @@ export async function createToolContext(): Promise<ToolContext> {
   }
 
   return {
+    backgroundWork: new BackgroundWork(error => console.error('[BackgroundWork]', error)),
     workflowService,
     featureFlags,
     sessionManager,
@@ -236,6 +240,7 @@ function toMcpTool<TInput extends z.ZodType>(tool: ToolDefinition<TInput>): Tool
  * internal ComposedServerInternal type instead.
  */
 export interface ComposedServer {
+  readonly closeRequests: () => Promise<void>;
   readonly server: import('@modelcontextprotocol/sdk/server/index.js').Server;
   readonly ctx: ToolContext;
   readonly rootsReader: RootsReader;
@@ -261,7 +266,12 @@ export interface ComposedServerInternal extends ComposedServer {
  * No transport-specific behavior (stdin watchers, roots fetching, etc).
  * Those belong in the transport-specific entry points.
  */
-export async function composeServer(): Promise<ComposedServerInternal> {
+export async function composeServer(options?: import('../answer-v1/contracts/host-composition.js').AnswerMcpCompositionOptions): Promise<ComposedServerInternal> {
+  const answers = process.env.WORKRAIL_AGENT_PROFILE === 'answers';
+  const authorityFile = process.env.WORKRAIL_ANSWER_AUTHORITY_FILE;
+  if (!answers && (options || authorityFile !== undefined)) throw new Error('Answer authority is only valid for the answers profile');
+  const authority = answers ? await resolveAnswerAuthority(options, authorityFile) : undefined;
+  if (authority?.kind === 'refused') throw new Error(`Answer profile requires explicit shared authority: ${authority.reason}`);
   // Bootstrap DI container. No runtimeMode override -- detectRuntimeMode() in
   // container.ts is the single source of truth (reads VITEST / NODE_ENV=test).
   // Hardcoding 'production' here bypassed test isolation, causing NodeProcessSignals
@@ -269,7 +279,11 @@ export async function composeServer(): Promise<ComposedServerInternal> {
   await bootstrap();
 
   // Create tool context with all dependencies
-  const ctx = await createToolContext();
+  const ctx = await createToolContext({initializeV2: !answers});
+  if (authority?.kind === 'configured') {
+    const {composeAnswerProfile} = await import('./answer-profile.js');
+    return composeAnswerProfile(authority.options.answerAuthority,ctx);
+  }
 
   // Upfront console background auto-boot hook (capability-based)
   if (ctx.featureFlags.isEnabled('sessionTools')) {
@@ -419,7 +433,8 @@ export async function composeServer(): Promise<ComposedServerInternal> {
   // createHandler()) is caught here and returned as an INTERNAL_ERROR response
   // rather than becoming an unhandled promise rejection that kills the process.
   // "Errors are data" / "validate at boundaries" — this is the outermost seam.
-  server.setRequestHandler(CallToolRequestSchema, async (request: any): Promise<any> => {
+  const requests = new RequestLifetime();
+  server.setRequestHandler(CallToolRequestSchema, requests.wrap( async (request: any): Promise<any> => {
     try {
       const { name, arguments: args } = request.params;
       // Capture start time at the very top so unknown-tool elapsed time is accurate.
@@ -470,7 +485,7 @@ export async function composeServer(): Promise<ComposedServerInternal> {
         isError: true,
       };
     }
-  });
+  }));
 
   // Register ListResources handler — exposes the workrail://tags catalog resource.
   // Agents can read tag definitions without calling list_workflows at all (~500 tokens
@@ -524,6 +539,6 @@ export async function composeServer(): Promise<ComposedServerInternal> {
     }
   });
 
-  return { server, ctx, rootsManager, rootsReader: rootsManager, tools, handlers };
+  return { closeRequests: () => requests.close(), server, ctx, rootsManager, rootsReader: rootsManager, tools, handlers };
 }
 

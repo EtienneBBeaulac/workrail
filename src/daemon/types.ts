@@ -283,7 +283,10 @@ export interface AllocatedSession {
  */
 export type SessionSource =
   | { readonly kind: 'allocate'; readonly trigger: WorkflowTrigger }
-  | { readonly kind: 'pre_allocated'; readonly trigger: WorkflowTrigger; readonly session: AllocatedSession };
+  | { readonly kind: 'pre_allocated'; readonly trigger: WorkflowTrigger; readonly session: AllocatedSession }
+  | Readonly<{ kind: 'supervised'; operation: import('./runner/supervised-answer-host.js').SupervisedOperation;
+      scheduler: Pick<Extract<Awaited<ReturnType<typeof import('./runner/supervised-answer-host.js').createSupervisedAnswerHost>>, { kind: 'created' }>['scheduler'], 'enroll'>;
+      signal: AbortSignal }>;
 
 // ---------------------------------------------------------------------------
 // WorkflowRunResult discriminated union
@@ -291,6 +294,8 @@ export type SessionSource =
 
 /** Successful completion of a workflow run. */
 export interface WorkflowRunSuccess {
+  /** Execution completion does not prove the task's real-world outcome. */
+  readonly taskOutcome?: 'success' | 'failure' | 'partial' | 'unknown';
   readonly _tag: 'success';
   readonly workflowId: string;
   readonly stopReason: string;
@@ -478,8 +483,18 @@ export interface WorkflowRunGateParked {
   readonly workrailSessionId?: SessionId;
 }
 
+/** The invocation ended without proving canonical execution completion. The operation
+ * identity locates retained admission evidence; it is not permission to claim an owner. */
+export interface WorkflowRunRecoveryPending {
+  readonly _tag: 'recovery_pending';
+  readonly workflowId: string;
+  readonly stopReason: 'recovery_pending';
+  readonly operationId: string;
+  readonly reason: 'admission_unconfirmed' | 'execution_unconfirmed' | 'owner_busy' | 'storage_unavailable';
+}
+
 /** Result of a runWorkflow() call. Never throws. */
-export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout | WorkflowRunStuck | WorkflowDeliveryFailed | WorkflowRunGateParked;
+export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout | WorkflowRunStuck | WorkflowDeliveryFailed | WorkflowRunGateParked | WorkflowRunRecoveryPending;
 
 // ---------------------------------------------------------------------------
 // WorkflowContextSlots
@@ -530,7 +545,7 @@ export function extractContextSlots(context: Readonly<Record<string, unknown>> |
  * suppresses any compile-time error from a missing update -- only the assertNever guard
  * catches the omission at runtime. Keep these two unions in sync atomically.
  */
-export type ChildWorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout | WorkflowRunStuck | WorkflowRunGateParked;
+export type ChildWorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout | WorkflowRunStuck | WorkflowRunGateParked | WorkflowRunRecoveryPending;
 
 // ---------------------------------------------------------------------------
 // OrphanedSession (crash recovery)
@@ -596,3 +611,5 @@ export interface OrphanedSession {
 }
 
 
+
+export type KnownWorkflowRunResult = Exclude<WorkflowRunResult, WorkflowRunRecoveryPending>;

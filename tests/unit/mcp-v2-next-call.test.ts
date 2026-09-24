@@ -1,3 +1,4 @@
+import { BackgroundWork } from '../../src/mcp/background-work.js';
 import { createTestValidationPipelineDeps } from "../helpers/v2-test-helpers.js";
 /**
  * Tests for buildNextCall pure function and nextCall response field.
@@ -183,6 +184,7 @@ async function mkCtx(): Promise<ToolContext> {
   return {
     workflowService,
     featureFlags,
+    backgroundWork: new BackgroundWork(() => {}),
     sessionManager: null,
     httpServer: null,
     v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, entropy, tokenCodecPorts, idFactory, tokenAliasStore: new InMemoryTokenAliasStoreV2(), validationPipelineDeps: createTestValidationPipelineDeps() },

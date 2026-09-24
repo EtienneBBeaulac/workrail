@@ -312,6 +312,37 @@ describe('ConsoleService isSessionLiveFromEventLog', () => {
     expect(detail.liveActivity).toBeNull();
   });
 
+  it('isLive=false and liveActivity=null when an invocation suspends for recovery', async () => {
+    const sessionId = 'sess_live003aaaaaaaaaaaaaaaa';
+    const events = makeMinimalEvents(sessionId);
+
+    // Both started and completed -- session is not live.
+    const jsonlContent = makeEventLogJSONL(sessionId, {
+      started: true,
+      completed: true,
+      toolNames: ['Bash'],
+    });
+    const suspendedLog = jsonlContent.replace('session_completed', 'session_suspended');
+    const logPath = todayLogPath();
+
+    mockStat.mockImplementation(async (p: unknown) => {
+      if (p === logPath) return { size: Buffer.byteLength(suspendedLog) };
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+    mockReadFile.mockImplementation(async (p: unknown) => {
+      if (p === logPath) return suspendedLog;
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+
+    const service = makeService(sessionId, events);
+    const result = await service.getSessionDetail(sessionId);
+
+    expect(result.isOk()).toBe(true);
+    const detail = result._unsafeUnwrap();
+    // session_completed present => isLive=false => liveActivity=null
+    expect(detail.liveActivity).toBeNull();
+  });
+
   it('isLive=true and liveActivity populated when correlated events exist without session_completed', async () => {
     const sessionId = 'sess_live004aaaaaaaaaaaaaaaa';
     const events = makeMinimalEvents(sessionId);

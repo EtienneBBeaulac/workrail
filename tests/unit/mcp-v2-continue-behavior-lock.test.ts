@@ -1,3 +1,4 @@
+import { BackgroundWork } from '../../src/mcp/background-work.js';
 import { createTestValidationPipelineDeps, mintTestContinueToken } from "../helpers/v2-test-helpers.js";
 /**
  * Behavioral lock tests for orchestrateContinueWorkflow.
@@ -123,7 +124,8 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const workflowService = resolveService<any>(DI.Services.Workflow);
     const featureFlags = resolveService<any>(DI.Infra.FeatureFlags);
     const v2 = await mkV2Deps();
-    const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
+    const ctx: ToolContext = { workflowService, featureFlags, backgroundWork: new BackgroundWork(() => {}),
+    sessionManager: null, httpServer: null, v2 };
 
     // Start
     const start = await startWorkflowForTest({ workflowId: 'behavior-lock-wf', workspacePath: root, goal: 'test behavior lock' } as any, ctx);
@@ -165,7 +167,8 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const workflowService = resolveService<any>(DI.Services.Workflow);
     const featureFlags = resolveService<any>(DI.Infra.FeatureFlags);
     const v2 = await mkV2Deps();
-    const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
+    const ctx: ToolContext = { workflowService, featureFlags, backgroundWork: new BackgroundWork(() => {}),
+    sessionManager: null, httpServer: null, v2 };
 
     const start = await startWorkflowForTest({ workflowId: 'behavior-lock-wf', workspacePath: root, goal: 'test behavior lock' } as any, ctx);
     expect(start.type).toBe('success');
@@ -201,7 +204,8 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const workflowService = resolveService<any>(DI.Services.Workflow);
     const featureFlags = resolveService<any>(DI.Infra.FeatureFlags);
     const v2 = await mkV2Deps();
-    const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
+    const ctx: ToolContext = { workflowService, featureFlags, backgroundWork: new BackgroundWork(() => {}),
+    sessionManager: null, httpServer: null, v2 };
 
     const start = await startWorkflowForTest({ workflowId: 'behavior-lock-wf', workspacePath: root, goal: 'test behavior lock' } as any, ctx);
     expect(start.type).toBe('success');
@@ -236,7 +240,8 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const workflowService = resolveService<any>(DI.Services.Workflow);
     const featureFlags = resolveService<any>(DI.Infra.FeatureFlags);
     const v2 = await mkV2Deps();
-    const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
+    const ctx: ToolContext = { workflowService, featureFlags, backgroundWork: new BackgroundWork(() => {}),
+    sessionManager: null, httpServer: null, v2 };
 
     const start = await startWorkflowForTest({ workflowId: 'behavior-lock-wf', workspacePath: root, goal: 'test behavior lock' } as any, ctx);
     expect(start.type).toBe('success');
@@ -280,7 +285,8 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const workflowService = resolveService<any>(DI.Services.Workflow);
     const featureFlags = resolveService<any>(DI.Infra.FeatureFlags);
     const v2 = await mkV2Deps();
-    const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
+    const ctx: ToolContext = { workflowService, featureFlags, backgroundWork: new BackgroundWork(() => {}),
+    sessionManager: null, httpServer: null, v2 };
 
     // Create a valid token for a non-existent session
     const { signTokenV1Binary } = await import('../../src/v2/durable-core/tokens/index.js');
@@ -316,7 +322,8 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const workflowService = resolveService<any>(DI.Services.Workflow);
     const featureFlags = resolveService<any>(DI.Infra.FeatureFlags);
     const v2 = await mkV2Deps();
-    const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
+    const ctx: ToolContext = { workflowService, featureFlags, backgroundWork: new BackgroundWork(() => {}),
+    sessionManager: null, httpServer: null, v2 };
 
     // This test would require seeding a session with mismatched hash; defer to simpler mocking
     // or accept that TOKEN_WORKFLOW_HASH_MISMATCH is covered by unit test in mcp-v2-execution.test.ts

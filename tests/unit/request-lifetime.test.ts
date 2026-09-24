@@ -1,0 +1,31 @@
+import { it, expect } from 'vitest';
+import { RequestLifetime } from '../../src/mcp/request-lifetime.js';
+import { waitForCompletion } from '../../src/mcp/background-work.js';
+it('drains admitted handlers even when their caller no longer awaits them', async () => {
+  let release!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const scope = new RequestLifetime();
+  let writes = 0;
+  const handler = scope.wrap(async () => { await blocked; writes++; return 'done'; });
+  const inFlight = handler();
+  let drained = false;
+  const closing = scope.close().then(() => { drained = true; });
+  expect(await handler()).toMatchObject({ isError: true });
+  await new Promise<void>(resolve => setImmediate(resolve));
+  expect(drained).toBe(false);
+  release();
+  expect(await inFlight).toBe('done');
+  await closing;
+  expect(writes).toBe(1);
+});
+it('reports failed close as data and observes late failure after cancellation', async () => {
+  expect(await waitForCompletion(Promise.reject(new Error('close failed')), new AbortController().signal)).toBe('failed');
+  let fail!: () => void;
+  const pending = new Promise<void>((_resolve, reject) => { fail = () => reject(new Error('late failure')); });
+  const controller = new AbortController();
+  const waiting = waitForCompletion(pending, controller.signal);
+  controller.abort();
+  expect(await waiting).toBe('incomplete');
+  fail();
+  expect(await waitForCompletion(pending, new AbortController().signal)).toBe('failed');
+});

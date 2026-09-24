@@ -836,7 +836,7 @@ export class TriggerRouter {
       // delivery systems and must not affect each other.
       const originalTag = result._tag;
       const originalResult = result;
-      if (trigger.callbackUrl) {
+      if (trigger.callbackUrl && result._tag !== 'recovery_pending') {
         result = await runCallbackUrlDelivery(trigger.id, trigger.workflowId, trigger.callbackUrl, result, this.emitter);
       }
 
@@ -871,6 +871,9 @@ export class TriggerRouter {
           `workflowId=${trigger.workflowId} reason=${result.reason} message=${result.message}`,
           // TODO(follow-up): add onStuck: trigger hook support here
         );
+      } else if (result._tag === 'recovery_pending') {
+        console.warn(`[TriggerRouter] Recovery pending: operationId=${result.operationId} reason=${result.reason}`);
+        return;
       } else if (result._tag === 'gate_parked') {
         // Session parked at a requireConfirmation gate. Route based on gateKind:
         // - coordinator_eval: spawn wr.gate-eval-generic (existing autonomous path)
@@ -1058,11 +1061,10 @@ export class TriggerRouter {
    * @returns The workflowId that was dispatched.
    */
   dispatch(workflowTrigger: WorkflowTrigger, source?: SessionSource): string {
-    // Pre-allocated session: executeStartWorkflow already created the session in the store.
-    // Deduplication must not apply here -- dropping this dispatch would zombie the session.
-    // A pre_allocated SessionSource is authoritative evidence that the caller explicitly
-    // intends to start this session. Skip the dedup block entirely.
-    if (source?.kind !== 'pre_allocated') {
+    // Explicit sources already carry session or admission identity. Goal-based
+    // deduplication would lose an allocated session or a distinct retained operation.
+    // Supervised duplicate operations are resolved by canonical admission instead.
+    if (!source || source.kind === 'allocate') {
       // Deduplicate: if the same goal+workspace was dispatched within 30s, skip.
       // WHY shared deduplicator: prevents duplicate dispatches within the same 30s window.
       // Key format differs by path: route/dispatch use workflowId::goal::workspace;
@@ -1074,7 +1076,7 @@ export class TriggerRouter {
         return workflowTrigger.workflowId;
       }
     } else {
-      console.log(`[TriggerRouter] Pre-allocated session dispatched: workflowId=${workflowTrigger.workflowId} goal="${workflowTrigger.goal.slice(0, 60)}"`);
+      console.log(`[TriggerRouter] Explicit ${source.kind} session dispatched: workflowId=${workflowTrigger.workflowId} goal="${workflowTrigger.goal.slice(0, 60)}"`);
     }
 
     void this.queue.enqueue(workflowTrigger.workflowId, async () => {
@@ -1126,6 +1128,9 @@ export class TriggerRouter {
           `reason=${result.reason} message=${result.message}`,
           // TODO(follow-up): add onStuck: trigger hook support here
         );
+      } else if (result._tag === 'recovery_pending') {
+        console.warn(`[TriggerRouter] Recovery pending: operationId=${result.operationId} reason=${result.reason}`);
+        return;
       } else if (result._tag === 'gate_parked') {
         const sessionId = result.sessionId;
         const stepId = result.stepId;

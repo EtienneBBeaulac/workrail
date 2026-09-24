@@ -9,7 +9,7 @@
  * core. It must be importable in any test context without I/O stubs.
  */
 
-import type { WorkflowTrigger, WorkflowRunResult, RunId } from '../types.js';
+import type { WorkflowTrigger, WorkflowRunResult, KnownWorkflowRunResult, RunId } from '../types.js';
 import type { SessionState } from '../state/session-state.js';
 import { assertNever } from '../../runtime/assert-never.js';
 import { DEFAULT_SESSION_TIMEOUT_MINUTES, DEFAULT_MAX_TURNS } from './session-context.js';
@@ -29,7 +29,7 @@ import { DEFAULT_SESSION_TIMEOUT_MINUTES, DEFAULT_MAX_TURNS } from './session-co
  * HTTP callback POST failed. The stats should reflect that the work was done.
  * See WorkflowDeliveryFailed and invariants doc section 1.3.
  */
-export function tagToStatsOutcome(tag: WorkflowRunResult['_tag']): 'success' | 'error' | 'timeout' | 'stuck' | 'gate_parked' {
+export function tagToStatsOutcome(tag: KnownWorkflowRunResult['_tag']): 'success' | 'error' | 'timeout' | 'stuck' | 'gate_parked' {
   switch (tag) {
     case 'success': return 'success';
     case 'error': return 'error';
@@ -61,7 +61,8 @@ export type SidecarLifecycle =
    * and handle the gated session on daemon restart.
    * Sidecar is cleaned up by startup recovery after the session is discarded or resumed.
    */
-  | { readonly kind: 'retain_for_gate' };
+  | { readonly kind: 'retain_for_gate' }
+  | { readonly kind: 'retain_for_recovery' };
 
 /**
  * Determine the correct sidecar lifecycle action for a completed session.
@@ -85,6 +86,8 @@ export function sidecardLifecycleFor(
       return branchStrategy === 'worktree'
         ? { kind: 'retain_for_delivery' }
         : { kind: 'delete_now' };
+    case 'recovery_pending':
+      return { kind: 'retain_for_recovery' };
     case 'gate_parked':
       // Sidecar must survive so startup recovery can detect and handle the gated session.
       // Coordinator (PR 2) or startup recovery cleans it up after the gate resolves.

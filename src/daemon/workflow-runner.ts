@@ -22,6 +22,7 @@
  */
 
 import 'reflect-metadata';
+import { runSupervisedDaemonWorkflow } from './runner/supervised-daemon-workflow.js';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -345,6 +346,7 @@ export async function runWorkflow(
    */
   onChildStepAdvance?: () => void,
 ): Promise<WorkflowRunResult> {
+  if (source?.kind === 'supervised') return runSupervisedDaemonWorkflow(trigger, source, emitter);
   // ---- Resolved dirs (injectable for tests) ----
   const statsDir = _statsDir ?? DAEMON_STATS_DIR;
   const sessionsDir = _sessionsDir ?? DAEMON_SESSIONS_DIR;

@@ -1,3 +1,4 @@
+import { createAnswerInvocationBinder, type BindAnswerInvocation } from './answer-invocation.js';
 /**
  * Factories for the continue_workflow and complete_step tools used in daemon agent sessions.
  *
@@ -9,7 +10,7 @@ import type { AgentTool, AgentToolResult } from '../agent-loop.js';
 import type { V2ToolContext } from '../../mcp/types.js';
 import type { DaemonEventEmitter, RunId } from '../daemon-events.js';
 import { executeContinueWorkflow } from '../../mcp/handlers/v2-execution/index.js';
-import { persistTokens, withWorkrailSession } from './_shared.js';
+import { persistTokens, withWorkrailSession, DAEMON_SESSIONS_DIR } from './_shared.js';
 import type { SessionId } from '../../v2/durable-core/ids/index.js';
 
 export function makeContinueWorkflowTool(
@@ -25,9 +26,11 @@ export function makeContinueWorkflowTool(
   workrailSessionId?: SessionId | null,
   onGateParked: (gateToken: string, stepId: string, gateKind: import('../../v2/durable-core/constants.js').GateKind) => void = () => { /* no-op for callers that predate gate support */ },
   gateRecoveryContext?: { readonly workflowId: string; readonly goal: string; readonly workspacePath: string; readonly branchStrategy?: import('../types.js').BranchStrategy; readonly context?: Readonly<Record<string, unknown>> },
+  persist: typeof persistTokens = persistTokens,
 ): AgentTool {
   return {
     name: 'continue_workflow',
+    responsePolicy: 'first_answer',
     description:
       '[DEPRECATED in daemon sessions -- use complete_step instead] ' +
       'Advance the WorkRail workflow to the next step. Call this after completing all work ' +
@@ -82,7 +85,7 @@ export function makeContinueWorkflowTool(
         // if the daemon crashes between now and agent loop exit, startup recovery
         // can detect the gate from the sidecar rather than relying on in-memory state.
         const gateState = { kind: 'gate_checkpoint' as const, gateToken: out.gateToken, stepId: out.stepId };
-        const persistResult = await persistTokens(sessionId, '', null, undefined, gateRecoveryContext, gateState, workrailSessionId);
+        const persistResult = await persist(sessionId, '', null, undefined, gateRecoveryContext, gateState, workrailSessionId);
         if (persistResult.kind === 'err') {
           console.warn(`[WorkflowRunner] persistTokens failed (continue_workflow gate_checkpoint): ${persistResult.error.code} -- ${persistResult.error.message}`);
         }
@@ -103,7 +106,7 @@ export function makeContinueWorkflowTool(
       const checkpointToken = out.checkpointToken ?? null;
       const persistToken = (out.kind === 'blocked' ? out.nextCall?.params.continueToken : undefined) ?? continueToken;
       if (persistToken) {
-        const persistResult = await persistTokens(sessionId, persistToken, checkpointToken);
+        const persistResult = await persist(sessionId, persistToken, checkpointToken);
         // WHY log-and-continue (not throw): a persist failure degrades crash recovery but
         // the session is still live and the LLM has the token in memory. Killing the session
         // here loses in-progress work. Invariant 4.3: onAdvance/onTokenUpdate must still fire.
@@ -241,9 +244,12 @@ export function makeCompleteStepTool(
   workrailSessionId?: SessionId | null,
   onGateParked: (gateToken: string, stepId: string, gateKind: import('../../v2/durable-core/constants.js').GateKind) => void = () => { /* no-op for callers that predate gate support */ },
   gateRecoveryContext?: { readonly workflowId: string; readonly goal: string; readonly workspacePath: string; readonly branchStrategy?: import('../types.js').BranchStrategy; readonly context?: Readonly<Record<string, unknown>> },
+  persist: typeof persistTokens = persistTokens,
+  bindInvocation: BindAnswerInvocation = createAnswerInvocationBinder(DAEMON_SESSIONS_DIR),
 ): AgentTool {
   return {
     name: 'complete_step',
+    responsePolicy: 'first_answer',
     description:
       'Mark the current WorkRail workflow step as complete and advance to the next one. ' +
       'Call this after completing all work required by the current step. ' +
@@ -255,7 +261,7 @@ export function makeCompleteStepTool(
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (
-      _toolCallId: string,
+      toolCallId: string,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       params: any,
       _signal: AbortSignal,
@@ -281,6 +287,14 @@ export function makeCompleteStepTool(
       // sees this token -- we inject it here so the engine can authenticate the
       // advance call. This is the core value of complete_step over continue_workflow.
       const continueToken = getCurrentToken();
+      const bound = await bindInvocation(sessionId, toolCallId, continueToken, params);
+      if (bound.kind === 'refused' || bound.token !== continueToken) {
+        return { isError: true, content: [{ type: 'text', text: bound.kind === 'refused'
+          ? `Answer invocation refused: ${bound.reason}`
+          : 'This answer invocation belongs to an earlier task. Read the current prompt and submit a fresh answer.' }],
+          details: { kind: 'refused', isComplete: false } };
+      }
+
 
       const result = await _executeContinueWorkflowFn(
         {
@@ -315,7 +329,7 @@ export function makeCompleteStepTool(
       // WHY NOT call onAdvance: the step did NOT advance to the next workflow step.
       if (out.kind === 'gate_checkpoint') {
         const gateState = { kind: 'gate_checkpoint' as const, gateToken: out.gateToken, stepId: out.stepId };
-        const persistResult = await persistTokens(sessionId, '', null, undefined, gateRecoveryContext, gateState, workrailSessionId);
+        const persistResult = await persist(sessionId, '', null, undefined, gateRecoveryContext, gateState, workrailSessionId);
         if (persistResult.kind === 'err') {
           console.warn(`[WorkflowRunner] persistTokens failed (complete_step gate_checkpoint): ${persistResult.error.code} -- ${persistResult.error.message}`);
         }
@@ -337,7 +351,7 @@ export function makeCompleteStepTool(
       // advances to this retry token -- the original session token is consumed.
       const persistToken = (out.kind === 'blocked' ? out.nextCall?.params.continueToken : undefined) ?? newContinueToken;
       if (persistToken) {
-        const persistResult = await persistTokens(sessionId, persistToken, checkpointToken);
+        const persistResult = await persist(sessionId, persistToken, checkpointToken);
         // WHY log-and-continue (not throw): a persist failure degrades crash recovery but
         // the session is still live. Invariant 4.3: onAdvance/onTokenUpdate must still fire.
         if (persistResult.kind === 'err') {

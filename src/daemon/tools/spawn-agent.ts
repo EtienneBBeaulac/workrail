@@ -50,7 +50,7 @@ interface SingleSpawnSpec {
 interface SingleSpawnResult {
   readonly kind: 'single';
   readonly childSessionId: SessionId | null;
-  readonly outcome: 'success' | 'error' | 'timeout' | 'stuck';
+  readonly outcome: 'success' | 'error' | 'timeout' | 'stuck' | 'recovery_pending';
   readonly notes: string;
   readonly artifacts?: readonly unknown[];
   readonly issueSummaries?: readonly string[];
@@ -394,6 +394,9 @@ async function spawnOne(spec: SingleSpawnSpec, sc: SpawnContext): Promise<Single
       notes: childResult.message,
       ...(childResult.issueSummaries !== undefined ? { issueSummaries: childResult.issueSummaries } : {}),
     };
+  } else if (childResult._tag === 'recovery_pending') {
+    return { kind: 'single', childSessionId, outcome: 'recovery_pending',
+      notes: 'Child execution outcome is unconfirmed. Evidence is retained for recovery; do not repeat the task as a new execution.' };
   } else if (childResult._tag === 'gate_parked') {
     // Child session parked at a requireConfirmation gate. Coordinator evaluation not yet
     // implemented (PR 2). Surface as 'stuck' outcome so the parent session knows the child
@@ -467,7 +470,7 @@ export function makeSpawnAgentTool(
     description:
       'Spawn one or more child WorkRail sessions to handle delegated sub-tasks. ' +
       '\n\nSINGLE form: { workflowId, goal, workspacePath, context?, agentConfig?: { modelTier?, allowedTools? } }' +
-      '\n  Returns: { kind: "single", childSessionId, outcome: "success"|"error"|"timeout"|"stuck", notes, artifacts? }' +
+      '\n  Returns: { kind: "single", childSessionId, outcome: "success"|"error"|"timeout"|"stuck"|"recovery_pending", notes, artifacts? }' +
       '\n\nPARALLEL form: { agents: [{ workflowId, goal, workspacePath, context?, agentConfig?: { modelTier?, allowedTools? } }, ...] }' +
       '\n  Runs all agents simultaneously. Returns: { kind: "parallel", results: [...] } in input order.' +
       '\n  Budget: maxSessionMinutes must cover max(child duration), NOT sum(child durations).' +

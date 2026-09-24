@@ -1,3 +1,4 @@
+import { BackgroundWork } from '../mcp/background-work.js';
 /**
  * WorkRail Library Engine Factory
  *
@@ -379,6 +380,7 @@ export async function createWorkRailEngine(
   const featureFlags = new StaticFeatureFlagProvider({ v2Tools: true });
 
   const ctx: ToolContext = {
+    backgroundWork: new BackgroundWork(error => console.error('[BackgroundWork]', error)),
     workflowService,
     featureFlags,
     sessionManager: null,
@@ -503,12 +505,15 @@ export async function createWorkRailEngine(
     },
 
     async close(): Promise<void> {
+      const drained = await ctx.backgroundWork.close(new AbortController().signal);
+      if (drained === 'incomplete') throw new Error('Engine background shutdown incomplete');
       // Reset the DI container so a subsequent createWorkRailEngine() call
       // gets fresh state (new dataDir, new keyring, etc.).
       // Without this, the global container singleton would be reused,
       // silently ignoring config changes on the next create call.
       resetContainer();
       engineActive = false;
+      if (drained === 'failed') throw new Error('Engine background shutdown failed');
     },
   };
 

@@ -4,6 +4,10 @@
 
 import { defineConfig } from 'vitest/config';
 
+// Real Git and CLI fixtures include subprocess startup in their assertions. Run them
+// after functional tests so fixture contention does not consume unchanged deadlines.
+const subprocessFixtures = ['tests/integration/answer-host/operational-e2e.test.ts', 'tests/integration/answer-host/supervised-host.test.ts', 'tests/integration/answer-host/stdio-bootstrap.test.ts', 'tests/unit/daemon-workspace-preparation.test.ts', 'tests/integration/mcp-http-transport.test.ts', 'tests/unit/cli-validate.test.ts', 'tests/unit/v2/workspace-anchor-adapter.test.ts', 'tests/integration/git-*.test.ts', 'tests/integration/external-workflow*.test.ts', 'tests/e2e/external-workflows-*.test.ts'];
+
 const shared = {
   // Setup files
   setupFiles: ['./tests/setup.ts'],
@@ -41,7 +45,7 @@ export default defineConfig({
           include: ['tests/**/*.test.ts'],
           // Exclude the knowledge-graph test -- it runs in the 'knowledge-graph' project
           // below with pool:forks to avoid DuckDB native binary + worker thread conflicts.
-          exclude: ['tests/unit/knowledge-graph.test.ts'],
+          exclude: ['tests/unit/knowledge-graph.test.ts', 'tests/performance/**', ...subprocessFixtures],
           pool: 'threads',
           poolOptions: {
             threads: {
@@ -65,6 +69,27 @@ export default defineConfig({
             },
           },
           ...shared,
+        },
+      },
+      {
+        test: {
+          name: 'git-integration', environment: 'node', include: subprocessFixtures,
+          pool: 'threads', poolOptions: { threads: { minThreads: 1, maxThreads: 1 } },
+          ...shared,
+          sequence: { groupOrder: 1 },
+        },
+      },
+      // Measure latency after the functional workload has drained. Budgets stay
+      // unchanged; concurrent fixture I/O must not determine benchmark results.
+      {
+        test: {
+          name: 'performance',
+          environment: 'node',
+          include: ['tests/performance/**/*.test.ts'],
+          pool: 'threads',
+          poolOptions: { threads: { minThreads: 1, maxThreads: 1 } },
+          ...shared,
+          sequence: { groupOrder: 2 },
         },
       },
       // Knowledge graph tests use pool:forks because @duckdb/node-api is a native

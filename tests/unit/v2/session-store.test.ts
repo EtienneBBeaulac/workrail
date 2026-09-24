@@ -17,7 +17,7 @@ import { describe, it, expect } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { errAsync } from 'neverthrow';
+import { errAsync, ResultAsync } from 'neverthrow';
 
 import { LocalDataDirV2 } from '../../../src/v2/infra/local/data-dir/index.js';
 import { NodeFileSystemV2 } from '../../../src/v2/infra/local/fs/index.js';
@@ -187,6 +187,49 @@ describe('v2 local session store (Slice 2 substrate)', () => {
     if (res.ok) return;
     expect(res.error.code).toBe('SESSION_STORE_INVARIANT_VIOLATION');
     expect(res.error.message).toContain('witness misuse-after-release');
+  });
+
+  it('rejects retained witness writes while the physical release acknowledgment is pending', async () => {
+    const root = await mkTempDataDir();
+    const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: root });
+    const fsPort = new NodeFileSystemV2();
+    const lock = new LocalSessionLockV2(dataDir, fsPort, new NodeTimeClockV2());
+    const store = new LocalSessionEventLogStoreV2(dataDir, fsPort, new NodeSha256V2());
+    let acknowledge!: () => void, released!: () => void;
+    const releaseAck = new Promise<void>(resolve => { acknowledge = resolve; });
+    const physicallyReleased = new Promise<void>(resolve => { released = resolve; });
+    const gate = new ExecutionSessionGateV2({
+      acquire: id => lock.acquire(id),
+      release: handle => lock.release(handle).andThen(() => {
+        released();
+        return ResultAsync.fromSafePromise(releaseAck);
+      }),
+    }, store);
+    const sessionId = asSessionId('sess_release_pending');
+    const event: DomainEventV1 = {
+      v: 1, eventId: 'evt_release', eventIndex: 0, sessionId,
+      kind: 'session_created', dedupeKey: `session_created:${sessionId}`,
+      data: {}, timestampMs: 1,
+    };
+    let witness!: WithHealthySessionLock;
+    const operation = gate.withHealthySessionLock(sessionId, held => {
+      witness = held;
+      return store.append(held, { events: [event], snapshotPins: [] });
+    });
+    try {
+      await physicallyReleased;
+      const result = await store.append(witness, { events: [event], snapshotPins: [] });
+      expect(result.isErr()).toBe(true);
+      if (result.isErr()) {
+        expect(result.error.code).toBe('SESSION_STORE_INVARIANT_VIOLATION');
+        expect(result.error.message).toContain('witness misuse-after-release');
+      }
+      expect((await store.load(sessionId))._unsafeUnwrap().events).toHaveLength(1);
+    } finally {
+      acknowledge();
+      await operation;
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 
   it('load fails on digest mismatch for a committed segment', async () => {

@@ -1,3 +1,4 @@
+import { BackgroundWork } from '../../src/mcp/background-work.js';
 import { describe, expect, it } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
@@ -95,6 +96,7 @@ async function buildCtx(dataRoot: string, workflowRoot?: string): Promise<{
       validateStepOutput: async () => ({ valid: true, issues: [], suggestions: [] }),
     } as any,
     featureFlags: EnvironmentFeatureFlagProvider.withEnv({}),
+    backgroundWork: new BackgroundWork(() => {}),
     sessionManager: null,
     httpServer: null,
     v2: {

@@ -25,7 +25,7 @@
 
 import * as childProcess from 'node:child_process';
 import * as os from 'node:os';
-import type { WorkflowRunResult } from '../daemon/types.js';
+import type { WorkflowRunResult, KnownWorkflowRunResult } from '../daemon/types.js';
 
 // ---------------------------------------------------------------------------
 // Injected function types
@@ -121,7 +121,7 @@ export interface NotificationPayload {
  * WHY pure function: deterministic, testable in isolation from the side-effecting
  * channel delivery. Same inputs always produce the same notification text.
  */
-export function buildNotificationBody(result: WorkflowRunResult, goal: string): string {
+export function buildNotificationBody(result: KnownWorkflowRunResult, goal: string): string {
   const truncated = goal.length > 60 ? `${goal.slice(0, 57)}...` : goal;
   switch (result._tag) {
     case 'success':
@@ -142,14 +142,14 @@ export function buildNotificationBody(result: WorkflowRunResult, goal: string): 
 /**
  * Build the outcome string for the webhook NotificationPayload.
  */
-export function buildOutcome(result: WorkflowRunResult): NotificationPayload['outcome'] {
+export function buildOutcome(result: KnownWorkflowRunResult): NotificationPayload['outcome'] {
   return result._tag;
 }
 
 /**
  * Build a human-readable detail string for the NotificationPayload.
  */
-export function buildDetail(result: WorkflowRunResult): string {
+export function buildDetail(result: KnownWorkflowRunResult): string {
   switch (result._tag) {
     case 'success':
       return `stopReason: ${result.stopReason}`;
@@ -244,6 +244,7 @@ export class NotificationService {
    * @param goal - The goal string passed to start_workflow (for the notification body).
    */
   notify(result: WorkflowRunResult, goal: string): void {
+    if (result._tag === 'recovery_pending') return;
     void this._doNotify(result, goal).catch(() => {
       // Intentionally empty: errors are silently swallowed.
       // Observability must never affect correctness.
@@ -256,7 +257,7 @@ export class NotificationService {
    * WHY separated from notify(): keeps notify() synchronous and makes the
    * async I/O path unit-testable in isolation.
    */
-  private async _doNotify(result: WorkflowRunResult, goal: string): Promise<void> {
+  private async _doNotify(result: KnownWorkflowRunResult, goal: string): Promise<void> {
     const body = buildNotificationBody(result, goal);
 
     const deliveries: Promise<void>[] = [];
@@ -308,7 +309,7 @@ export class NotificationService {
    * Uses AbortController with a 30-second timeout (same as delivery-client.ts).
    * Non-2xx responses and network errors are caught, logged, and discarded.
    */
-  private async _notifyWebhook(result: WorkflowRunResult, goal: string): Promise<void> {
+  private async _notifyWebhook(result: KnownWorkflowRunResult, goal: string): Promise<void> {
     const url = this._webhookUrl!;
     const payload: NotificationPayload = {
       event: 'session_completed',

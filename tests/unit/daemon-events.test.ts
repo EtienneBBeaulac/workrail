@@ -42,17 +42,6 @@ async function readJsonlLines(filePath: string): Promise<Record<string, unknown>
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
-/** Wait for all pending async I/O to flush. */
-async function flushAsync(): Promise<void> {
-  // emit() fires a detached Promise. The underlying fs.appendFile is async I/O.
-  // We poll until the file appears or a reasonable number of ticks pass.
-  // Using multiple setTimeout(0) + setImmediate rounds ensures both microtasks
-  // and I/O callbacks complete before we inspect the result.
-  for (let i = 0; i < 20; i++) {
-    await new Promise<void>((resolve) => setTimeout(resolve, 10));
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -74,7 +63,7 @@ describe('DaemonEventEmitter', () => {
 
     emitter.emit({ kind: 'daemon_started', port: 3200, workspacePath: '/workspace' });
 
-    await flushAsync();
+    await emitter.settle();
 
     const files = await fs.readdir(tmpDir);
     expect(files).toHaveLength(1);
@@ -97,7 +86,7 @@ describe('DaemonEventEmitter', () => {
     emitter.emit({ kind: 'session_queued', triggerId: 'trig-1', workflowId: 'wf-1' });
     emitter.emit({ kind: 'session_started', sessionId: 'sess-1', workflowId: 'wf-1', workspacePath: '/ws' });
 
-    await flushAsync();
+    await emitter.settle();
 
     const files = await fs.readdir(tmpDir);
     const lines = await readJsonlLines(path.join(tmpDir, files[0]!));
@@ -117,7 +106,7 @@ describe('DaemonEventEmitter', () => {
       emitter.emit({ kind: 'step_advanced', sessionId: `sess-${i}` });
     }
 
-    await flushAsync();
+    await emitter.settle();
 
     const files = await fs.readdir(tmpDir);
     const lines = await readJsonlLines(path.join(tmpDir, files[0]!));
@@ -135,7 +124,7 @@ describe('DaemonEventEmitter', () => {
     const emitter = new DaemonEventEmitter(nestedDir);
 
     emitter.emit({ kind: 'step_advanced', sessionId: 'sess-1' });
-    await flushAsync();
+    await emitter.settle();
 
     const files = await fs.readdir(nestedDir);
     expect(files).toHaveLength(1);
@@ -150,12 +139,12 @@ describe('DaemonEventEmitter', () => {
     // First emit on "day 1"
     Date.prototype.toISOString = () => '2026-01-01T12:00:00.000Z';
     emitter.emit({ kind: 'tool_called', sessionId: 's1', toolName: 'Bash' });
-    await flushAsync();
+    await emitter.settle();
 
     // Second emit on "day 2"
     Date.prototype.toISOString = () => '2026-01-02T12:00:00.000Z';
     emitter.emit({ kind: 'tool_called', sessionId: 's1', toolName: 'Read' });
-    await flushAsync();
+    await emitter.settle();
 
     // Restore original
     Date.prototype.toISOString = originalToISOString;
@@ -180,9 +169,14 @@ describe('DaemonEventEmitter', () => {
     }).not.toThrow();
 
     // Wait for the detached Promise to settle (error swallowed).
-    await flushAsync();
+    await emitter.settle();
 
-    // No crash, no unhandled rejection -- test passes.
+    // A failed attempt must not poison the queue for subsequent writes.
+    await fs.unlink(blockingFile);
+    emitter.emit({ kind: 'step_advanced', sessionId: 'after-failure' });
+    await emitter.settle();
+    const files=await fs.readdir(blockingFile);
+    expect(await readJsonlLines(path.join(blockingFile,files[0]!))).toMatchObject([{sessionId:'after-failure'}]);
   });
 
   it('each event kind has the correct discriminant field', async () => {
@@ -217,7 +211,7 @@ describe('DaemonEventEmitter', () => {
     for (const event of events) {
       emitter.emit(event);
     }
-    await flushAsync();
+    await emitter.settle();
 
     const files = await fs.readdir(tmpDir);
     const lines = await readJsonlLines(path.join(tmpDir, files[0]!));

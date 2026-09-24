@@ -525,7 +525,8 @@ export function readVerdictArtifact(
     return {
       severity: v.verdict,
       findingSummaries: v.findings.map((f) => f.summary),
-      raw: JSON.stringify(v),
+      // Schema validation supplies routing, while evidence retains the submitted artifact.
+      raw: JSON.stringify(raw),
       source: 'artifact',
     };
   }

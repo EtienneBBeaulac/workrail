@@ -553,6 +553,7 @@ describe('TriggerRouter.route', () => {
 describe('startTriggerListener feature flag', () => {
   it('returns null when WORKRAIL_TRIGGERS_ENABLED is not set', async () => {
     const result = await startTriggerListener(FAKE_CTX, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: '/tmp',
       apiKey: 'key',
       env: {}, // no WORKRAIL_TRIGGERS_ENABLED
@@ -562,6 +563,7 @@ describe('startTriggerListener feature flag', () => {
 
   it('returns null when WORKRAIL_TRIGGERS_ENABLED is "false"', async () => {
     const result = await startTriggerListener(FAKE_CTX, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: '/tmp',
       apiKey: 'key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'false' },
@@ -571,6 +573,7 @@ describe('startTriggerListener feature flag', () => {
 
   it('returns feature_disabled when flag is missing (null is returned, not err)', async () => {
     const result = await startTriggerListener(FAKE_CTX, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: '/tmp',
       apiKey: 'key',
       env: {},
@@ -580,6 +583,7 @@ describe('startTriggerListener feature flag', () => {
 
   it('returns missing_api_key error when API key is absent and flag is enabled', async () => {
     const result = await startTriggerListener(FAKE_CTX, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: '/nonexistent',
       // no apiKey
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
@@ -595,6 +599,7 @@ describe('startTriggerListener feature flag', () => {
   it('returns missing_v2_context error when ctx.v2 is absent and flag is enabled', async () => {
     // FAKE_CTX has no v2 -- valid apiKey gets past missing_api_key but hits the v2 guard.
     const result = await startTriggerListener(FAKE_CTX, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: '/nonexistent',
       apiKey: 'test-key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
@@ -610,6 +615,7 @@ describe('startTriggerListener feature flag', () => {
   it('starts with empty config when triggers.yml is missing', async () => {
     const { fn } = makeFakeRunWorkflow();
     const result = await startTriggerListener(FAKE_CTX_WITH_V2, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: tmpPath('nonexistent-workspace-xyz'),
       apiKey: 'test-key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
@@ -674,6 +680,7 @@ describe('startTriggerListener workflowId validation', () => {
     const getWorkflowByIdFn = vi.fn().mockResolvedValue(false);
 
     const result = await startTriggerListener(FAKE_CTX_WITH_V2, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: wsDir,
       apiKey: 'test-key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
@@ -707,6 +714,7 @@ describe('startTriggerListener workflowId validation', () => {
     const getWorkflowByIdFn = vi.fn().mockResolvedValue(true);
 
     const result = await startTriggerListener(FAKE_CTX_WITH_V2, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: wsDir,
       apiKey: 'test-key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
@@ -753,6 +761,7 @@ describe('startTriggerListener workflowId validation', () => {
     );
 
     const result = await startTriggerListener(FAKE_CTX_WITH_V2, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: wsDir,
       apiKey: 'test-key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
@@ -781,6 +790,7 @@ describe('startTriggerListener workflowId validation', () => {
 
     // No getWorkflowByIdFn -- validation should be skipped
     const result = await startTriggerListener(FAKE_CTX_WITH_V2, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: wsDir,
       apiKey: 'test-key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
@@ -812,6 +822,7 @@ describe('startTriggerListener workflowId validation', () => {
     const getWorkflowByIdFn = vi.fn().mockRejectedValue(new Error('Storage I/O error'));
 
     const result = await startTriggerListener(FAKE_CTX_WITH_V2, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: wsDir,
       apiKey: 'test-key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
@@ -1994,6 +2005,18 @@ describe('TriggerRouter.dispatch pre_allocated SessionSource bypass', () => {
     vi.useRealTimers();
   });
 
+  it('dispatch() preserves distinct supervised operation identities with the same goal', async () => {
+    const { fn, calls } = makeFakeRunWorkflow();
+    const configured = makeTrigger();
+    const router = new TriggerRouter(makeIndex(configured), FAKE_CTX, FAKE_API_KEY, fn);
+    const trigger = { workflowId: configured.workflowId, goal: configured.goal, workspacePath: configured.workspacePath };
+    router.dispatch(trigger);
+    router.dispatch(trigger, { kind: 'supervised',
+      operation: { operationId: '11111111-1111-4111-8111-111111111111', request: trigger },
+      scheduler: { enroll: async () => ({ kind: 'refused', reason: 'invalid_request' }) }, signal: new AbortController().signal });
+    await vi.waitFor(() => expect(calls).toHaveLength(2));
+  });
+
   it('dispatch() with pre_allocated SessionSource bypasses dedup and calls runWorkflowFn', async () => {
     // WHY: proves the fix for the zombie-session bug. The dedup map contains goal::workspace
     // from a prior dispatch. dispatch() with a pre_allocated SessionSource must bypass the dedup
@@ -2286,4 +2309,25 @@ describe('TriggerRouter: explicit github_draft_review delivery', () => {
     warnSpy.mockRestore();
     expect(warned).toBe(false);
   });
+});
+
+it.each(['route', 'dispatch'] as const)('%s retains pending work without completion side effects', async entry => {
+  const calls: string[] = [];
+  vi.stubGlobal('fetch', async () => { calls.push('callback'); return { ok: true, text: async () => '' }; });
+  try {
+    const trigger = makeTrigger({ callbackUrl: 'https://example.com/callback', autoCommit: true });
+    const run: RunWorkflowFn = async () => {
+      calls.push('run');
+      return { _tag: 'recovery_pending', workflowId: trigger.workflowId, stopReason: 'recovery_pending',
+        operationId: 'operation', reason: 'execution_unconfirmed' };
+    };
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, run, {
+      notificationService: { notify: () => { calls.push('notification'); } } as unknown as NotificationService,
+      execFn: async () => { calls.push('delivery'); return { stdout: '', stderr: '' }; },
+    });
+    if (entry === 'route') router.route(makeEvent());
+    else router.dispatch({ workflowId: trigger.workflowId, goal: trigger.goal, workspacePath: trigger.workspacePath });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(calls).toEqual(['run']);
+  } finally { vi.unstubAllGlobals(); }
 });

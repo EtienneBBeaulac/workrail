@@ -143,6 +143,9 @@ export class DefaultFileStateTracker implements FileStateTracker {
  * Named fields document intent and prevent accidental param ordering errors.
  */
 export interface SessionScope {
+  readonly bindAnswerInvocation: import('./tools/answer-invocation.js').BindAnswerInvocation;
+  readonly persistTokens: typeof import('./tools/_shared.js').persistTokens;
+
   /** Tracks which files have been read in this session (read-before-write enforcement). */
   readonly fileTracker: FileStateTracker;
 

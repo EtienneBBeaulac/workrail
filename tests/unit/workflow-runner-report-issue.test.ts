@@ -2,8 +2,7 @@
  * Unit tests for makeReportIssueTool() in workflow-runner.ts.
  *
  * Strategy: use issuesDirOverride to write to a temp directory, avoiding any
- * writes to ~/.workrail. The appendIssueAsync fire-and-forget write is tested
- * via flushAsync() -- same approach as daemon-events.test.ts.
+ * writes to ~/.workrail. Read immediately after execute resolves to verify acknowledgment.
  *
  * WHY no fs mocking: the issuesDirOverride parameter makes the test hermetic
  * without requiring mocks. This follows the "prefer fakes over mocks" principle.
@@ -15,6 +14,11 @@ import * as os from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeReportIssueTool } from '../../src/daemon/workflow-runner.js';
 import { DaemonEventEmitter } from '../../src/daemon/daemon-events.js';
+
+class RecordingEmitter extends DaemonEventEmitter {
+  readonly emitted: unknown[] = [];
+  override emit(event: Parameters<DaemonEventEmitter['emit']>[0]): void { this.emitted.push(event); }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -40,13 +44,6 @@ async function readJsonlLines(filePath: string): Promise<Record<string, unknown>
     .split('\n')
     .filter((line) => line.trim().length > 0)
     .map((line) => JSON.parse(line) as Record<string, unknown>);
-}
-
-/** Wait for all pending async I/O to flush (same pattern as daemon-events.test.ts). */
-async function flushAsync(): Promise<void> {
-  for (let i = 0; i < 20; i++) {
-    await new Promise<void>((resolve) => setTimeout(resolve, 10));
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -138,7 +135,7 @@ describe('makeReportIssueTool()', () => {
         summary: 'npm run build failed',
       });
 
-      await flushAsync();
+
 
       const filePath = path.join(tmpDir, 'sess-abc.jsonl');
       const lines = await readJsonlLines(filePath);
@@ -153,7 +150,7 @@ describe('makeReportIssueTool()', () => {
         summary: 'Could not clone repo',
       });
 
-      await flushAsync();
+
 
       const filePath = path.join(tmpDir, 'sess-abc.jsonl');
       const lines = await readJsonlLines(filePath);
@@ -179,7 +176,7 @@ describe('makeReportIssueTool()', () => {
         continueToken: 'ct_abc123',
       });
 
-      await flushAsync();
+
 
       const filePath = path.join(tmpDir, 'sess-abc.jsonl');
       const lines = await readJsonlLines(filePath);
@@ -201,27 +198,33 @@ describe('makeReportIssueTool()', () => {
         summary: 'Made a reasoned decision without oracle guidance',
       });
 
-      await flushAsync();
+
 
       const files = await fs.readdir(nestedDir);
       expect(files).toContain('sess-abc.jsonl');
     });
 
-    it('does not throw when the write fails (fire-and-forget)', async () => {
-      // Use a path where writes will fail: a non-writable location.
-      // We simulate failure by pointing to /dev/null as the directory -- mkdir
-      // on /dev/null will fail because it is not a directory.
-      const badDir = '/dev/null/impossible-path';
-      const tool = makeReportIssueTool('sess-abc', undefined, undefined, badDir);
+    it('rejects failed storage without notifying the summary observer', async () => {
+      const badDir = path.join(tmpDir, 'ordinary-file');
+      await fs.writeFile(badDir, 'not a directory');
+      const summaries: string[] = [];
+      const emitter = new RecordingEmitter(tmpDir);
+      const tool = makeReportIssueTool('sess-abc', emitter, undefined, badDir, s => summaries.push(s));
+      await expect(tool.execute('call-1', { kind: 'tool_failure', severity: 'error', summary: 'Test error' })).rejects.toMatchObject({code: expect.stringMatching(/^(EEXIST|ENOTDIR)$/)});
+      expect(summaries).toEqual([]);
+      expect(emitter.emitted).toEqual([]);
+    });
 
-      // Must not throw -- fire-and-forget swallows all write errors.
-      await expect(
-        tool.execute('call-1', {
-          kind: 'tool_failure',
-          severity: 'error',
-          summary: 'Test error',
-        }),
-      ).resolves.not.toThrow();
+    it('refuses an already-cancelled report before creating the issues directory', async () => {
+      const dir = path.join(tmpDir, 'not-created');
+      const controller = new AbortController(); controller.abort();
+      const summaries: string[] = [];
+      const emitter = new RecordingEmitter(tmpDir);
+      const tool = makeReportIssueTool('sess-abc', emitter, undefined, dir, s => summaries.push(s));
+      await expect(tool.execute('call-1', {kind:'blocked',severity:'warn',summary:'Cancelled'}, controller.signal)).rejects.toMatchObject({name:'AbortError'});
+      expect(summaries).toEqual([]);
+      expect(emitter.emitted).toEqual([]);
+      await expect(fs.stat(dir)).rejects.toMatchObject({code:'ENOENT'});
     });
 
     it('truncates summary longer than 200 chars to exactly 200 chars', async () => {
@@ -233,7 +236,7 @@ describe('makeReportIssueTool()', () => {
         summary: longSummary,
       });
 
-      await flushAsync();
+
 
       const filePath = path.join(tmpDir, 'sess-abc.jsonl');
       const lines = await readJsonlLines(filePath);

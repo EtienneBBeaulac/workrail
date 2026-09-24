@@ -46,6 +46,18 @@ export interface AgentClientInterface {
   };
 }
 
+/** An awaited host boundary may halt inference without fabricating a model response. */
+export interface ControlledInference {
+  generate(params: Anthropic.MessageCreateParamsNonStreaming, signal: AbortSignal): Promise<
+    | Readonly<{ kind: 'response'; response: Anthropic.Message }>
+    | Readonly<{ kind: 'halted' }>
+  >;
+}
+export type ControlledAgentLoopOptions = Omit<AgentLoopOptions, 'client' | 'inference'> & {
+  readonly client?: never;
+  readonly inference: ControlledInference;
+};
+
 /**
  * Result returned by a tool's execute() function.
  *
@@ -53,6 +65,8 @@ export interface AgentClientInterface {
  * for tool_result blocks, which accept an array of content blocks.
  */
 export interface AgentToolResult<T> {
+  /** An observed command error is distinct from transport uncertainty. */
+  readonly isError?: boolean;
   readonly content: ReadonlyArray<{ readonly type: 'text'; readonly text: string }>;
   readonly details: T;
 }
@@ -78,6 +92,8 @@ export interface AgentTool {
   readonly inputSchema: Record<string, unknown>;
   /** Human-readable label for logging. */
   readonly label: string;
+  /** Answer calls in one model response cannot answer prompts delivered afterward. */
+  readonly responsePolicy?: 'first_answer';
   /**
    * Execute the tool call.
    * May throw on failure -- AgentLoop._executeTools() catches throws and converts them
@@ -200,8 +216,28 @@ export interface AgentLoopCallbacks {
   readonly onToolCallFailed?: (info: { readonly toolName: string; readonly durationMs: number; readonly errorMessage: string }) => void;
 }
 
+/** Trusted host admission, separate from observers. The controller retains durable
+ * failure details before halting. A rejection is conservatively halted, never model
+ * feedback inviting a retry of a possibly completed effect. */
+export interface ControlledToolExecution {
+  execute(call: Readonly<{ callId: string; name: string; input: unknown }>,
+    invoke: () => Promise<AgentToolResult<unknown>>, signal: AbortSignal): Promise<
+      | Readonly<{ kind: 'completed'; result: AgentToolResult<unknown> }>
+      | Readonly<{ kind: 'halted' }>
+    >;
+}
+type ToolBatchOutcome = Readonly<{ kind: 'completed'; results: AgentToolCallResult[] }> | Readonly<{ kind: 'halted' }>;
+
 /** Options for constructing an AgentLoop. */
 export interface AgentLoopOptions {
+  readonly inference?: never;
+  readonly toolBoundary?: ControlledToolExecution;
+  /** A host-owned answer ends this model turn before any tool in its response runs.
+   * The host captures the whole response durably before selecting or committing it. */
+  readonly responseHandoff?: {
+    readonly toolName: string;
+    readonly accept: (response: Anthropic.Message) => void;
+  };
   /** System prompt sent with every LLM request. */
   readonly systemPrompt: string;
   /** Tools available to the LLM. */
@@ -287,7 +323,7 @@ export interface AgentLoopOptions {
  * for the surface area used by workflow-runner.ts.
  */
 export class AgentLoop {
-  private readonly _options: AgentLoopOptions;
+  private readonly _options: AgentLoopOptions | ControlledAgentLoopOptions;
   private readonly _listeners: Array<(event: AgentEvent) => Promise<void> | void> = [];
   private readonly _steerQueue: Array<AgentInternalUserMessage> = [];
   private _messages: AgentInternalMessage[] = [];
@@ -309,7 +345,7 @@ export class AgentLoop {
    */
   private _stallTimerHandle: ReturnType<typeof setTimeout> | undefined = undefined;
 
-  constructor(options: AgentLoopOptions) {
+  constructor(options: AgentLoopOptions | ControlledAgentLoopOptions) {
     this._options = options;
   }
 
@@ -464,7 +500,7 @@ export class AgentLoop {
   // ---------------------------------------------------------------------------
 
   private async _runLoop(): Promise<void> {
-    const { client, modelId, systemPrompt, tools, maxTokens = 8192, callbacks, stallTimeoutMs, llmCallTimeoutMs } = this._options;
+    const { modelId, systemPrompt, tools, maxTokens = 8192, callbacks, stallTimeoutMs, llmCallTimeoutMs } = this._options;
 
     while (true) {
       // Check abort before each LLM call.
@@ -520,16 +556,19 @@ export class AgentLoop {
 
       let response: Anthropic.Message;
       try {
-        response = await client.messages.create(
-          {
-            model: modelId,
-            system: systemPrompt,
-            messages: apiMessages,
-            tools: apiTools,
-            max_tokens: maxTokens,
-          },
-          { signal: this._abortController.signal },
-        );
+        const request: Anthropic.MessageCreateParamsNonStreaming = {
+          model: modelId, system: systemPrompt, messages: apiMessages, tools: apiTools, max_tokens: maxTokens,
+        };
+        if (this._options.inference) {
+          const result = await this._options.inference.generate(request, this._abortController.signal);
+          if (result.kind === 'halted') {
+            await this._emitEvent({ type: 'agent_end' });
+            return;
+          }
+          response = result.response;
+        } else {
+          response = await this._options.client.messages.create(request, { signal: this._abortController.signal });
+        }
       } catch (err: unknown) {
         // Distinguish abort from genuine API error.
         const isAbort =
@@ -591,8 +630,20 @@ export class AgentLoop {
         (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
       );
 
+      const handoff = this._options.responseHandoff;
+      if (handoff && toolUseBlocks.some(block => block.name === handoff.toolName)) {
+        handoff.accept(response);
+        await this._emitEvent({ type: 'agent_end' });
+        return;
+      }
+
       if (stopReason === 'tool_use' || toolUseBlocks.length > 0) {
-        const toolResults = await this._executeTools(toolUseBlocks);
+        const batch = await this._executeTools(toolUseBlocks);
+        if (batch.kind === 'halted') {
+          await this._emitEvent({ type: 'agent_end' });
+          return;
+        }
+        const toolResults = batch.results;
 
         // Append tool results as a user message.
         const toolResultBlocks: Anthropic.ToolResultBlockParam[] = toolResults.map((r) => ({
@@ -661,13 +712,15 @@ export class AgentLoop {
    */
   private async _executeTools(
     toolUseBlocks: readonly Anthropic.ToolUseBlock[],
-  ): Promise<AgentToolCallResult[]> {
+  ): Promise<ToolBatchOutcome> {
     const { callbacks } = this._options;
     const results: AgentToolCallResult[] = [];
+    let answerSelected = false;
 
     for (const block of toolUseBlocks) {
       // Check abort before each tool execution.
       if (this._abortController.signal.aborted) {
+        if (this._options.toolBoundary) return { kind: 'halted' };
         results.push({
           toolCallId: block.id,
           toolName: block.name,
@@ -701,11 +754,20 @@ export class AgentLoop {
       // escalate. Same rationale as unknown tool names above.
       const params = (block.input ?? {}) as Record<string, unknown>;
 
+      if (tool.responsePolicy === 'first_answer') {
+        if (answerSelected) {
+          results.push({ toolCallId: block.id, toolName: block.name, isError: true,
+            result: { content: [{ type: 'text', text: 'Only the first answer in a response is selected. Read the resulting prompt before answering again.' }], details: null } });
+          continue;
+        }
+        // Selection precedes validation: a rejected first answer cannot fall through.
+        answerSelected = true;
+      }
+
       // Emit tool_call_started before execute().
       // WHY try/catch: preserves fire-and-forget invariant -- a throwing callback
       // must never crash the agent loop.
       const argsSummary = JSON.stringify(params).slice(0, 2000);
-      try { callbacks?.onToolCallStarted?.({ toolName: block.name, argsSummary }); } catch { /* swallow */ }
 
       // C1: Reset stall timer before each tool execution.
       // WHY here: the stall timer fires when no new LLM call starts within stallTimeoutMs.
@@ -722,12 +784,21 @@ export class AgentLoop {
       const toolStartMs = Date.now();
       let result: AgentToolResult<unknown>;
       try {
-        result = await tool.execute(block.id, params, this._abortController.signal);
+        const invoke = () => {
+          try { callbacks?.onToolCallStarted?.({ toolName: block.name, argsSummary }); } catch { /* swallow */ }
+          return tool.execute(block.id, params, this._abortController.signal);
+        };
+        if (this._options.toolBoundary) {
+          const outcome = await this._options.toolBoundary.execute({ callId: block.id, name: block.name, input: params }, invoke, this._abortController.signal);
+          if (outcome.kind === 'halted') return { kind: 'halted' };
+          result = outcome.result;
+        } else result = await invoke();
       } catch (err: unknown) {
         const durationMs = Date.now() - toolStartMs;
         const message = err instanceof Error ? err.message : String(err);
         // Emit tool_call_failed for the throwing path.
         try { callbacks?.onToolCallFailed?.({ toolName: block.name, durationMs, errorMessage: message.slice(0, 500) }); } catch { /* swallow */ }
+        if (this._options.toolBoundary) return { kind: 'halted' };
         results.push({
           toolCallId: block.id,
           toolName: block.name,
@@ -748,11 +819,11 @@ export class AgentLoop {
         toolCallId: block.id,
         toolName: block.name,
         result,
-        isError: false,
+        isError: result.isError ?? false,
       });
     }
 
-    return results;
+    return { kind: 'completed', results };
   }
 
   /**

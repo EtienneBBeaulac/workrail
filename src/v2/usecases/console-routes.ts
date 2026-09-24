@@ -1,3 +1,6 @@
+import { createConsoleReadRuntimeFromEngine } from '../../answer-v1/console.js';
+import { mountAnswerConsoleRoutes } from '../../answer-v1/console-routes.js';
+import type { ConsoleReaderBinding } from '../../answer-v1/contracts/console-contract.js';
 /**
  * Console API routes for the v2 Console UI.
  *
@@ -136,7 +139,17 @@ export function mountConsoleRoutes(
   toolCallsPerfFile?: string,
   serverVersion?: string,
   v2ToolContext?: V2ToolContext,
+  answerReader?: ConsoleReaderBinding,
 ): () => void {
+  const answerLifetime = new AbortController();
+  const answerRuntime = !answerReader && v2ToolContext
+    ? createConsoleReadRuntimeFromEngine({
+        sessionStore: { load: v2ToolContext.v2.sessionStore.load.bind(v2ToolContext.v2.sessionStore) },
+        snapshotStore: { getExecutionSnapshotV1: v2ToolContext.v2.snapshotStore.getExecutionSnapshotV1.bind(v2ToolContext.v2.snapshotStore) },
+        pinnedStore: { get: v2ToolContext.v2.pinnedStore.get.bind(v2ToolContext.v2.pinnedStore) },
+        tokenCodecPorts: { hmac: v2ToolContext.v2.tokenCodecPorts.hmac, keyring: v2ToolContext.v2.tokenCodecPorts.keyring },
+      }, answerLifetime.signal) : undefined;
+  mountAnswerConsoleRoutes(app, answerReader ?? answerRuntime?.unboundReader);
   // SSE state: per-instance, not module-level (see comment block above).
   const sseClients = new Set<Response>();
   let sseDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -276,6 +289,7 @@ export function mountConsoleRoutes(
     'tool_error',
     'step_advanced',
     'session_completed',
+    'session_suspended',
     'issue_reported',
     'agent_stuck',
     'llm_turn_started',
@@ -370,7 +384,7 @@ export function mountConsoleRoutes(
         }
 
         // Close the stream after forwarding the terminal event.
-        if (kind === 'session_completed') {
+        if (kind === 'session_completed' || kind === 'session_suspended') {
           cleanup();
           return;
         }
@@ -983,6 +997,8 @@ export function mountConsoleRoutes(
         console.log(`[ConsoleRoutes] Auto dispatch failed: workflowId=${workflowId} error=${result.message}`);
       } else if (result._tag === 'stuck') {
         console.log(`[ConsoleRoutes] Auto dispatch stuck: workflowId=${workflowId} reason=${result.reason} message=${result.message}`);
+      } else if (result._tag === 'recovery_pending') {
+        console.warn(`[ConsoleRoutes] Recovery pending: operationId=${result.operationId} reason=${result.reason}`);
       } else if (result._tag === 'gate_parked') {
         console.log(`[ConsoleRoutes] Auto dispatch parked at gate: workflowId=${workflowId} stepId=${result.stepId}`);
       } else {
@@ -1049,5 +1065,5 @@ export function mountConsoleRoutes(
     console.error('[Console] UI not found (run: cd console && npm run build)');
   }
 
-  return stopWatcher;
+  return () => { answerLifetime.abort(); stopWatcher(); };
 }

@@ -1,3 +1,4 @@
+import { answerInvocationDirectory, createAnswerInvocationBinder } from '../../src/daemon/tools/answer-invocation.js';
 /**
  * Unit tests for runner/finalize-session.ts
  *
@@ -283,4 +284,33 @@ describe('finalizeSession -- missing files', () => {
     const result: WorkflowRunResult = { _tag: 'success', workflowId: 'wr.test', stopReason: 'stop' };
     await expect(finalizeSession(result, ctx)).resolves.toBeUndefined();
   });
+});
+
+it('retains recovery evidence and clears liveness without recording completion', async () => {
+  const { DaemonRegistry } = await import('../../src/v2/infra/in-memory/daemon-registry/index.js');
+  const registry = new DaemonRegistry(); registry.register('sess_wr001', 'wr.test');
+  const events: unknown[] = [];
+  const ctx = makeCtx({ daemonRegistry: registry,
+    emitter: { emit: (event: unknown) => events.push(event) } as unknown as DaemonEventEmitter });
+  const sidecar = makeSidecar(tmpDir, ctx.sessionId);
+  await writeSidecar(sidecar); await writeConversation(ctx.conversationPath);
+  const before = await fs.readdir(tmpDir);
+  await finalizeSession({ _tag: 'recovery_pending', workflowId: 'wr.test', stopReason: 'recovery_pending',
+    operationId: 'operation', reason: 'execution_unconfirmed' }, ctx);
+  expect(events).toEqual([{ kind: 'session_suspended', sessionId: ctx.sessionId, workflowId: 'wr.test',
+    operationId: 'operation', reason: 'execution_unconfirmed', workrailSessionId: 'sess_wr001' }]);
+  expect(registry.snapshot().size).toBe(0);
+  expect(await fs.readdir(tmpDir)).toEqual(before);
+  expect(await fs.readFile(ctx.conversationPath, 'utf8')).toBe('{"role":"user"}\n');
+});
+
+it('deletes only the finalized session invocation evidence after deleting its sidecar', async () => {
+  const ctx = makeCtx();
+  await writeSidecar(makeSidecar(tmpDir, ctx.sessionId));
+  const bind = createAnswerInvocationBinder(tmpDir);
+  await bind(ctx.sessionId, 'call', 'token', { notes: 'retained' });
+  await bind('other-session', 'call', 'token', { notes: 'retained' });
+  await finalizeSession({ _tag: 'success', workflowId: 'wr.test', stopReason: 'stop' }, ctx);
+  await expect(fs.access(answerInvocationDirectory(tmpDir, ctx.sessionId))).rejects.toThrow();
+  await expect(fs.access(answerInvocationDirectory(tmpDir, 'other-session'))).resolves.toBeUndefined();
 });
