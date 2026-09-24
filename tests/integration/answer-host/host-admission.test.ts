@@ -1008,6 +1008,8 @@ it.skipIf(process.env.WORKRAIL_TEST_LINUX_SCRATCH !== '1').each([
   'success','cancel_after_effect','cancel_running','lost_reply','stale_owner','bootstrap_ack','create_reply_loss','deadline','expired_journal','symlink',
 ] as const)('composes canonical effects with an isolated Linux scratch backend: %s', async mode=>{
   const {DockerCli}=await import('../../../src/daemon/runner/linux-scratch/docker-cli.js');
+  const {observeScratchResource}=await import('../../../src/daemon/runner/linux-scratch/observation.js');
+  const {foldSupervisor}=await import('../../../src/answer-v1/supervisor-state.js');
   const {createLinuxScratchWorkspace}=await import('../../../src/daemon/runner/linux-scratch/workspace.js');
   const {createLinuxScratchAnswerModel}=await import('../../../src/daemon/runner/linux-scratch/answer-model.js');
   const {startExecutionDeadline,createSystemDeadlineClock}=await import('../../../src/answer-v1/execution-deadline.js');
@@ -1048,11 +1050,22 @@ it.skipIf(process.env.WORKRAIL_TEST_LINUX_SCRATCH !== '1').each([
         expect(created).toMatchObject(mode==='bootstrap_ack'?{kind:'refused',reason:'intent_unacknowledged'}:{kind:'unknown',cleanup:'unconfirmed'});
         expect(createdIds).toHaveLength(mode==='bootstrap_ack'?0:1);
         const second=await createLinuxScratchWorkspace({journal,owner,deadline:started.deadline,profile,docker:observed,artifactDirectory:join(root,'artifacts')});
-        expect(second.kind).toBe('refused');expect(createdIds).toHaveLength(mode==='bootstrap_ack'?0:1);return;
+        expect(second.kind).toBe('refused');expect(createdIds).toHaveLength(mode==='bootstrap_ack'?0:1);
+        const retained=await readHostState(engine,hydrated.enrollment);if(retained.kind!=='loaded')throw new Error(retained.kind);
+        const projection=foldSupervisor(retained.state.records);if(projection.kind!=='valid')throw new Error(projection.kind);
+        expect(await observeScratchResource(projection.state,docker,signal)).toMatchObject(mode==='bootstrap_ack'
+          ? {kind:'absent_at_observation'} : {kind:'present',container:createdIds[0],phase:'stopped'});
+        expect(await readHostState(engine,hydrated.enrollment)).toEqual(retained);
+        return;
       }
       expect(created.kind).toBe('ready');if(created.kind!=='ready')throw new Error(JSON.stringify(created));
       const workspace=created.workspace;
       const state=await readHostState(engine,hydrated.enrollment);if(state.kind!=='loaded')throw new Error(state.kind);
+      if(mode==='success'){
+        const projection=foldSupervisor(state.state.records);if(projection.kind!=='valid')throw new Error(projection.kind);
+        expect(await observeScratchResource(projection.state,docker,signal)).toMatchObject({kind:'present',container:createdIds[0],phase:'running'});
+        expect(await readHostState(engine,hydrated.enrollment)).toEqual(state);
+      }
       const view=await workView(engine,state.state);if(view.kind!=='question')throw new Error(view.kind);
       const delivery=await journal.appendDelivery(view.reply,owner,signal);if(delivery.kind!=='delivered')throw new Error(delivery.kind);
       let calls=0,toolCalls=0;
@@ -1110,6 +1123,12 @@ it.skipIf(process.env.WORKRAIL_TEST_LINUX_SCRATCH !== '1').each([
       if(mode==='expired_journal')expect(await journal.locked(signal,'unavailable',async()=> 'available')).toBe('unavailable');
       const final=await workspace.finish(signal);
       expect(final.cleanup).toBe(mode==='stale_owner'?'unconfirmed':'removed');
+      if(mode==='success'){
+        const cleaned=await readHostState(engine,hydrated.enrollment);if(cleaned.kind!=='loaded')throw new Error(cleaned.kind);
+        const projection=foldSupervisor(cleaned.state.records);if(projection.kind!=='valid')throw new Error(projection.kind);
+        expect(await observeScratchResource(projection.state,docker,signal)).toMatchObject({kind:'absent_at_observation'});
+        expect(await readHostState(engine,hydrated.enrollment)).toEqual(cleaned);
+      }
       if(mode==='success'){
         expect(final.inspection.kind).toBe('retained');
         if(final.inspection.kind==='retained'){
