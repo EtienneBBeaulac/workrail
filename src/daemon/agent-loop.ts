@@ -212,9 +212,22 @@ export interface AgentLoopCallbacks {
   readonly onToolCallFailed?: (info: { readonly toolName: string; readonly durationMs: number; readonly errorMessage: string }) => void;
 }
 
+/** Trusted host admission, separate from observers. The controller retains durable
+ * failure details before halting. A rejection is conservatively halted, never model
+ * feedback inviting a retry of a possibly completed effect. */
+export interface ControlledToolExecution {
+  execute(call: Readonly<{ callId: string; name: string; input: unknown }>,
+    invoke: () => Promise<AgentToolResult<unknown>>, signal: AbortSignal): Promise<
+      | Readonly<{ kind: 'completed'; result: AgentToolResult<unknown> }>
+      | Readonly<{ kind: 'halted' }>
+    >;
+}
+type ToolBatchOutcome = Readonly<{ kind: 'completed'; results: AgentToolCallResult[] }> | Readonly<{ kind: 'halted' }>;
+
 /** Options for constructing an AgentLoop. */
 export interface AgentLoopOptions {
   readonly inference?: never;
+  readonly toolBoundary?: ControlledToolExecution;
   /** A host-owned answer ends this model turn before any tool in its response runs.
    * The host captures the whole response durably before selecting or committing it. */
   readonly responseHandoff?: {
@@ -621,7 +634,12 @@ export class AgentLoop {
       }
 
       if (stopReason === 'tool_use' || toolUseBlocks.length > 0) {
-        const toolResults = await this._executeTools(toolUseBlocks);
+        const batch = await this._executeTools(toolUseBlocks);
+        if (batch.kind === 'halted') {
+          await this._emitEvent({ type: 'agent_end' });
+          return;
+        }
+        const toolResults = batch.results;
 
         // Append tool results as a user message.
         const toolResultBlocks: Anthropic.ToolResultBlockParam[] = toolResults.map((r) => ({
@@ -690,13 +708,14 @@ export class AgentLoop {
    */
   private async _executeTools(
     toolUseBlocks: readonly Anthropic.ToolUseBlock[],
-  ): Promise<AgentToolCallResult[]> {
+  ): Promise<ToolBatchOutcome> {
     const { callbacks } = this._options;
     const results: AgentToolCallResult[] = [];
 
     for (const block of toolUseBlocks) {
       // Check abort before each tool execution.
       if (this._abortController.signal.aborted) {
+        if (this._options.toolBoundary) return { kind: 'halted' };
         results.push({
           toolCallId: block.id,
           toolName: block.name,
@@ -734,7 +753,6 @@ export class AgentLoop {
       // WHY try/catch: preserves fire-and-forget invariant -- a throwing callback
       // must never crash the agent loop.
       const argsSummary = JSON.stringify(params).slice(0, 2000);
-      try { callbacks?.onToolCallStarted?.({ toolName: block.name, argsSummary }); } catch { /* swallow */ }
 
       // C1: Reset stall timer before each tool execution.
       // WHY here: the stall timer fires when no new LLM call starts within stallTimeoutMs.
@@ -751,12 +769,21 @@ export class AgentLoop {
       const toolStartMs = Date.now();
       let result: AgentToolResult<unknown>;
       try {
-        result = await tool.execute(block.id, params, this._abortController.signal);
+        const invoke = () => {
+          try { callbacks?.onToolCallStarted?.({ toolName: block.name, argsSummary }); } catch { /* swallow */ }
+          return tool.execute(block.id, params, this._abortController.signal);
+        };
+        if (this._options.toolBoundary) {
+          const outcome = await this._options.toolBoundary.execute({ callId: block.id, name: block.name, input: params }, invoke, this._abortController.signal);
+          if (outcome.kind === 'halted') return { kind: 'halted' };
+          result = outcome.result;
+        } else result = await invoke();
       } catch (err: unknown) {
         const durationMs = Date.now() - toolStartMs;
         const message = err instanceof Error ? err.message : String(err);
         // Emit tool_call_failed for the throwing path.
         try { callbacks?.onToolCallFailed?.({ toolName: block.name, durationMs, errorMessage: message.slice(0, 500) }); } catch { /* swallow */ }
+        if (this._options.toolBoundary) return { kind: 'halted' };
         results.push({
           toolCallId: block.id,
           toolName: block.name,
@@ -781,7 +808,7 @@ export class AgentLoop {
       });
     }
 
-    return results;
+    return { kind: 'completed', results };
   }
 
   /**
