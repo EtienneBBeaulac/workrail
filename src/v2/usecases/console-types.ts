@@ -129,7 +129,15 @@ export interface ConsoleExecutionTraceSummary {
   readonly contextFacts: readonly ConsoleExecutionTraceFact[];
 }
 
+/** Retained observations only, never a live-process or lease-release assertion. */
+export type ConsoleSupervisorStatus =
+  | Readonly<{kind:'recorded';phase:'create_pending'|'created'|'start_pending'|'running'|'stop_pending'|'process_stopped'}>
+  | Readonly<{kind:'unconfirmed';operation:'create'|'start'|'stop';reason:'ack_unknown'|'backend_refused'}>
+  | Readonly<{kind:'invalid_history'}>;
+
 export interface ConsoleDagRun {
+  /** Absent for legacy runs without supervisor history. */
+  readonly supervisor?: ConsoleSupervisorStatus;
   readonly runId: string;
   readonly workflowId: string | null;
   readonly workflowName: string | null;

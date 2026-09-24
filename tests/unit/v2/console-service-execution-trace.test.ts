@@ -13,7 +13,7 @@ const tmp = os.tmpdir();
 
 
 describe('ConsoleService executionTraceSummary integration', () => {
-  it('includes projected execution trace summary on session detail runs', async () => {
+  it.each([false,true])('includes projected execution trace summary and optional supervisor history (%s)', async withSupervisor => {
     const events: DomainEventV1[] = [
       {
         v: 1,
@@ -89,6 +89,13 @@ describe('ConsoleService executionTraceSummary integration', () => {
       } as DomainEventV1,
     ];
 
+    if(withSupervisor) {
+      const data:import('../../../src/v2/durable-core/schemas/session/answer-host.js').AnswerHostRecord[]=[
+        {kind:'owner_acquired',epoch:'1'},
+        {kind:'supervisor_create_intended',supervisor:'private-id',epoch:'1',configurationDigest:'a'.repeat(64)}];
+      for(const record of data)events.push({v:1,kind:'answer_host_recorded',sessionId:'sess_test',scope:{runId:'run_1'},
+        eventId:`evt_supervisor_${events.length}`,eventIndex:events.length,timestampMs:0,dedupeKey:`supervisor_${events.length}`,data:record});
+    }
     const directoryListing: DirectoryListingPortV2 = {
       readdir: () => okAsync([]),
       readdirWithMtime: () => okAsync([]),
@@ -142,6 +149,7 @@ describe('ConsoleService executionTraceSummary integration', () => {
     expect(result.isOk()).toBe(true);
     if (result.isOk()) {
       expect(result.value.runs).toHaveLength(1);
+      expect(result.value.runs[0]?.supervisor).toEqual(withSupervisor?{kind:'recorded',phase:'create_pending'}:undefined);
       expect(result.value.runs[0]?.executionTraceSummary).toEqual({
         items: [
           {
