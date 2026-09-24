@@ -118,7 +118,8 @@ it.skipIf(process.platform === 'win32').each([
               if (cleanup === 'cancel_create') lifetime.abort();
               return { kind: 'completed', bytes: Buffer.from(cid) };
             case 'start': running = true; return { kind: 'completed', bytes: Buffer.from(cid) };
-            case 'inspect': value = [{ Id: cid, State: { Running: running }, Config: { Labels: { 'workrail.linux-scratch': label } } }]; break;
+            case 'ps': return { kind: 'completed', bytes: Buffer.from(JSON.stringify(cid)) };
+            case 'inspect': value = [{ Id: cid, Name: '/' + (await import('../../../src/daemon/runner/linux-scratch/identity.js')).scratchContainerName(label), State: { Running: running }, Config: { Labels: { 'workrail.linux-scratch': label } } }]; break;
             case 'exec': value = { format: 'workrail-scratch-observation-v1', files: [] }; break;
             case 'stop': running = false; return { kind: 'completed', bytes: Buffer.from(cid) };
             case 'rm': return cleanup === 'unknown' ? { kind: 'unknown' } : { kind: 'completed', bytes: Buffer.from(cid) };
@@ -168,6 +169,10 @@ it.skipIf(process.platform === 'win32').each([
         const retained = await readHostState(reopened, result.enrollment.result.enrollment);
         if (retained.kind !== 'loaded') throw new Error(retained.kind);
         expect(retained.state.records.find(record => record.kind === 'supervisor_create_intended')).toMatchObject({ daemon: 'fixture-daemon' });
+        if (cleanup === 'create_unknown') {
+          expect(await host.scheduler.inspectResource(operation, new AbortController().signal)).toMatchObject({ kind: 'observation', result: { kind: 'present', daemon: 'fixture-daemon', container: cid, phase: 'stopped' } });
+          expect(await readHostState(reopened, result.enrollment.result.enrollment)).toEqual(retained);
+        }
         expect(commands.filter(command => command === 'create')).toHaveLength(1);
         expect(commands).not.toContain('start');
         expect(calls).toBe(0);

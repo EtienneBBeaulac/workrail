@@ -1424,3 +1424,28 @@ it.skipIf(process.platform === 'win32').each(['notes', 'review'] as const)('refu
     expect(truth.value.events).toEqual([]);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+
+it.skipIf(process.platform === 'win32')('inspects retained admission without initializing, acquiring ownership or appending', async () => {
+  const { inspectHostAdmission } = await import('../../../src/answer-v1/host-admission.js');
+  const root = await mkdtemp(join(tmpdir(), 'read-admission-'));
+  try {
+    const { engine, prepared, expected, candidate } = await setup(root);
+    const signal = new AbortController().signal;
+    const reader = { crypto: engine.crypto, pinnedStore: engine.pinnedStore, snapshotStore: engine.snapshotStore,
+      sessionStore: { load: (id: Parameters<typeof engine.sessionStore.load>[0]) => engine.sessionStore.load(id) } };
+    expect(await inspectHostAdmission(reader, root, expected, signal)).toEqual({ kind: 'missing' });
+    expect((await publishAdmissionFile(root, expected.operationId, candidate.bytes, signal)).kind).toBe('durable');
+    const before = await engine.sessionStore.load(prepared.sessionId);
+    const files = (await readdir(root, { recursive: true })).sort();
+    expect(await inspectHostAdmission(reader, root, expected, signal)).toEqual({ kind: 'not_initialized' });
+    expect(await engine.sessionStore.load(prepared.sessionId)).toEqual(before);
+    expect((await readdir(root, { recursive: true })).sort()).toEqual(files);
+    expect((await publishAndReconcileHostAdmission(engine, root, expected, candidate.bytes, signal)).kind).toBe('admitted');
+    const initialized = await engine.sessionStore.load(prepared.sessionId);
+    expect(await inspectHostAdmission(reader, root, expected, signal)).toMatchObject({ kind: 'located', enrollment: { execution: prepared.sessionId } });
+    expect(await engine.sessionStore.load(prepared.sessionId)).toEqual(initialized);
+    expect(await inspectHostAdmission(reader, root, { ...expected, request: { ...expected.request, goal: 'different' } }, signal)).toMatchObject({ kind: 'refused', reason: 'request_conflict' });
+    expect(await engine.sessionStore.load(prepared.sessionId)).toEqual(initialized);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

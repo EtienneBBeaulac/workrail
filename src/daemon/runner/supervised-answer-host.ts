@@ -1,3 +1,5 @@
+import { observeScratchResource } from './linux-scratch/observation.js';
+import { foldSupervisor } from '../../answer-v1/supervisor-state.js';
 import { createAnswerWorkflowReader } from '../../answer-v1/workflow-reader.js';
 import { isAbsolute } from 'node:path';
 import type { ClientOptions } from '@anthropic-ai/sdk/client';
@@ -9,7 +11,7 @@ import { owns, readHostState, inspectionView } from '../../answer-v1/host-state.
 import { composeAnswerEngine } from '../../answer-v1/engine-composition.js';
 import { prepareAdmissionDirectory } from '../../answer-v1/admission-directory.js';
 import { admissionFileName } from '../../answer-v1/immutable-admission-file.js';
-import { buildHostAdmissionCandidate, createFreshAdmissionAuthority, recoverHostAdmission } from '../../answer-v1/host-admission.js';
+import { buildHostAdmissionCandidate, createFreshAdmissionAuthority, recoverHostAdmission, inspectHostAdmission } from '../../answer-v1/host-admission.js';
 import { classifyAnswerWorkflow } from '../../answer-v1/workflow-support.js';
 import { hasWorkflowDefinitionShape } from '../../types/workflow-definition.js';
 import type { Workflow } from '../../types/workflow.js';
@@ -131,6 +133,20 @@ export async function createSupervisedAnswerHost(config: SharedAuthorityConfig &
             reconciliationRequired.add(expected.operationId);
             return { kind: 'unconfirmed', reason: 'storage_unavailable', operation: expected } as const;
           }
+        })());
+      },
+      inspectResource(operation: SupervisedOperation, signal: AbortSignal) {
+        return track((async () => {
+          const checked = validate(operation);
+          if (checked.kind !== 'valid') return { kind: 'refused', reason: 'invalid_request' } as const;
+          const combined = AbortSignal.any([signal, parent]);
+          const admission = await inspectHostAdmission(engine, directory.root, checked, combined);
+          if (admission.kind !== 'located') return { kind: 'admission', result: admission } as const;
+          const state = await readHostState(engine, admission.enrollment);
+          if (state.kind !== 'loaded') return { kind: 'unavailable' } as const;
+          const projected = foldSupervisor(state.state.records);
+          if (projected.kind !== 'valid') return { kind: 'unavailable' } as const;
+          return { kind: 'observation', result: await observeScratchResource(projected.state, config.docker, combined) } as const;
         })());
       },
       reconcileAdmission(operation: SupervisedOperation, signal: AbortSignal) {

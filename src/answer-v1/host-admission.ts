@@ -63,7 +63,9 @@ type AdmissionEngine = Readonly<{
   sessionStore: Pick<AnswerEngine['sessionStore'], 'load' | 'append'>;
 }>;
 
-async function contentMatches(engine: AdmissionEngine, reservation: AdmissionReservation): Promise<'valid' | 'invalid' | 'unavailable'> {
+type AdmissionContentReader = Pick<AdmissionEngine, 'crypto' | 'pinnedStore' | 'snapshotStore'>;
+
+async function contentMatches(engine: AdmissionContentReader, reservation: AdmissionReservation): Promise<'valid' | 'invalid' | 'unavailable'> {
   const workflowHash = asWorkflowHash(asSha256Digest(reservation.workflowHash));
   const snapshotRef = asSnapshotRef(asSha256Digest(reservation.plan.snapshotPins[0]!.snapshotRef));
   const [pinned, snapshot] = await Promise.all([
@@ -124,6 +126,36 @@ export async function recoverHostAdmission(
   if (retained.kind !== 'durable') return retained;
   const decoded = decodeAdmissionReservation(retained.bytes, expected);
   return decoded.kind === 'refused' ? decoded : reconcileHostAdmission(engine, decoded.reservation, signal);
+}
+
+export type InspectHostAdmissionResult = Exclude<HostAdmissionResult, { kind: 'admitted' }>
+  | Readonly<{ kind: 'missing' | 'not_initialized' }>
+  | Readonly<{ kind: 'located'; enrollment: HostEnrollment }>;
+
+/** Observation never invokes admission reconciliation: that path may append an
+ * uninitialized session. The restricted engine has no lock, append or owner capability. */
+export async function inspectHostAdmission(
+  engine: AdmissionContentReader & Readonly<{ sessionStore: Pick<AdmissionEngine['sessionStore'], 'load'> }>,
+  root: string, expected: Readonly<{ operationId: string; request: HostWorkRequest }>, signal: AbortSignal,
+): Promise<InspectHostAdmissionResult> {
+  try {
+  if (signal.aborted) return { kind: 'unconfirmed', reason: 'cancelled' } as const;
+  const retained = await readAdmissionFile(root, expected.operationId, signal);
+  if (retained.kind !== 'durable') return retained;
+  const decoded = decodeAdmissionReservation(retained.bytes, expected);
+  if (decoded.kind === 'refused') return decoded;
+  const { reservation } = decoded;
+  const content = await contentMatches(engine, reservation);
+  if (content === 'unavailable') return { kind: 'unconfirmed', reason: 'storage_unavailable' } as const;
+  if (content === 'invalid') return { kind: 'refused', reason: 'invalid_content' } as const;
+  const loaded = await engine.sessionStore.load(asSessionId(reservation.sessionId));
+  if (loaded.isErr()) return { kind: 'unconfirmed', reason: 'storage_unavailable' } as const;
+  if (signal.aborted) return { kind: 'unconfirmed', reason: 'cancelled' } as const;
+  if (!loaded.value.events.length && !loaded.value.manifest.length) return { kind: 'not_initialized' } as const;
+  if (!matchesAdmissionPrefix(reservation, loaded.value.events)) return { kind: 'refused', reason: 'journal_conflict' } as const;
+  const enrollment = { execution: reservation.sessionId as ExecutionRef, recovery: reservation.recovery as RecoveryRef } as HostEnrollment;
+  return { kind: 'located', enrollment } as const;
+  } catch { return { kind: 'unconfirmed', reason: 'storage_unavailable' }; }
 }
 
 async function reconcileHostAdmission(

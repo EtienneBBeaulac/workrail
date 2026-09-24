@@ -12,6 +12,7 @@ import { CommandSchema, ScratchPathSchema, decodeLinuxScratchProfile, type Scrat
 import { DockerCli } from './docker-cli.js';
 import { ScratchChannel } from './channel.js';
 import { supervisorSource, inspectionSource } from './supervisor-source.js';
+import { scratchContainerName } from './identity.js';
 
 const LABEL='workrail.linux-scratch';
 const Info=z.object({ID:z.string().min(1),OSType:z.literal('linux')});
@@ -71,7 +72,7 @@ export async function createLinuxScratchWorkspace(options:Readonly<{
   const unknown=()=>({kind:'unknown' as const,supervisor,cleanup:'unconfirmed' as const});
   // Name derives from the retained identity: lost create replies leave an inspectable orphan,
   // never permission to create a replacement. No subsequent name-based command grants execution.
-  const name='workrail-scratch-'+createHash('sha256').update(supervisor).digest('hex').slice(0,32);
+  const name=scratchContainerName(supervisor);
   const created=await docker.run(['create','--pull=never','--name',name,'--label',`${LABEL}=${supervisor}`,
     ...configuration],signal);
   if(created.kind!=='completed')return unknown();
