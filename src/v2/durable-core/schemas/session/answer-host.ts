@@ -1,11 +1,19 @@
 import { z } from 'zod';
 const id = z.string().min(1);
+/** Immutable admission input, retained with enrollment rather than mutable context. */
+export const AnswerHostRequestSchema = z.object({
+    workflowId: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+    goal: z.string(),
+    workspacePath: z.string().min(1),
+}).strict().readonly();
 const epoch = z.string().regex(/^[1-9][0-9]*$/);
 const raw = z.object({ providerResponseId: z.string().optional(), responseText: z.string(),
     calls: z.array(z.object({ id: z.string(), name: z.string(), argumentsJson: z.string() }).strict().readonly()).readonly() }).strict().readonly();
 /** Host lifecycle records live in the same atomic event stream as engine transitions. */
 export const AnswerHostRecordSchema = z.discriminatedUnion('kind', [
-    z.object({ kind: z.literal('enrolled'), mode: z.enum(['host_bound','unbound']), recovery: id, initialNode: id }).strict(),
+    z.object({ kind: z.literal('enrolled'), mode: z.enum(['host_bound','unbound']), recovery: id, initialNode: id,
+        // Absent only in older journals; never invent a request from current workflow files.
+        request: AnswerHostRequestSchema.optional() }).strict(),
     z.object({ kind: z.literal('owner_acquired'), epoch }).strict(),
     z.object({ kind: z.literal('owner_released'), epoch }).strict(),
     z.object({ kind: z.literal('delivered'), delivery: id, node: id, reply: id, epoch }).strict(),

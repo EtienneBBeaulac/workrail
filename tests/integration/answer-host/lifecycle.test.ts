@@ -227,3 +227,39 @@ it('discovery does not authorize takeover, including after the prior runtime clo
     await scheduler.close(signal());
   }
 }));
+
+it('retains the original request in the canonical enrollment across caller and workflow changes', () => fixture(async config => {
+  const created = await createAnswerHost(config, signal());
+  if (created.kind !== 'created') throw new Error(created.kind);
+  const request = { workflowId: 'lifecycle', goal: 'original goal', workspacePath: config.workflowStoragePath };
+  const original = { ...request };
+  const result = await created.scheduler.enroll(request, signal());
+  if (result.kind !== 'enrolled') throw new Error(result.kind);
+  const pointer = created.scheduler.hydrator.dehydrate(result.enrollment);
+  request.goal = 'later caller mutation';
+  await writeFile(join(config.workflowStoragePath, 'lifecycle.json'), 'not the enrolled workflow');
+  await created.scheduler.close(signal());
+  const replacement = await createAnswerHost(config, signal());
+  if (replacement.kind !== 'created') throw new Error(replacement.kind);
+  try {
+    const hydrated = await replacement.scheduler.hydrator.hydrate(pointer, signal());
+    if (hydrated.kind !== 'hydrated') throw new Error(hydrated.kind);
+    const { composeAnswerEngine } = await import('../../../src/answer-v1/engine-composition.js');
+    const { readHostState, workView } = await import('../../../src/answer-v1/host-state.js');
+    const engine = await composeAnswerEngine(config);
+    if (engine.kind !== 'ready') throw new Error(engine.kind);
+    const loaded = await readHostState(engine, hydrated.enrollment);
+    if (loaded.kind !== 'loaded') throw new Error(loaded.kind);
+    const record = loaded.state.records.find(r => r.kind === 'enrolled');
+    expect(record).toMatchObject({ request: original });
+    if (record?.kind !== 'enrolled') throw new Error('missing enrollment');
+    expect(Object.isFrozen(record.request)).toBe(true);
+    expect((await workView(engine, loaded.state)).kind).toBe('question');
+    expect(loaded.state.run.data.workflowId).toBe(original.workflowId);
+    const { AnswerHostRecordSchema } = await import('../../../src/v2/durable-core/schemas/session/answer-host.js');
+    if (record?.kind !== 'enrolled') throw new Error('missing enrollment');
+    const { request: ignored, ...legacy } = record;
+    expect(AnswerHostRecordSchema.parse(legacy)).not.toHaveProperty('request');
+    expect(AnswerHostRecordSchema.safeParse({ ...record, request: { ...original, owner: 'forged' } }).success).toBe(false);
+  } finally { await replacement.scheduler.close(signal()); }
+}));

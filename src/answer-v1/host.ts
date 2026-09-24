@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
 import { z } from 'zod';
+import { AnswerHostRequestSchema } from '../v2/durable-core/schemas/session/answer-host.js';
 import { errAsync } from 'neverthrow';
 import type { AnswerHostConfig, CreateAnswerHostResult, TrustedAnswerScheduler, RuntimeCapabilityDescriptor, RecoverHostSessionResult, BoundTurnRunner, TurnOutcome, ReleaseOwnershipResult } from './contracts/host-composition.js';
 import type { ClaimUnownedResult } from './contracts/automatic-recovery-contract.js';
@@ -18,7 +19,7 @@ import { createUserDirectorySource } from '../types/workflow-source.js';
 import { hasWorkflowDefinitionShape, isStandardStepDefinition } from '../types/workflow-definition.js';
 export const runtimeCapabilities: RuntimeCapabilityDescriptor = Object.freeze({ enrollmentFormatVersion: 1, journalFormatVersion: 1, supportedOutputs: Object.freeze(['notes' as const]) });
 const Pointer = z.object({ formatVersion: z.literal(1), executionId: z.string().regex(/^sess_[a-z0-9]+$/), recoveryLocator: z.string().min(1) }).strict();
-const Request = z.object({ workflowId: z.string().regex(/^[a-zA-Z0-9_-]+$/), goal: z.string(), workspacePath: z.string().refine(isAbsolute) }).strict();
+const Request = AnswerHostRequestSchema.refine(request => isAbsolute(request.workspacePath));
 export async function createAnswerRuntime(config: AnswerHostConfig, lifetime: AbortSignal, mode: 'host_bound' | 'unbound'): Promise<CreateAnswerHostResult> {
     if (lifetime.aborted)
         return { kind: 'refused', reason: 'storage_unavailable', detail: 'Host creation cancelled' };
@@ -242,7 +243,7 @@ export async function createAnswerRuntime(config: AnswerHostConfig, lifetime: Ab
                             return errAsync({ code: 'SESSION_STORE_IO_ERROR' as const, message: 'Enrollment cancelled or incomplete' });
                         enrollment = { execution: lock.sessionId as string as ExecutionRef, recovery } as HostEnrollment;
                         const state = { enrollment, run };
-                        return engine.sessionStore.append(lock, { ...plan, events: [...plan.events, hostEvent(engine, state, { kind: 'enrolled', mode, recovery, initialNode: node.scope.nodeId }, plan.events.length), hostEvent(engine, state, { kind: 'owner_acquired', epoch: '1' }, plan.events.length + 1)] });
+                        return engine.sessionStore.append(lock, { ...plan, events: [...plan.events, hostEvent(engine, state, { kind: 'enrolled', mode, recovery, initialNode: node.scope.nodeId, request: parsed.data }, plan.events.length), hostEvent(engine, state, { kind: 'owner_acquired', epoch: '1' }, plan.events.length + 1)] });
                     } } }, parsed.data, { triggerSource: 'daemon' });
             if (started.isErr() || !enrollment)
                 return enrollment ? { kind: 'unconfirmed', reason: 'commit_uncertain', pointer: hydrator.dehydrate(enrollment) } : { kind: 'refused', reason: started.isErr() && ['pinned_workflow_store_failed', 'snapshot_creation_failed', 'session_append_failed', 'keyring_load_failed'].includes(started.error.kind) ? 'storage_unavailable' : 'initialization_failed', detail: started.isErr() ? started.error.kind : 'Missing enrollment' };
