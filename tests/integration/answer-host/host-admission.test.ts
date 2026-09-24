@@ -847,3 +847,39 @@ it.skipIf(process.platform === 'win32').each(['success','duplicate','intent_ack'
       } finally {await host.scheduler.close(signal);}
     } finally {await rm(root,{recursive:true,force:true});}
   });
+
+it.skipIf(process.platform === 'win32')('validates supervisor records from canonical storage on cold read', async () => {
+  const { foldSupervisor } = await import('../../../src/answer-v1/supervisor-state.js');
+  const root = await mkdtemp(join(tmpdir(), 'supervisor-canonical-'));
+  const signal = new AbortController().signal;
+  try {
+    const { engine, prepared, expected, candidate, config } = await setup(root);
+    const admitted = await publishAndReconcileHostAdmission(engine,root,expected,candidate.bytes,signal);
+    if (admitted.kind !== 'admitted') throw new Error(admitted.kind);
+    const hostConfig = {...config,model:{async generate(){return {kind:'unavailable' as const,detail:'unused'};}}};
+    const host = await createAnswerHost(hostConfig,signal);
+    if(host.kind!=='created')throw new Error(host.kind);
+    try {
+      const hydrated = await host.scheduler.hydrator.hydrate(admitted.pointer,signal);
+      if(hydrated.kind!=='hydrated')throw new Error(hydrated.kind);
+      const journal = new SessionJournal(engine,hydrated.enrollment,hostConfig,s=>!s.aborted);
+      // Trusted fixture uses the actual canonical append path; no supervisor adapter is registered.
+      const append = (record: import('../../../src/v2/durable-core/schemas/session/answer-host.js').AnswerHostRecord) =>
+        journal.locked(signal,false,(state,lock)=>journal.append(state,lock,record,signal));
+      expect(await append({kind:'owner_acquired',epoch:'1'})).toBe(true);
+      const intent = {kind:'supervisor_create_intended' as const,supervisor:'s',epoch:'1',configurationDigest:'a'.repeat(64)};
+      expect(await append(intent)).toBe(true);
+      const reopened=await composeAnswerEngine(config);
+      if(reopened.kind!=='ready')throw new Error(reopened.kind);
+      const pending=await readHostState(reopened,hydrated.enrollment);
+      if(pending.kind!=='loaded')throw new Error(pending.kind);
+      expect(foldSupervisor(pending.state.records)).toEqual({kind:'valid',state:{kind:'create_pending',intent}});
+      const truth=await reopened.sessionStore.load(prepared.sessionId);
+      if(truth.isErr())throw new Error(truth.error.code);
+      expect(truth.value.events.filter(e=>e.kind==='answer_host_recorded'&&e.data.kind==='supervisor_create_intended')).toHaveLength(1);
+      // Simulate semantically corrupt but schema-valid historical data, not a public writer.
+      expect(await append({...intent,supervisor:'replacement'})).toBe(true);
+      expect(await readHostState(reopened,hydrated.enrollment)).toMatchObject({kind:'unavailable',reason:'corrupt',detail:expect.stringContaining('duplicate_intent')});
+    } finally {await host.scheduler.close(signal);}
+  } finally {await rm(root,{recursive:true,force:true});}
+});

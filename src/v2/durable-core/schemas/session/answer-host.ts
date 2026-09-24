@@ -1,3 +1,4 @@
+import { SupervisorCreateIntendedSchema, SupervisorCreatedSchema, SupervisorStartIntendedSchema, SupervisorStartedSchema, SupervisorStopIntendedSchema, SupervisorProcessStoppedSchema, SupervisorUnconfirmedSchema } from './supervisor.js';
 import { z } from 'zod';
 import { WorkspaceEffectIntentSchema, WorkspaceEffectCompletedSchema, WorkspaceEffectUnconfirmedSchema } from './workspace-effect.js';
 import { DaemonExecutionPolicySchema } from './daemon-policy.js';
@@ -14,6 +15,7 @@ const raw = z.object({ providerResponseId: z.string().optional(), responseText: 
     calls: z.array(z.object({ id: z.string(), name: z.string(), argumentsJson: z.string() }).strict().readonly()).readonly() }).strict().readonly();
 /** Host lifecycle records live in the same atomic event stream as engine transitions. */
 export const AnswerHostRecordSchema = z.discriminatedUnion('kind', [
+    SupervisorCreateIntendedSchema, SupervisorCreatedSchema, SupervisorStartIntendedSchema, SupervisorStartedSchema, SupervisorStopIntendedSchema, SupervisorProcessStoppedSchema, SupervisorUnconfirmedSchema,
     WorkspaceEffectIntentSchema, WorkspaceEffectCompletedSchema, WorkspaceEffectUnconfirmedSchema,
     z.object({ kind: z.literal('enrolled'), mode: z.enum(['host_bound','unbound']), recovery: id, initialNode: id,
         // Absent only in older journals; never invent a request from current workflow files.

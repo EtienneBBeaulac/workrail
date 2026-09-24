@@ -1,3 +1,4 @@
+import { foldSupervisor } from './supervisor-state.js';
 import type { AnswerEngine } from './engine-composition.js';
 import type { AnswerHostRecord } from '../v2/durable-core/schemas/session/answer-host.js';
 import type { DomainEventV1 } from '../v2/durable-core/schemas/session/index.js';
@@ -50,6 +51,9 @@ export async function readHostState(engine: AnswerEngine, enrollment: HostEnroll
     if (!run)
         return { kind: 'unavailable', reason: 'corrupt', detail: 'Missing engine run' };
     const records = events.filter(e => e.scope.runId === run.scope.runId).map(e => e.data);
+    const supervisor = foldSupervisor(records);
+    if (supervisor.kind === 'invalid')
+        return { kind: 'unavailable', reason: 'corrupt', detail: `Invalid supervisor history at record ${supervisor.recordIndex}: ${supervisor.reason}` };
     const owner = [...records].reverse().find(e => e.kind === 'owner_acquired' || e.kind === 'owner_released');
     const committed = [...records].reverse().find(e => e.kind === 'committed');
     return { kind: 'loaded', state: { truth: loaded.value, mode: entry.data.mode, enrollment, run, records,
