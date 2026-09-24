@@ -9,7 +9,14 @@ import { WorkspaceEffectIntentSchema } from '../../v2/durable-core/schemas/sessi
 import { JsonValueSchema } from '../../v2/durable-core/canonical/json-zod.js';
 import { toCanonicalBytes } from '../../v2/durable-core/canonical/jcs.js';
 
-import type { WorkspaceFailure } from '../../answer-v1/contracts/workspace-effect-contract.js';
+import type { WorkspaceFailure, WorkspaceRefusal } from '../../answer-v1/contracts/workspace-effect-contract.js';
+export type WorkspaceInvocationOutcome =
+  | Readonly<{kind:'completed';text:string;isError:boolean}>
+  | Readonly<{kind:'unknown'}>
+  | Readonly<{kind:'refused';reason:WorkspaceRefusal}>;
+export interface WorkspaceInvoker {
+  execute(name:string,input:unknown,signal:AbortSignal):Promise<WorkspaceInvocationOutcome>;
+}
 type PreparedCall = Readonly<{ id: string; name: string; digest: string; position: number }>;
 type State =
   | Readonly<{ kind: 'idle' }>
@@ -27,7 +34,7 @@ function digest(input: unknown): string | undefined {
 
 /** Tool accounting, not a supervisor or lease. Trusted composition must supply those
  * before public execution is enabled. Failure latches for this entire delivery. */
-export function createWorkspaceEffectController(journal: SessionJournal, delivery: DeliveryRef, owner: OwnerFence) {
+export function createWorkspaceEffectController(journal: SessionJournal, delivery: DeliveryRef, owner: OwnerFence, workspace?: WorkspaceInvoker) {
   let state: State = {kind:'idle'};
   const halt = (failure: WorkspaceFailure) => { state = {kind:'halted',failure}; return {kind:'halted'} as const; };
   const boundary: ControlledToolExecution = { async execute(call, invoke, signal) {
@@ -47,12 +54,15 @@ export function createWorkspaceEffectController(journal: SessionJournal, deliver
     if ((state as State).kind === 'halted') return {kind:'halted'};
     if (signal.aborted) return halt({reason:'execution_unknown',effect});
     try {
-      const result = await invoke();
+      const executed = workspace ? await workspace.execute(call.name,call.input,signal) : undefined;
+      if (executed?.kind === 'unknown') return halt({reason:'execution_unknown',effect});
+      if (executed?.kind === 'refused') return halt({reason:'backend_refused',refusal:executed.reason,effect});
+      const result = executed ? {content:[{type:'text' as const,text:executed.text}],details:null,isError:executed.isError} : await invoke();
       if (signal.aborted) return halt({reason:'execution_unknown',effect});
       const content = result.content.map(block=>block.text).join('\n');
       if (content.length > 65536) return halt({reason:'execution_unknown',effect});
       const retained = await retainWorkspaceEffect(journal,owner,{
-        kind:'workspace_effect_completed',effect,result:{content,isError:false},
+        kind:'workspace_effect_completed',effect,result:{content,isError:result.isError ?? false},
       },signal);
       if (retained.kind !== 'retained') return halt({reason:'outcome_unacknowledged',effect});
       // A concurrent misuse must not clear the failure latch after an awaited operation.

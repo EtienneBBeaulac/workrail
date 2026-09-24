@@ -782,7 +782,7 @@ it.skipIf(process.platform === 'win32').each(['normal', 'intent_ack', 'outcome_a
     } finally { await rm(root,{recursive:true,force:true}); }
   });
 
-it.skipIf(process.platform === 'win32').each(['success','duplicate','intent_ack','outcome_ack','throw','owner_change','cancel_after_effect','cancel_throw','cancel_after_reservation'] as const)(
+it.skipIf(process.platform === 'win32').each(['success','duplicate','intent_ack','outcome_ack','throw','owner_change','cancel_after_effect','cancel_throw','cancel_after_reservation','typed_unknown','typed_refused'] as const)(
   'controls actual model tool batches through canonical effects: %s', async mode => {
     const { createWorkspaceEffectController } = await import('../../../src/daemon/runner/workspace-effect-controller.js');
     const { createDaemonAnswerModel } = await import('../../../src/daemon/runner/answer-model.js');
@@ -813,7 +813,8 @@ it.skipIf(process.platform === 'win32').each(['success','duplicate','intent_ack'
         const delivery=await journal.appendDelivery(view.reply,owner,signal);
         if(delivery.kind!=='delivered')throw new Error(delivery.kind);
         await journal.locked(signal,false,(s,l)=>journal.append(s,l,{kind:'model_call_reserved',call:'m1',delivery:delivery.delivery,epoch:'1',ordinal:1},signal));
-        const effects=createWorkspaceEffectController(journal,delivery.delivery,owner);
+        const effects=createWorkspaceEffectController(journal,delivery.delivery,owner,
+          mode==='typed_unknown'||mode==='typed_refused'?{async execute(){return mode==='typed_unknown'?{kind:'unknown'}:{kind:'refused',reason:'closed'};}}:undefined);
         let requests=0,invocations=0;
         const created=createDaemonAnswerModel({effects,provider:{async invoke(){
           requests++;
@@ -849,7 +850,7 @@ it.skipIf(process.platform === 'win32').each(['success','duplicate','intent_ack'
           expect(retained.state.records.some(r=>r.kind==='workspace_effect_unconfirmed')).toBe(false);
         }
         expect(result.kind).toBe(mode==='success'?'completed':'workspace_failed');
-        expect([requests,invocations]).toEqual(mode==='success'?[2,2]:mode==='duplicate'||mode==='intent_ack'||mode==='cancel_after_reservation'?[1,0]:[1,1]);
+        expect([requests,invocations]).toEqual(mode==='success'?[2,2]:mode==='duplicate'||mode==='intent_ack'||mode==='cancel_after_reservation'||mode==='typed_unknown'||mode==='typed_refused'?[1,0]:[1,1]);
         expect(await journal.recover(hydrated.enrollment,owner,signal)).toMatchObject({kind:'refused',reason:mode==='owner_change'?'stale_owner':'reconciliation_required'});
         if(mode==='success') {
           // Simulate a preexisting newer delivery with a captured answer. Older unfinished work must still block.
@@ -865,7 +866,7 @@ it.skipIf(process.platform === 'win32').each(['success','duplicate','intent_ack'
           const again=await created.model.generate({instruction:'retry',issues:[],retainedSummaries:[]},signal);
           expect(again.kind).toBe('workspace_failed');
           expect(requests).toBe(1);
-          expect(invocations).toBe(mode==='duplicate'||mode==='intent_ack'||mode==='cancel_after_reservation'?0:1);
+          expect(invocations).toBe(mode==='duplicate'||mode==='intent_ack'||mode==='cancel_after_reservation'||mode==='typed_unknown'||mode==='typed_refused'?0:1);
         }
       } finally {await host.scheduler.close(signal);}
     } finally {await rm(root,{recursive:true,force:true});}
@@ -982,3 +983,137 @@ it.skipIf(process.platform === 'win32').each(['normal','intent_ack','transition_
       } finally {await host.scheduler.close(new AbortController().signal);}
     } finally {await rm(root,{recursive:true,force:true});}
   });
+
+// Explicit local backend proof. Ordinary CI exercises the deterministic controller/channel
+// suites without starting Docker or pulling an image. No provider credentials are involved.
+it.skipIf(process.env.WORKRAIL_TEST_LINUX_SCRATCH !== '1').each([
+  'success','cancel_after_effect','cancel_running','lost_reply','stale_owner','bootstrap_ack','create_reply_loss','deadline','symlink',
+] as const)('composes canonical effects with an isolated Linux scratch backend: %s', async mode=>{
+  const {DockerCli}=await import('../../../src/daemon/runner/linux-scratch/docker-cli.js');
+  const {createLinuxScratchWorkspace}=await import('../../../src/daemon/runner/linux-scratch/workspace.js');
+  const {createLinuxScratchAnswerModel}=await import('../../../src/daemon/runner/linux-scratch/answer-model.js');
+  const {startExecutionDeadline,createSystemDeadlineClock}=await import('../../../src/answer-v1/execution-deadline.js');
+  const root=await mkdtemp(join(tmpdir(),'linux-scratch-proof-'));
+  const signal=new AbortController().signal,parent=new AbortController(),call=new AbortController();
+  const docker=DockerCli.local(process.env.WORKRAIL_TEST_DOCKER_BINARY!,process.env.WORKRAIL_TEST_DOCKER_SOCKET!);
+  if(!docker)throw new Error('Explicit absolute Docker binary/socket required');
+  const createdIds:string[]=[];
+  const observed={stream:docker.stream.bind(docker),async run(...args:Parameters<typeof docker.run>){
+    const result=await docker.run(...args);
+    if(args[0][0]==='create'&&result.kind==='completed'){
+      createdIds.push(result.bytes.toString().trim());
+      if(mode==='create_reply_loss')return {kind:'unknown' as const};
+    }
+    return result;
+  }};
+  const started=startExecutionDeadline({kind:'new_execution',expiresAtMs:Date.now()+60000},createSystemDeadlineClock(),parent.signal);
+  if(started.kind!=='started')throw new Error(started.kind);
+  try {
+    const {engine,expected,candidate,config}=await setup(root);
+    const admitted=await publishAndReconcileHostAdmission(engine,root,expected,candidate.bytes,signal);
+    if(admitted.kind!=='admitted')throw new Error(admitted.kind);
+    const hostConfig:AnswerHostConfig={...config,model:{async generate(){return {kind:'unavailable',detail:'fake only'};}}};
+    const host=await createAnswerHost(hostConfig,signal);
+    if(host.kind!=='created')throw new Error(host.kind);
+    try {
+      const hydrated=await host.scheduler.hydrator.hydrate(admitted.pointer,signal);
+      if(hydrated.kind!=='hydrated')throw new Error(hydrated.kind);
+      const journal=new SessionJournal(engine,hydrated.enrollment,{...hostConfig,faultSeam:{async intercept(b){
+        return mode==='bootstrap_ack'&&b==='after_supervisor_intent_append'?{kind:'simulate_uncertain',message:'lost bootstrap ack'}:{kind:'proceed'};
+      }}},s=>!s.aborted);
+      const owner={execution:hydrated.enrollment.execution,epoch:1n} as OwnerFence;
+      await journal.locked(signal,false,(s,l)=>journal.append(s,l,{kind:'owner_acquired',epoch:'1'},signal));
+      const profile={kind:'linux_scratch',image:'python@sha256:eb5be8e5b4d0a159c237946bbdd06356dda5d19c30fc4f7843e8046d3a590333',platform:'linux/arm64',
+        snapshot:{kind:'explicit_files',description:'Only this fixture text; no checkout files',files:[{path:'input.txt',text:'original'}]}};
+      const created=await createLinuxScratchWorkspace({journal,owner,deadline:started.deadline,profile,docker:observed,artifactDirectory:join(root,'artifacts')});
+      if(mode==='bootstrap_ack'||mode==='create_reply_loss'){
+        expect(created).toMatchObject(mode==='bootstrap_ack'?{kind:'refused',reason:'intent_unacknowledged'}:{kind:'unknown',cleanup:'unconfirmed'});
+        expect(createdIds).toHaveLength(mode==='bootstrap_ack'?0:1);
+        const second=await createLinuxScratchWorkspace({journal,owner,deadline:started.deadline,profile,docker:observed,artifactDirectory:join(root,'artifacts')});
+        expect(second.kind).toBe('refused');expect(createdIds).toHaveLength(mode==='bootstrap_ack'?0:1);return;
+      }
+      expect(created.kind).toBe('ready');if(created.kind!=='ready')throw new Error(JSON.stringify(created));
+      const workspace=created.workspace;
+      const state=await readHostState(engine,hydrated.enrollment);if(state.kind!=='loaded')throw new Error(state.kind);
+      const view=await workView(engine,state.state);if(view.kind!=='question')throw new Error(view.kind);
+      const delivery=await journal.appendDelivery(view.reply,owner,signal);if(delivery.kind!=='delivered')throw new Error(delivery.kind);
+      let calls=0,toolCalls=0;
+      const commands=mode==='success'?[
+        {name:'Read',input:{path:'input.txt'}},{name:'Write',input:{path:'output.txt',content:'first'}},
+        {name:'Edit',input:{path:'output.txt',old_string:'first',new_string:'final'}},
+        {name:'Bash',input:{command:'test ! -w /proc/$PPID/fd/1 && id -u && cat output.txt'}},
+        {name:'Glob',input:{pattern:'*.txt'}},{name:'Grep',input:{pattern:'final'}},{name:'Bash',input:{command:'exit 7'}},
+      ]:mode==='symlink'?[{name:'Bash',input:{command:'mkdir links; ln -s /etc/passwd links/escape'}},{name:'Read',input:{path:'links/escape'}},{name:'Write',input:{path:'forbidden.txt',content:'must not happen'}}]:[mode==='cancel_running'?{name:'Bash',input:{command:'printf "effect happened" > marker.txt; sleep 30'}}:{name:'Write',input:{path:'marker.txt',content:'effect happened'}},{name:'Write',input:{path:'forbidden.txt',content:'must not happen'}}];
+      const wrapped={...workspace,async execute(...args:Parameters<typeof workspace.execute>){
+        toolCalls++;
+        if(mode==='stale_owner')await journal.locked(signal,false,(s,l)=>journal.append(s,l,{kind:'owner_released',epoch:'1'},signal));
+        if(mode==='deadline')started.deadline.close();
+        const pending=workspace.execute(...args);
+        if(mode==='cancel_running'){
+          const end=Date.now()+5000;let observed=false;
+          while(Date.now()<end){
+            const marker=await docker.run(['exec',createdIds[0]!,'cat','/workspace/marker.txt'],signal);
+            if(marker.kind==='completed'&&marker.bytes.toString()==='effect happened'){observed=true;break;}
+            await new Promise(resolve=>setTimeout(resolve,50));
+          }
+          call.abort();expect(observed).toBe(true);
+        }
+        const result=await pending;
+        if(mode==='cancel_after_effect')call.abort();
+        // A fault at the real backend reply boundary after the actual side effect.
+        return mode==='lost_reply'?{kind:'unknown' as const}:result;
+      }};
+      const model=createLinuxScratchAnswerModel(journal,delivery.delivery,owner,wrapped,{modelId:'fake',systemPrompt:'fixture',provider:{async invoke(params){
+        if(calls===1&&mode==='success'){
+          const last=params.messages.at(-1);
+          expect(Array.isArray(last?.content)&&last.content.some(b=>b.type==='tool_result'&&b.is_error===true)).toBe(true);
+        }
+        calls++;
+        await journal.locked(signal,false,(s,l)=>journal.append(s,l,{kind:'model_call_reserved',call:`model-${calls}`,delivery:delivery.delivery,epoch:'1',ordinal:calls},signal));
+        return {kind:'completed',reservation:{call:`model-${calls}`,ordinal:calls},value:{id:`response-${calls}`,type:'message',role:'assistant',model:'fake',stop_reason:'tool_use',stop_sequence:null,usage:{input_tokens:1,output_tokens:1},
+          content:calls===1?commands.map((c,i)=>({type:'tool_use' as const,id:`tool-${i}`,name:c.name,input:c.input})):[{type:'tool_use' as const,id:'answer',name:'answer_work',input:{answer:{notes:'scratch work done'}}}]}};
+      }}});
+      if(model.kind!=='created')throw new Error(model.kind);
+      const result=await model.model.generate({instruction:'Exercise tools',issues:[],retainedSummaries:[]},call.signal);
+      expect(result.kind).toBe(mode==='success'?'completed':'workspace_failed');
+      expect(calls).toBe(mode==='success'?2:1);expect(toolCalls).toBe(mode==='success'?7:mode==='symlink'?2:1);
+      if(mode!=='success'){
+        expect((await model.model.generate({instruction:'retry',issues:[],retainedSummaries:[]},signal)).kind).toBe('workspace_failed');
+        expect(calls).toBe(1);expect(toolCalls).toBe(mode==='symlink'?2:1);
+      }
+      const retained=await readHostState(engine,hydrated.enrollment);if(retained.kind!=='loaded')throw new Error(retained.kind);
+      const effects=retained.state.records.filter(r=>r.kind==='workspace_effect_completed');
+      expect(effects).toHaveLength(mode==='success'?7:mode==='symlink'?1:0);
+      if(mode==='success')expect(effects.map(r=>r.result.content).join('\n')).toContain('65534\nfinal');
+      if(mode==='cancel_after_effect'||mode==='cancel_running'||mode==='lost_reply'){
+        const marker=await docker.run(['exec',createdIds[0]!,'cat','/workspace/marker.txt'],signal);
+        expect(marker.kind==='completed'&&marker.bytes.toString()).toBe('effect happened');
+      }
+      const final=await workspace.finish(signal);
+      expect(final.cleanup).toBe(mode==='stale_owner'?'unconfirmed':'removed');
+      if(mode==='success'){
+        expect(final.inspection.kind).toBe('retained');
+        if(final.inspection.kind==='retained'){
+          const artifact=JSON.parse(await readFile(final.inspection.path,'utf8'));
+          expect(artifact.format).toBe('workrail-scratch-observation-v1');
+          expect(Buffer.from(artifact.files.find((f:{path:string})=>f.path==='output.txt').base64,'base64').toString()).toBe('final');
+        }
+      }
+      expect(await workspace.execute('Read',{path:'input.txt'},signal)).toMatchObject({kind:'refused'});
+    }finally{await host.scheduler.close(signal);}
+  }finally{
+    started.deadline.close();parent.abort();
+    // Test operator cleanup is separate from runtime authority and only touches exact IDs
+    // returned by this test's create calls. Never prune shared resources or use rm --force.
+    for(const cid of createdIds){
+      const present=await docker.run(['inspect',cid],signal);
+      if(present.kind==='completed'){
+        const metadata=JSON.parse(present.bytes.toString())[0];
+        expect(metadata.Config.Labels['workrail.linux-scratch']).toBeTruthy();
+        if(metadata.State.Running)expect((await docker.run(['stop','--time','1',cid],signal)).kind).toBe('completed');
+        expect((await docker.run(['rm',cid],signal)).kind).toBe('completed');
+      }
+    }
+    await rm(root,{recursive:true,force:true});
+  }
+},90000);

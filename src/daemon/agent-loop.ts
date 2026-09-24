@@ -65,6 +65,8 @@ export type ControlledAgentLoopOptions = Omit<AgentLoopOptions, 'client' | 'infe
  * for tool_result blocks, which accept an array of content blocks.
  */
 export interface AgentToolResult<T> {
+  /** An observed command error is distinct from transport uncertainty. */
+  readonly isError?: boolean;
   readonly content: ReadonlyArray<{ readonly type: 'text'; readonly text: string }>;
   readonly details: T;
 }
@@ -804,7 +806,7 @@ export class AgentLoop {
         toolCallId: block.id,
         toolName: block.name,
         result,
-        isError: false,
+        isError: result.isError ?? false,
       });
     }
 
