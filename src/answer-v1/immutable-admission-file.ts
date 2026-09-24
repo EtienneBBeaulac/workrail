@@ -1,3 +1,4 @@
+import type { ExecutionDeadline } from './execution-deadline.js';
 import { open, link, unlink, type FileHandle } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -38,6 +39,7 @@ export function admissionFileName(operationId: string): string | undefined {
  */
 export async function publishAdmissionFile(
   root: string, operationId: string, candidate: Uint8Array, signal: AbortSignal,
+  deadline?: Pick<ExecutionDeadline, 'check'>,
 ): Promise<AdmissionPublicationResult> {
   const name = admissionFileName(operationId);
   if (!isAbsolute(root) || !name || candidate.length === 0 || candidate.length > MAX_ADMISSION_BYTES)
@@ -45,7 +47,7 @@ export async function publishAdmissionFile(
   // The existing filesystem adapter silently skips directory sync on Windows.
   // Do not claim this stronger primitive's contract there without a real barrier.
   if (process.platform === 'win32') return { kind: 'refused', reason: 'unsupported_platform' };
-  if (signal.aborted) return { kind: 'unconfirmed', reason: 'cancelled' };
+  if (signal.aborted || deadline?.check().kind === 'stopped') return { kind: 'unconfirmed', reason: 'cancelled' };
   const bytes = Buffer.from(candidate);
   const target = join(root, name);
   const temporary = join(root, `.${name}.${randomUUID()}.tmp`);
@@ -57,7 +59,7 @@ export async function publishAdmissionFile(
       await writer.writeFile(bytes);
       await writer.sync();
     } finally { await writer.close(); }
-    if (signal.aborted) return { kind: 'unconfirmed', reason: 'cancelled' };
+    if (signal.aborted || deadline?.check().kind === 'stopped') return { kind: 'unconfirmed', reason: 'cancelled' };
     const publication = await (async (): Promise<'published_by_this_call' | 'existing_winner'> => {
       try { await link(temporary, target); return 'published_by_this_call'; }
       catch (error) { if (hasCode(error, 'EEXIST')) return 'existing_winner'; throw error; }

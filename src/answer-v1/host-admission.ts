@@ -1,3 +1,4 @@
+import { startExecutionDeadline, type DeadlineClock, type ExecutionDeadline, type DeadlineStopReason, type StartDeadlineResult } from './execution-deadline.js';
 import { z } from 'zod';
 import type { JsonValue } from '../v2/durable-core/canonical/json-types.js';
 import { ResultAsync } from 'neverthrow';
@@ -119,22 +120,26 @@ export async function recoverHostAdmission(
 
 async function reconcileHostAdmission(
   engine: AdmissionEngine, reservation: AdmissionReservation, signal: AbortSignal,
+  mode: Readonly<{ kind: 'reconcile' }> | Readonly<{ kind: 'fresh'; deadline: ExecutionDeadline }> = { kind: 'reconcile' },
 ): Promise<HostAdmissionResult> {
-  if (signal.aborted) return { kind: 'unconfirmed', reason: 'cancelled' };
+  const deadline = mode.kind === 'fresh' ? mode.deadline : undefined;
+  const available = () => !signal.aborted && deadline?.check().kind !== 'stopped';
+  if (!available()) return { kind: 'unconfirmed', reason: 'cancelled' };
   const pointer: PersistedHostPointer = { formatVersion: 1, executionId: reservation.sessionId, recoveryLocator: reservation.recovery };
   const result = await engine.gate.withHealthySessionLock(asSessionId(reservation.sessionId), lock =>
     ResultAsync.fromPromise((async (): Promise<HostAdmissionResult> => {
-      if (signal.aborted) return { kind: 'unconfirmed', reason: 'cancelled' };
+      if (!available()) return { kind: 'unconfirmed', reason: 'cancelled' };
       const content = await contentMatches(engine, reservation);
       if (content === 'unavailable') return { kind: 'unconfirmed', reason: 'storage_unavailable' };
       if (content === 'invalid') return { kind: 'refused', reason: 'invalid_content' };
       const loaded = await engine.sessionStore.load(asSessionId(reservation.sessionId));
       if (loaded.isErr()) return { kind: 'unconfirmed', reason: 'storage_unavailable' };
       if (loaded.value.events.length || loaded.value.manifest.length) {
+        if (mode.kind === 'fresh') return { kind: 'refused', reason: 'journal_conflict' };
         return matchesAdmissionPrefix(reservation, loaded.value.events)
           ? { kind: 'admitted', pointer } : { kind: 'refused', reason: 'journal_conflict' };
       }
-      if (signal.aborted) return { kind: 'unconfirmed', reason: 'cancelled' };
+      if (!available()) return { kind: 'unconfirmed', reason: 'cancelled' };
       // Parse into the journal port's event type; never cast deeply readonly data to
       // writable event payloads or expose the validated reservation to the store.
       const events = DomainEventV1Schema.array().safeParse(reservation.plan.events);
@@ -146,6 +151,85 @@ async function reconcileHostAdmission(
         : { kind: 'unconfirmed', reason: 'storage_unavailable' };
     })(), () => ({ code: 'ADMISSION_IO_ERROR' as const })),
   );
-  return signal.aborted ? { kind: 'unconfirmed', reason: 'cancelled' }
+  return !available() ? { kind: 'unconfirmed', reason: 'cancelled' }
     : result.isOk() ? result.value : { kind: 'unconfirmed', reason: 'storage_unavailable' };
+}
+
+
+const freshAdmissionBrand = Symbol('fresh-admission');
+/** Opaque process-local handoff. The private registry, not this brand, is authority. */
+export type FreshAdmission = Readonly<{ [freshAdmissionBrand]: true }>;
+type FreshAdmissionFailure = Exclude<HostAdmissionResult, { kind: 'admitted' }>
+  | Readonly<{ kind: 'refused'; reason: 'missing_policy' | 'clock_continuity_unavailable' | 'expired' | 'invalid_expiration' | 'cancelled' }>;
+export type FreshAdmissionResult = FreshAdmissionFailure
+  | Readonly<{ kind: 'fresh'; handoff: FreshAdmission }>
+  | Readonly<{ kind: 'existing'; pointer: PersistedHostPointer }>
+  | Readonly<{ kind: 'unconfirmed'; reason: 'deadline_stopped'; deadlineReason: DeadlineStopReason }>;
+export type ConsumeFreshAdmissionResult =
+  | Readonly<{ kind: 'consumed'; reservation: AdmissionReservation; deadline: ExecutionDeadline }>
+  | Readonly<{ kind: 'refused'; reason: 'invalid_handoff' }>;
+
+/** Trusted admission composition only. Consuming transfers deadline cleanup to the host;
+ * it does not acquire ownership or permit tools. The host must still validate the exact
+ * canonical prefix under its owner lock and enforce workspace capabilities. */
+export function createFreshAdmissionAuthority(engine: AdmissionEngine, clock: DeadlineClock, lifetime: AbortSignal) {
+  const shutdown = new AbortController();
+  const parent = AbortSignal.any([lifetime, shutdown.signal]);
+  const pending = new Map<FreshAdmission, Readonly<{ reservation: AdmissionReservation; deadline: ExecutionDeadline; detach(): void }>>();
+  const discard = () => { for (const entry of pending.values()) entry.deadline.close(); pending.clear(); };
+  parent.addEventListener('abort', discard, { once: true });
+  return {
+    async admit(root: string, expected: Readonly<{ operationId: string; request: HostWorkRequest }>, candidate: Uint8Array,
+      requestSignal: AbortSignal): Promise<FreshAdmissionResult> {
+      const bytes = Uint8Array.from(candidate);
+      const decoded = decodeAdmissionReservation(bytes, expected);
+      if (decoded.kind !== 'validated') return decoded;
+      const reservation = decoded.reservation;
+      const policy = reservation.request.daemonPolicy;
+      if (!policy) return { kind: 'refused', reason: 'missing_policy' };
+      if (requestSignal.aborted) return { kind: 'refused', reason: 'cancelled' };
+      const started: StartDeadlineResult = startExecutionDeadline({ kind: 'new_execution', expiresAtMs: policy.limits.expiresAtMs }, clock, parent);
+      if (started.kind !== 'started') return started;
+      const deadline = started.deadline;
+      const signal = AbortSignal.any([requestSignal, deadline.signal]);
+      const diagnose = (result: FreshAdmissionResult): FreshAdmissionResult => {
+        const status = deadline.check();
+        return status.kind === 'stopped'
+          ? { kind: 'unconfirmed', reason: 'deadline_stopped', deadlineReason: status.reason } : result;
+      };
+      let transferred = false;
+      try {
+        const publication = await publishAdmissionFile(root, reservation.operationId, bytes, signal, deadline);
+        if (publication.kind !== 'durable') return diagnose(publication);
+        const winner = decodeAdmissionReservation(publication.bytes, { operationId: reservation.operationId, request: reservation.request });
+        if (winner.kind !== 'validated') return winner;
+        // Existing reservations may be inspected, but this new timer cannot attest their lifetime.
+        if (publication.publication === 'existing_winner') return { kind: 'existing', pointer: {
+          formatVersion: 1, executionId: winner.reservation.sessionId, recoveryLocator: winner.reservation.recovery,
+        } };
+        if (!Buffer.from(publication.bytes).equals(Buffer.from(bytes))) return { kind: 'refused', reason: 'journal_conflict' };
+        const admitted = await reconcileHostAdmission(engine, winner.reservation, signal, { kind: 'fresh', deadline });
+        if (admitted.kind !== 'admitted') return diagnose(admitted);
+        if (signal.aborted || deadline.check().kind === 'stopped') return diagnose({ kind: 'unconfirmed', reason: 'cancelled' });
+        const handoff: FreshAdmission = Object.freeze({ [freshAdmissionBrand]: true });
+        const expired = () => { pending.delete(handoff); };
+        deadline.signal.addEventListener('abort', expired, { once: true });
+        pending.set(handoff, { reservation: winner.reservation, deadline,
+          detach() { deadline.signal.removeEventListener('abort', expired); } });
+        transferred = true;
+        return { kind: 'fresh', handoff };
+      } catch { return diagnose({ kind: 'unconfirmed', reason: 'storage_unavailable' }); }
+      finally { if (!transferred) deadline.close(); }
+    },
+    /** Consumed, expired, closed and foreign handles are all invalid for transfer. */
+    consume(handoff: FreshAdmission): ConsumeFreshAdmissionResult {
+      const entry = pending.get(handoff);
+      if (!entry) return { kind: 'refused', reason: 'invalid_handoff' };
+      pending.delete(handoff);
+      entry.detach();
+      if (entry.deadline.check().kind === 'stopped') { entry.deadline.close(); return { kind: 'refused', reason: 'invalid_handoff' }; }
+      return { kind: 'consumed', reservation: entry.reservation, deadline: entry.deadline };
+    },
+    close() { shutdown.abort(); discard(); },
+  };
 }

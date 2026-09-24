@@ -137,3 +137,18 @@ it.skipIf(process.platform === 'win32')('identical bytes and cold reads cannot c
     expect(read).not.toHaveProperty('publication');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+
+it.skipIf(process.platform === 'win32')('rechecks admission deadline after temporary-file I/O before publication', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'admission-deadline-'));
+  try {
+    let checks = 0;
+    const deadline = { check: () => ++checks === 1
+      ? { kind: 'active' as const, remainingMs: 10 }
+      : { kind: 'stopped' as const, reason: 'expired' as const } };
+    expect(await publishAdmissionFile(root, randomUUID(), bytes('candidate'), signal(), deadline))
+      .toEqual({ kind: 'unconfirmed', reason: 'cancelled' });
+    expect(checks).toBe(2);
+    expect(await readdir(root)).toEqual([]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

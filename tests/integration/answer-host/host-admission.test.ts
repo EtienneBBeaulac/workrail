@@ -1,10 +1,12 @@
+import { createFreshAdmissionAuthority } from '../../../src/answer-v1/host-admission.js';
+import type { DeadlineClock } from '../../../src/answer-v1/execution-deadline.js';
 import { createDeliveryAnswerModel } from '../../../src/daemon/runner/delivery-answer-model.js';
 import { SessionJournal } from '../../../src/answer-v1/journal.js';
 import { readHostState, workView } from '../../../src/answer-v1/host-state.js';
 import { bindBudgetedProvider, reserveModelCall } from '../../../src/answer-v1/model-call-budget.js';
 import type { OwnerFence } from '../../../src/answer-v1/contracts/invocation-contract.js';
 import { decodeDaemonExecutionPolicy } from '../../../src/answer-v1/daemon-policy.js';
-import { errAsync } from 'neverthrow';
+import { errAsync, okAsync } from 'neverthrow';
 import { it, expect } from 'vitest';
 import { mkdtemp, rm, readFile, writeFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -420,4 +422,149 @@ it.skipIf(process.platform === 'win32').each(['answer', 'budget', 'unknown', 'st
       expect(toolRuns).toBe(scenario === 'budget' ? 1 : 0);
     } finally { await host.scheduler.close(new AbortController().signal); }
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+class AdmissionClock implements DeadlineClock {
+  wall = 1000; mono = 0;
+  timers = new Set<() => void>();
+  read(): ReturnType<DeadlineClock['read']> { return { kind: 'reading', wallMs: this.wall, monotonicMs: this.mono }; }
+  schedule(_delay: number, wake: () => void): ReturnType<DeadlineClock['schedule']> {
+    this.timers.add(wake); return { kind: 'scheduled', cancel: () => { this.timers.delete(wake); } };
+  }
+}
+async function freshFixture(root: string) {
+  const fixture = await setup(root);
+  const parsed = decodeDaemonExecutionPolicy({ formatVersion: 1, profile: 'daemon_answers_v1',
+    model: { provider: 'anthropic', modelId: 'original-model' }, systemPrompt: 'original prompt',
+    limits: { expiresAtMs: 1100, maxModelCalls: 5, maxOutputTokens: 100, stallTimeoutMs: 100, callTimeoutMs: 50 },
+    workspace: { kind: 'existing', workspacePath: root }, delivery: { kind: 'none' },
+    restart: { kind: 'requires_explicit_reconciliation' } });
+  if (parsed.kind !== 'validated') throw new Error('policy fixture');
+  const expected = { ...fixture.expected, request: { ...fixture.expected.request, daemonPolicy: parsed.policy } };
+  const candidate = buildHostAdmissionCandidate(fixture.prepared, expected.request, expected.operationId, fixture.engine, () => 1);
+  if (candidate.kind !== 'candidate') throw new Error('candidate fixture');
+  return { ...fixture, expected, candidate };
+}
+
+it.skipIf(process.platform === 'win32')('fresh handoff belongs to one authority, consumes once and retains elapsed time before consumption', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fresh-handoff-'));
+  const parent = new AbortController(), request = new AbortController();
+  try {
+    const { engine, expected, candidate } = await freshFixture(root), clock = new AdmissionClock();
+    const authority = createFreshAdmissionAuthority(engine, clock, parent.signal);
+    const foreign = createFreshAdmissionAuthority(engine, clock, parent.signal);
+    const results = await Promise.all([1, 2].map(() => authority.admit(root, expected, candidate.bytes, request.signal)));
+    expect(results.map(r => r.kind).sort()).toEqual(['existing', 'fresh']);
+    const fresh = results.find(r => r.kind === 'fresh');
+    if (!fresh || fresh.kind !== 'fresh') throw new Error('no handoff');
+    expect(foreign.consume(fresh.handoff)).toEqual({ kind: 'refused', reason: 'invalid_handoff' });
+    expect(authority.consume({ ...fresh.handoff })).toEqual({ kind: 'refused', reason: 'invalid_handoff' });
+    clock.mono = 40; clock.wall = 500;
+    request.abort(); // A completed admission request does not own execution lifetime.
+    const consumed = authority.consume(fresh.handoff);
+    expect(consumed.kind).toBe('consumed');
+    if (consumed.kind !== 'consumed') throw new Error('not consumed');
+    expect(consumed.deadline.check()).toEqual({ kind: 'active', remainingMs: 60 });
+    expect(authority.consume(fresh.handoff)).toEqual({ kind: 'refused', reason: 'invalid_handoff' });
+    expect((await authority.admit(root, expected, candidate.bytes, new AbortController().signal)).kind).toBe('existing');
+    expect(clock.timers.size).toBe(1);
+    authority.close(); foreign.close();
+    expect(consumed.deadline.signal.aborted).toBe(true);
+    expect(clock.timers.size).toBe(0);
+  } finally { parent.abort(); await rm(root, { recursive: true, force: true }); }
+});
+
+it.skipIf(process.platform === 'win32').each(['expiry', 'lost_ack', 'invalid_content'])('fresh admission closes its deadline on %s without granting a handoff', async scenario => {
+  const root = await mkdtemp(join(tmpdir(), 'fresh-refusal-')), parent = new AbortController();
+  try {
+    const { engine, expected, candidate, prepared } = await freshFixture(root), clock = new AdmissionClock();
+    let appends = 0;
+    const controlled = { ...engine, sessionStore: {
+      load: async (...args: Parameters<typeof engine.sessionStore.load>) => {
+        const loaded = await engine.sessionStore.load(...args);
+        if (scenario === 'expiry') clock.mono = 101;
+        return loaded;
+      },
+      append: (...args: Parameters<typeof engine.sessionStore.append>) => {
+        appends++;
+        return engine.sessionStore.append(...args).andThen(value => scenario === 'lost_ack'
+          ? errAsync({ code: 'SESSION_STORE_IO_ERROR' as const, message: 'lost acknowledgement' })
+          : okAsync(value));
+      },
+    } };
+    if (scenario === 'invalid_content') {
+      const path = engine.dataDir.pinnedWorkflowPath(prepared.workflowHash);
+      const raw = JSON.parse(await readFile(path, 'utf8')); raw.description = 'changed'; await writeFile(path, JSON.stringify(raw));
+    }
+    const authority = createFreshAdmissionAuthority(controlled, clock, parent.signal);
+    const result = await authority.admit(root, expected, candidate.bytes, new AbortController().signal);
+    expect(result).toEqual(scenario === 'invalid_content' ? { kind: 'refused', reason: 'invalid_content' }
+      : scenario === 'expiry' ? { kind: 'unconfirmed', reason: 'deadline_stopped', deadlineReason: 'expired' }
+      : { kind: 'unconfirmed', reason: 'storage_unavailable' });
+    expect(appends).toBe(scenario === 'lost_ack' ? 1 : 0);
+    expect(clock.timers.size).toBe(0);
+    expect((await authority.admit(root, expected, candidate.bytes, new AbortController().signal)).kind).toBe('existing');
+    expect(clock.timers.size).toBe(0);
+    authority.close();
+  } finally { parent.abort(); await rm(root, { recursive: true, force: true }); }
+});
+
+
+it.skipIf(process.platform === 'win32')('closing an authority invalidates pending handoffs and refuses new admission without timers', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fresh-close-')), parent = new AbortController();
+  try {
+    const { engine, expected, candidate } = await freshFixture(root), clock = new AdmissionClock();
+    const authority = createFreshAdmissionAuthority(engine, clock, parent.signal);
+    const result = await authority.admit(root, expected, candidate.bytes, new AbortController().signal);
+    if (result.kind !== 'fresh') throw new Error('missing fresh handoff');
+    authority.close();
+    expect(authority.consume(result.handoff)).toEqual({ kind: 'refused', reason: 'invalid_handoff' });
+    expect(await authority.admit(root, expected, candidate.bytes, new AbortController().signal))
+      .toEqual({ kind: 'refused', reason: 'cancelled' });
+    expect(clock.timers.size).toBe(0);
+  } finally { parent.abort(); await rm(root, { recursive: true, force: true }); }
+});
+
+
+it.skipIf(process.platform === 'win32')('time consumed inside canonical admission is not restored at handoff', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fresh-admission-time-')), parent = new AbortController();
+  try {
+    const { engine, expected, candidate, prepared } = await freshFixture(root), clock = new AdmissionClock();
+    const delayed = { ...engine, sessionStore: { ...engine.sessionStore,
+      load: async (...args: Parameters<typeof engine.sessionStore.load>) => {
+        const result = await engine.sessionStore.load(...args); clock.mono = 40; return result;
+      },
+      append: engine.sessionStore.append.bind(engine.sessionStore),
+    } };
+    const authority = createFreshAdmissionAuthority(delayed, clock, parent.signal);
+    const result = await authority.admit(root, expected, candidate.bytes, new AbortController().signal);
+    if (result.kind !== 'fresh') throw new Error('missing handoff');
+    const consumed = authority.consume(result.handoff);
+    if (consumed.kind !== 'consumed') throw new Error('not consumed');
+    expect(consumed.deadline.check()).toEqual({ kind: 'active', remainingMs: 60 });
+    const loaded = await engine.sessionStore.load(prepared.sessionId);
+    if (loaded.isErr()) throw new Error('load failed');
+    expect(loaded.value.events.filter(e => e.kind === 'answer_host_recorded').map(e => e.data.kind)).toEqual(['enrolled']);
+    consumed.deadline.close(); authority.close();
+    expect(clock.timers.size).toBe(0);
+  } finally { parent.abort(); await rm(root, { recursive: true, force: true }); }
+});
+
+
+it.skipIf(process.platform === 'win32')('new publication cannot grant fresh handoff for an already populated canonical journal', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fresh-existing-journal-')), parent = new AbortController();
+  try {
+    const { engine, expected, candidate, prepared } = await freshFixture(root), clock = new AdmissionClock();
+    const signal = new AbortController().signal;
+    expect((await publishAndReconcileHostAdmission(engine, root, expected, candidate.bytes, signal)).kind).toBe('admitted');
+    const before = await engine.sessionStore.load(prepared.sessionId);
+    const newExpected = { ...expected, operationId: randomUUID() };
+    const raw = JSON.parse(Buffer.from(candidate.bytes).toString()); raw.operationId = newExpected.operationId;
+    const authority = createFreshAdmissionAuthority(engine, clock, parent.signal);
+    expect(await authority.admit(root, newExpected, Buffer.from(JSON.stringify(raw)), signal))
+      .toEqual({ kind: 'refused', reason: 'journal_conflict' });
+    expect(await engine.sessionStore.load(prepared.sessionId)).toEqual(before);
+    expect(clock.timers.size).toBe(0); authority.close();
+  } finally { parent.abort(); await rm(root, { recursive: true, force: true }); }
 });
