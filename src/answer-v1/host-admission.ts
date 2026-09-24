@@ -208,7 +208,7 @@ export type FreshAdmissionResult = FreshAdmissionFailure
 export type ClaimFreshAdmissionResult =
   | Readonly<{ kind: 'owned'; reservation: AdmissionReservation; deadline: ExecutionDeadline; enrollment: HostEnrollment; owner: OwnerFence }>
   | Readonly<{ kind: 'refused'; reason: 'invalid_handoff' | 'journal_changed' | 'cancelled' }>
-  | Readonly<{ kind: 'unconfirmed'; reason: 'storage_unavailable' }>
+  | Readonly<{ kind: 'unconfirmed'; reason: 'storage_unavailable' | 'cancelled' }>
   | Readonly<{ kind: 'unconfirmed'; reason: 'deadline_stopped'; deadlineReason: DeadlineStopReason }>;
 
 
@@ -298,12 +298,14 @@ export function createFreshAdmissionAuthority(engine: AdmissionEngine & Pick<Ans
             if (!event.success) return { kind: 'unconfirmed', reason: 'storage_unavailable' };
             if (!available()) return { kind: 'refused', reason: 'cancelled' };
             const appended = await engine.sessionStore.append(lock, { events: [event.data], snapshotPins: [] }, loaded.value);
-            if (appended.isErr() || !available()) return { kind: 'unconfirmed', reason: 'storage_unavailable' };
+            if (appended.isErr()) return { kind: 'unconfirmed', reason: 'storage_unavailable' };
+            if (requestSignal.aborted) return { kind: 'unconfirmed', reason: 'cancelled' };
+            if (!available()) return { kind: 'unconfirmed', reason: 'storage_unavailable' };
             return { kind: 'owned', enrollment, owner, reservation, deadline: entry.deadline };
           })(), () => ({ code: 'FRESH_OWNER_IO_ERROR' as const })));
         const status = entry.deadline.check();
         if (status.kind === 'stopped') return { kind: 'unconfirmed', reason: 'deadline_stopped', deadlineReason: status.reason };
-        if (requestSignal.aborted) return { kind: 'unconfirmed', reason: 'storage_unavailable' };
+        if (requestSignal.aborted) return { kind: 'unconfirmed', reason: 'cancelled' };
         if (result.isErr()) return { kind: 'unconfirmed', reason: 'storage_unavailable' };
         transferred = result.value.kind === 'owned';
         return result.value;

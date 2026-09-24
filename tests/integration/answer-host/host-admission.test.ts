@@ -572,7 +572,7 @@ it.skipIf(process.platform === 'win32')('new publication cannot grant fresh hand
 });
 
 
-it.skipIf(process.platform === 'win32').each(['intervening_owner', 'lost_ack', 'expiry', 'request_cancel'])('fresh owner acquisition fails closed after %s and cannot reuse its handoff', async scenario => {
+it.skipIf(process.platform === 'win32').each(['intervening_owner', 'lost_ack', 'expiry', 'request_cancel', 'cancel_after_append'])('fresh owner acquisition fails closed after %s and cannot reuse its handoff', async scenario => {
   const root = await mkdtemp(join(tmpdir(), 'fresh-owner-')), parent = new AbortController(), request = new AbortController();
   try {
     const { engine, expected, candidate, prepared } = await freshFixture(root), clock = new AdmissionClock();
@@ -584,8 +584,10 @@ it.skipIf(process.platform === 'win32').each(['intervening_owner', 'lost_ack', '
         if (claiming && scenario === 'request_cancel') request.abort();
         return loaded;
       },
-      append: (...args: Parameters<typeof engine.sessionStore.append>) => engine.sessionStore.append(...args).andThen(value =>
-        claiming && scenario === 'lost_ack' ? errAsync({ code: 'SESSION_STORE_IO_ERROR' as const, message: 'owner acknowledgement lost' }) : okAsync(value)),
+      append: (...args: Parameters<typeof engine.sessionStore.append>) => engine.sessionStore.append(...args).andThen(value => {
+        if (claiming && scenario === 'cancel_after_append') request.abort();
+        return claiming && scenario === 'lost_ack' ? errAsync({ code: 'SESSION_STORE_IO_ERROR' as const, message: 'owner acknowledgement lost' }) : okAsync(value);
+      }),
     } };
     const authority = createFreshAdmissionAuthority(controlled, clock, parent.signal);
     const admitted = await authority.admit(root, expected, candidate.bytes, request.signal);
@@ -605,13 +607,14 @@ it.skipIf(process.platform === 'win32').each(['intervening_owner', 'lost_ack', '
     const result = await authority.claim(admitted.handoff, request.signal);
     expect(result).toEqual(scenario === 'intervening_owner' ? { kind: 'refused', reason: 'journal_changed' }
       : scenario === 'expiry' ? { kind: 'unconfirmed', reason: 'deadline_stopped', deadlineReason: 'expired' }
+      : scenario === 'request_cancel' || scenario === 'cancel_after_append' ? { kind: 'unconfirmed', reason: 'cancelled' }
       : { kind: 'unconfirmed', reason: 'storage_unavailable' });
     expect(await authority.claim(admitted.handoff, new AbortController().signal)).toEqual({ kind: 'refused', reason: 'invalid_handoff' });
     const after = await engine.sessionStore.load(prepared.sessionId);
     if (after.isErr()) throw new Error('load');
     expect(after.value.events.filter(e => e.kind === 'answer_host_recorded' && e.data.kind === 'owner_acquired'))
-      .toHaveLength(scenario === 'lost_ack' || scenario === 'intervening_owner' ? 1 : 0);
-    if (scenario !== 'lost_ack') expect(after).toEqual(before);
+      .toHaveLength(scenario === 'lost_ack' || scenario === 'cancel_after_append' || scenario === 'intervening_owner' ? 1 : 0);
+    if (scenario !== 'lost_ack' && scenario !== 'cancel_after_append') expect(after).toEqual(before);
     expect(clock.timers.size).toBe(0); authority.close();
   } finally { parent.abort(); await rm(root, { recursive: true, force: true }); }
 });
