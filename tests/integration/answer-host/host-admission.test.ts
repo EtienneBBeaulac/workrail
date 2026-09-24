@@ -782,12 +782,13 @@ it.skipIf(process.platform === 'win32').each(['normal', 'intent_ack', 'outcome_a
     } finally { await rm(root,{recursive:true,force:true}); }
   });
 
-it.skipIf(process.platform === 'win32').each(['success','duplicate','intent_ack','outcome_ack','throw','owner_change'] as const)(
+it.skipIf(process.platform === 'win32').each(['success','duplicate','intent_ack','outcome_ack','throw','owner_change','cancel_after_effect','cancel_throw','cancel_after_reservation'] as const)(
   'controls actual model tool batches through canonical effects: %s', async mode => {
     const { createWorkspaceEffectController } = await import('../../../src/daemon/runner/workspace-effect-controller.js');
     const { createDaemonAnswerModel } = await import('../../../src/daemon/runner/answer-model.js');
     const root = await mkdtemp(join(tmpdir(),'controlled-workspace-'));
     const signal = new AbortController().signal;
+    const toolCancellation = new AbortController();
     try {
       const {engine,expected,candidate,config}=await setup(root);
       const admitted=await publishAndReconcileHostAdmission(engine,root,expected,candidate.bytes,signal);
@@ -799,6 +800,7 @@ it.skipIf(process.platform === 'win32').each(['success','duplicate','intent_ack'
         const hydrated=await host.scheduler.hydrator.hydrate(admitted.pointer,signal);
         if(hydrated.kind!=='hydrated') throw new Error(hydrated.kind);
         const journal=new SessionJournal(engine,hydrated.enrollment,{...hostConfig,faultSeam:{async intercept(b){
+          if(mode==='cancel_after_reservation'&&b==='after_effect_intent_append')toolCancellation.abort();
           return (mode==='intent_ack'&&b==='after_effect_intent_append')||(mode==='outcome_ack'&&b==='after_effect_outcome_append')
             ? {kind:'simulate_uncertain',message:'lost ack'}:{kind:'proceed'};
         }}},s=>!s.aborted);
@@ -820,14 +822,34 @@ it.skipIf(process.platform === 'win32').each(['success','duplicate','intent_ack'
             : [{type:'tool_use' as const,id:'answer',name:'answer_work',input:{answer:{notes:'done'}}}];
           return {kind:'completed',reservation:{call:'m1',ordinal:1},value:{id:'response',type:'message',role:'assistant',model:'fake',stop_reason:'tool_use',stop_sequence:null,usage:{input_tokens:1,output_tokens:1},content}};
         }},workspaceTools:[{name:'Write',label:'Write',description:'fake',inputSchema:{type:'object'},async execute(){
-          invocations++;if(mode==='throw')throw new Error('uncertain write');
+          invocations++;
+          if(mode==='cancel_after_effect'||mode==='cancel_throw') {
+            await writeFile(join(root,'effect-marker'),'written before cancellation');
+            toolCancellation.abort();
+            if(mode==='cancel_throw')throw new DOMException('cancelled','AbortError');
+          }
+          if(mode==='throw')throw new Error('uncertain write');
           if(mode==='owner_change') await journal.locked(signal,false,(s,l)=>journal.append(s,l,{kind:'owner_released',epoch:'1'},signal));
           return {content:[{type:'text',text:'written'}],details:null};
         }}],modelId:'fake',systemPrompt:'fake'});
         if(created.kind!=='created')throw new Error(created.kind);
-        const result=await created.model.generate({instruction:'work',issues:[],retainedSummaries:[]},signal);
+        const result=await created.model.generate({instruction:'work',issues:[],retainedSummaries:[]},mode.startsWith('cancel_')?toolCancellation.signal:signal);
+        if(mode.startsWith('cancel_')) {
+          if(mode!=='cancel_after_reservation')
+            expect(await readFile(join(root,'effect-marker'),'utf8')).toBe('written before cancellation');
+          expect(result).toMatchObject({kind:'workspace_failed',failure:{reason:mode==='cancel_after_reservation'?'intent_unacknowledged':'execution_unknown'}});
+          const retained=await readHostState(engine,hydrated.enrollment);
+          if(retained.kind!=='loaded')throw new Error(retained.kind);
+          const intents=retained.state.records.filter(r=>r.kind==='workspace_effect_intended');
+          expect(intents).toHaveLength(1);
+          // An unacknowledged reservation cannot grant the caller an effect identity.
+          if(mode!=='cancel_after_reservation')expect(result).toMatchObject({failure:{effect:intents[0]!.effect}});
+          expect(retained.state.records.some(r=>r.kind==='workspace_effect_completed')).toBe(false);
+          // Aborted storage writes leave the intent pending in both return and throw paths.
+          expect(retained.state.records.some(r=>r.kind==='workspace_effect_unconfirmed')).toBe(false);
+        }
         expect(result.kind).toBe(mode==='success'?'completed':'workspace_failed');
-        expect([requests,invocations]).toEqual(mode==='success'?[2,2]:mode==='duplicate'||mode==='intent_ack'?[1,0]:[1,1]);
+        expect([requests,invocations]).toEqual(mode==='success'?[2,2]:mode==='duplicate'||mode==='intent_ack'||mode==='cancel_after_reservation'?[1,0]:[1,1]);
         expect(await journal.recover(hydrated.enrollment,owner,signal)).toMatchObject({kind:'refused',reason:mode==='owner_change'?'stale_owner':'reconciliation_required'});
         if(mode==='success') {
           // Simulate a preexisting newer delivery with a captured answer. Older unfinished work must still block.
@@ -839,10 +861,11 @@ it.skipIf(process.platform === 'win32').each(['success','duplicate','intent_ack'
           expect(await journal.recover(hydrated.enrollment,owner,signal)).toMatchObject({kind:'refused',reason:'stopped'});
         }
         if(mode!=='success') {
+          // A fresh signal must not erase the delivery's prior failure, including cancellation.
           const again=await created.model.generate({instruction:'retry',issues:[],retainedSummaries:[]},signal);
           expect(again.kind).toBe('workspace_failed');
           expect(requests).toBe(1);
-          expect(invocations).toBe(mode==='duplicate'||mode==='intent_ack'?0:1);
+          expect(invocations).toBe(mode==='duplicate'||mode==='intent_ack'||mode==='cancel_after_reservation'?0:1);
         }
       } finally {await host.scheduler.close(signal);}
     } finally {await rm(root,{recursive:true,force:true});}
