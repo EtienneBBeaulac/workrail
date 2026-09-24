@@ -60,7 +60,7 @@
     "web:dev": "npm run build && node dist/cli-worktrain.js console",
     "web:ci": "node dist/cli-worktrain.js console",
     "web:typecheck": "tsc -p tsconfig.web.json",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.type-proofs.json",
     "test": "vitest",
     "test:smoke": "vitest tests/smoke/ --reporter=verbose",
     "test:integration": "vitest tests/integration/",

@@ -2,10 +2,10 @@ import type { SupervisorCleanup } from '../../../src/answer-v1/supervisor-cleanu
 
 function rejectsExecutionAuthority(cleanup: SupervisorCleanup) {
   // @ts-expect-error Cleanup cannot create/start a supervisor.
-  cleanup.retainStartIntent();
+  void cleanup.retainStartIntent;
   // @ts-expect-error Cleanup cannot append arbitrary canonical events.
-  cleanup.append({ kind: 'model_call_reserved' });
+  void cleanup.append;
   // @ts-expect-error Cleanup cannot invoke workspace effects.
-  cleanup.execute('Bash', { command: 'true' });
+  void cleanup.execute;
 }
 void rejectsExecutionAuthority;

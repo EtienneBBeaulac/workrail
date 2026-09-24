@@ -88,7 +88,7 @@ export function prepareLinuxScratchExecution(options: Readonly<{
       const profile = claimed.reservation.request.daemonPolicy?.workspace;
       if (profile?.kind !== 'linux_scratch') return { kind: 'not_prepared', ...identity, outcome: { kind: 'unsupported_profile' } };
       const journal = new SessionJournal(options.engine, claimed.enrollment,
-        { ...options.config, model: { async generate() { return { kind: 'cancelled' }; } } },
+        options.config,
         s => !s.aborted && !options.lifetime.aborted && claimed.deadline.check().kind === 'active');
       const created = await createLinuxScratchWorkspace({ journal, owner: claimed.owner, deadline: claimed.deadline,
         profile, docker: options.docker, artifactDirectory: options.artifactDirectory });

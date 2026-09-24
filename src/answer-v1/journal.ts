@@ -9,7 +9,7 @@ import { capability, hostEvent, inspection, owns, readHostState, workView, type 
 import type { AnswerHostRecord } from '../v2/durable-core/schemas/session/answer-host.js';
 import type { WithHealthySessionLock } from '../v2/durable-core/ids/with-healthy-session-lock.js';
 import { asSessionId } from '../v2/durable-core/ids/index.js';
-import type { AnswerHostConfig, JournalFaultBoundary } from './contracts/host-composition.js';
+import type { DurableJournalFaultSeam, JournalFaultBoundary } from './contracts/host-composition.js';
 import type { InvocationJournal, HostEnrollment, OwnerFence, DeliveryRef, CapturedResponse, ResponseRef, PreparedAnswer, InvocationRef, AppendDeliveryResult, CaptureResult, PrepareResult, RecoveryResult, CommitStopResult, RedeliverResult } from './contracts/invocation-contract.js';
 import type { ReplyRef, ReceiptRef } from './contracts/answer-contract.js';
 import { CapturePolicy, decodeResponse, decideCapture } from './response-capture.js';
@@ -31,8 +31,14 @@ export function preparedAnswer(state: HostState, record: PreparedRecord): Prepar
         reply: (delivery?.kind === 'delivered' ? delivery.reply : '') as ReplyRef,
         answer: { kind: 'notes', notes: record.notes } } as PreparedAnswer;
 }
+export type JournalConfig = Readonly<{ faultSeam?: DurableJournalFaultSeam }>;
+
 export class SessionJournal implements InvocationJournal {
-    constructor(readonly engine: AnswerEngine, readonly enrollment: HostEnrollment, readonly config: AnswerHostConfig, readonly available: (signal: AbortSignal) => boolean) { }
+    readonly config: JournalConfig;
+    constructor(readonly engine: AnswerEngine, readonly enrollment: HostEnrollment, config: JournalConfig, readonly available: (signal: AbortSignal) => boolean) {
+        // Journal and cleanup capabilities do not need to retain inference dependencies.
+        this.config = Object.freeze(config.faultSeam ? { faultSeam: config.faultSeam } : {});
+    }
     async locked<T>(signal: AbortSignal, failure: T, fn: (state: HostState, lock: WithHealthySessionLock) => Promise<T>, gateFailure?: (error: ExecutionSessionGateErrorV2) => T): Promise<T> {
         if (!this.available(signal))
             return failure;
