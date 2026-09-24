@@ -203,3 +203,42 @@ it('treats an unexpectedly rejected controlled provider as an unknown outcome', 
   expect(await created.model.generate(prompt, signal())).toEqual({ kind: 'call_failed',
     failure: { kind: 'unconfirmed', reason: 'provider_outcome_unknown' } });
 });
+
+it('offers partial review fields to the model and resumes the missing field through host recovery', async () => {
+  const { default: Ajv } = await import('ajv');
+  const root = await mkdtemp(join(tmpdir(), 'daemon-review-'));
+  const config = { storage: { journalRootDir: join(root, 'sessions'), hostIndexRootDir: join(root, 'index') },
+    keyringPath: join(root, 'keys.json'), workflowStoragePath: join(root, 'workflows') };
+  let calls = 0;
+  const model = createDaemonAnswerModel(options({ messages: { async create(params) {
+    const fields = calls++ === 0 ? { notes: 'Reviewed.', verdict: 'clean', confidence: 'high', findings: [] } : { summary: 'No findings.' };
+    const advertised = params.tools?.find(t => 'name' in t && t.name === 'answer_work');
+    if (!advertised || !('input_schema' in advertised)) throw new Error('No answer schema');
+    const validate = new Ajv({ strict: false }).compile(advertised.input_schema);
+    expect(validate({ answer: fields }), JSON.stringify(validate.errors)).toBe(true);
+    if (calls === 2) expect(JSON.stringify(params.messages)).toContain('Provide summary.');
+    return message([{ type: 'tool_use', id: 'review-answer', name: 'answer_work', input: { answer: fields } }]);
+  } } }));
+  if (model.kind !== 'created') throw new Error(model.kind);
+  try {
+    await mkdir(config.workflowStoragePath);
+    await writeFile(join(config.workflowStoragePath, 'review.json'), JSON.stringify({ id: 'review', name: 'Review', description: 'Daemon review', version: '1.0.0',
+      steps: [{ id: 'one', title: 'Review', prompt: 'Review code', outputContract: { contractRef: 'wr.contracts.review_verdict', required: true } }] }));
+    const host = await createAnswerHost({ ...config, model: model.model }, signal());
+    if (host.kind !== 'created') throw new Error(host.kind);
+    const enrolled = await host.scheduler.enroll({ workflowId: 'review', goal: 'Review', workspacePath: root }, signal());
+    if (enrolled.kind !== 'enrolled') throw new Error(enrolled.kind);
+    const partial = await enrolled.runner.runTurn(signal());
+    expect(partial).toMatchObject({ kind: 'partial', nextView: { issues: [{ field: 'summary' }] } });
+    const pointer = host.scheduler.hydrator.dehydrate(enrolled.enrollment);
+    await host.scheduler.close(signal());
+    const restarted = await createAnswerHost({ ...config, model: model.model }, signal());
+    if (restarted.kind !== 'created') throw new Error(restarted.kind);
+    try {
+      const recovered = await restarted.scheduler.recover(pointer, signal());
+      if (recovered.kind !== 'ready') throw new Error(recovered.kind);
+      expect(await recovered.runner.runTurn(signal())).toMatchObject({ kind: 'advanced', nextView: { kind: 'finished' } });
+      expect(calls).toBe(2);
+    } finally { await restarted.scheduler.close(signal()); }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

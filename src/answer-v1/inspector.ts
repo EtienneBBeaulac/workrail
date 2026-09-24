@@ -24,8 +24,8 @@ export function createInspector(engine: AnswerReadEngine, enrollment: HostEnroll
             const state = loaded.state;
             if (read !== capability(engine, state, 'read'))
                 return { kind: 'refused', reason: 'invalid_scope' };
-            const record = state.records.find(r => (r.kind === 'committed' || r.kind === 'rejected') && r.receipt === receipt);
-            if (!record || (record.kind !== 'committed' && record.kind !== 'rejected'))
+            const record = state.records.find(r => (r.kind === 'committed' || r.kind === 'review_committed' || r.kind === 'review_partial' || r.kind === 'review_correction' || r.kind === 'rejected') && r.receipt === receipt);
+            if (!record || (record.kind !== 'committed' && record.kind !== 'review_committed' && record.kind !== 'review_partial' && record.kind !== 'review_correction' && record.kind !== 'rejected'))
                 return { kind: 'refused', reason: 'invalid_scope' };
             const text = record.kind === 'committed' ? JSON.stringify({ notes: record.notes }) : record.rawAnswer;
             let offset = 0;
@@ -43,7 +43,7 @@ export function createInspector(engine: AnswerReadEngine, enrollment: HostEnroll
             while (end < bytes.length && (bytes[end]! & 0xc0) === 0x80)
                 end--;
             const chunk = bytes.subarray(offset, end).toString('utf8') as EvidenceChunk;
-            const base = { receipt: record.receipt as ReceiptRef, disposition: record.kind === 'committed' ? 'accepted' as const : 'rejected' as const, encoding: record.kind === 'committed' ? 'canonical_json' as const : record.encoding, chunk };
+            const base = { receipt: record.receipt as ReceiptRef, disposition: record.kind === 'committed' || record.kind === 'review_committed' ? 'accepted' as const : record.kind === 'review_partial' ? 'partial' as const : 'rejected' as const, encoding: record.kind === 'rejected' ? record.encoding : 'canonical_json' as const, chunk };
             return end === bytes.length ? { ...base, kind: 'complete' } : { ...base, kind: 'more', next: `${end}:${capability(engine, state, 'cursor', `${receipt}:${end}`)}` as EvidenceCursor };
         },
     };

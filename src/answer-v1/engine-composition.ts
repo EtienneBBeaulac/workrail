@@ -1,5 +1,6 @@
-import { dirname } from 'node:path';
-import { LocalDataDirV2 } from '../v2/infra/local/data-dir/index.js';
+import { answerDataDir } from './authority-paths.js';
+export { answerDataDir } from './authority-paths.js';
+export { composeAnswerReader, type AnswerReadEngine } from './reader-composition.js';
 import { NodeFileSystemV2 } from '../v2/infra/local/fs/index.js';
 import { NodeHmacSha256V2 } from '../v2/infra/local/hmac-sha256/index.js';
 import { NodeBase64UrlV2 } from '../v2/infra/local/base64url/index.js';
@@ -25,14 +26,6 @@ import { ValidationEngine } from '../application/services/validation-engine.js';
 import { EnhancedLoopValidator } from '../application/services/enhanced-loop-validator.js';
 import { NullGitSnapshotV2 } from '../v2/ports/git-snapshot.port.js';
 import type { SharedAuthorityConfig } from './contracts/host-composition.js';
-export function answerDataDir(config: SharedAuthorityConfig): import('../v2/ports/data-dir.port.js').DataDirPortV2 {
-    class DataDir extends LocalDataDirV2 {
-        override sessionsDir() { return config.storage.journalRootDir; }
-        override keyringPath() { return config.keyringPath; }
-    }
-    const dataDir: import('../v2/ports/data-dir.port.js').DataDirPortV2 = new DataDir({ WORKRAIL_DATA_DIR: dirname(config.storage.journalRootDir), WORKRAIL_KEYS_DIR: dirname(config.keyringPath) });
-    return dataDir;
-}
 /** Explicit roots prevent this composition from falling back to the user's live data. */
 export async function composeAnswerEngine(config: SharedAuthorityConfig) {
     const dataDir = answerDataDir(config);
@@ -63,28 +56,3 @@ export async function composeAnswerEngine(config: SharedAuthorityConfig) {
 export type AnswerEngine = Extract<Awaited<ReturnType<typeof composeAnswerEngine>>, {
     kind: 'ready';
 }>;
-
-/** Read projections receive no append, lock, id minting or key creation capability. */
-export type AnswerReadEngine = Readonly<{
-    sessionStore: Pick<AnswerEngine['sessionStore'], 'load'>;
-    snapshotStore: Pick<AnswerEngine['snapshotStore'], 'getExecutionSnapshotV1'>;
-    pinnedStore: Pick<AnswerEngine['pinnedStore'], 'get'>;
-    tokenCodecPorts: Pick<AnswerEngine['tokenCodecPorts'], 'hmac' | 'keyring'>;
-}>;
-
-export async function composeAnswerReader(config: SharedAuthorityConfig) {
-    const dataDir = answerDataDir(config);
-    const fs = new NodeFileSystemV2();
-    const keyring = await new LocalKeyringV2(dataDir, fs, new NodeBase64UrlV2(), new NodeRandomEntropyV2()).loadExisting();
-    if (keyring.isErr()) return { kind: 'unavailable' as const, detail: keyring.error.message };
-    const sessions = new LocalSessionEventLogStoreV2(dataDir, fs, new NodeSha256V2());
-    const snapshots = new LocalSnapshotStoreV2(dataDir, fs, new NodeCryptoV2());
-    const pinned = new LocalPinnedWorkflowStoreV2(dataDir, fs);
-    const engine: AnswerReadEngine = {
-        sessionStore: { load: sessions.load.bind(sessions) },
-        snapshotStore: { getExecutionSnapshotV1: snapshots.getExecutionSnapshotV1.bind(snapshots) },
-        pinnedStore: { get: pinned.get.bind(pinned) },
-        tokenCodecPorts: { keyring: keyring.value, hmac: new NodeHmacSha256V2() },
-    };
-    return { kind: 'ready' as const, engine };
-}

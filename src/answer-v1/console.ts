@@ -4,7 +4,7 @@ import type { HostEnrollment, ExecutionRef } from './contracts/invocation-contra
 import type { ReadRef, RecoveryRef } from './contracts/answer-contract.js';
 import type { ConsoleReadConfig, CreateConsoleReadRuntimeResult, ConsoleReadRuntime } from './contracts/console-composition.js';
 import type { ConsoleHostScopedAnswerReader } from './contracts/console-contract.js';
-import { composeAnswerReader, type AnswerReadEngine } from './engine-composition.js';
+import { composeAnswerReader, type AnswerReadEngine } from './reader-composition.js';
 import { capability, readHostState, workView, inspection } from './host-state.js';
 import { createInspector } from './inspector.js';
 

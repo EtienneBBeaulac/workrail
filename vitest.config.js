@@ -4,6 +4,10 @@
 
 import { defineConfig } from 'vitest/config';
 
+// Real Git fixtures spawn multiple subprocesses per assertion. Serialize these after
+// functional tests so unrelated fixture I/O does not consume their unchanged deadlines.
+const gitIntegration = ['tests/integration/git-*.test.ts', 'tests/integration/external-workflow*.test.ts', 'tests/e2e/external-workflows-*.test.ts'];
+
 const shared = {
   // Setup files
   setupFiles: ['./tests/setup.ts'],
@@ -41,7 +45,7 @@ export default defineConfig({
           include: ['tests/**/*.test.ts'],
           // Exclude the knowledge-graph test -- it runs in the 'knowledge-graph' project
           // below with pool:forks to avoid DuckDB native binary + worker thread conflicts.
-          exclude: ['tests/unit/knowledge-graph.test.ts', 'tests/performance/**'],
+          exclude: ['tests/unit/knowledge-graph.test.ts', 'tests/performance/**', ...gitIntegration],
           pool: 'threads',
           poolOptions: {
             threads: {
@@ -67,6 +71,14 @@ export default defineConfig({
           ...shared,
         },
       },
+      {
+        test: {
+          name: 'git-integration', environment: 'node', include: gitIntegration,
+          pool: 'threads', poolOptions: { threads: { minThreads: 1, maxThreads: 1 } },
+          ...shared,
+          sequence: { groupOrder: 1 },
+        },
+      },
       // Measure latency after the functional workload has drained. Budgets stay
       // unchanged; concurrent fixture I/O must not determine benchmark results.
       {
@@ -77,7 +89,7 @@ export default defineConfig({
           pool: 'threads',
           poolOptions: { threads: { minThreads: 1, maxThreads: 1 } },
           ...shared,
-          sequence: { groupOrder: 1 },
+          sequence: { groupOrder: 2 },
         },
       },
       // Knowledge graph tests use pool:forks because @duckdb/node-api is a native

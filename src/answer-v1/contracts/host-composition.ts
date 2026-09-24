@@ -138,6 +138,7 @@ export type TurnOutcome =
   | Readonly<{ kind: 'refused'; reason: 'model_binding_refused'; failure: Exclude<ModelBindingRefusal, 'stale_owner' | 'storage_unavailable'>; detail: string }>
   | Readonly<{ kind: 'refused'; reason: 'model_call_refused'; failure: Extract<ModelCallFailure, { kind: 'refused' }>; detail: string }>
   | Readonly<{ kind: 'advanced'; receipt: ReceiptRef; nextView: WorkView }>
+  | Readonly<{ kind: 'partial'; receipt: ReceiptRef; nextView: WorkView }>
   | Readonly<{ kind: 'rejected'; receipt: ReceiptRef; correctionView: WorkView }>
   | Readonly<{ kind: 'settled'; receipt: ReceiptRef; view: WorkView }>
   | Readonly<{ kind: 'no_work_required'; view: Extract<WorkView, { kind: 'waiting' | 'finished' }> }>

@@ -270,6 +270,13 @@ describe('parseFindingsFromNotes', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('readVerdictArtifact', () => {
+  it('preserves exact accepted artifact evidence rather than parser-normalized objects', () => {
+    const artifact = JSON.parse('{"confidence":"high","findings":[{"__proto__":{"source":"retained"},"extra":{"b":2,"a":1},"summary":"Finding","severity":"minor"}],"kind":"wr.review_verdict","summary":"Done","verdict":"minor"}');
+    const result = readVerdictArtifact([artifact]);
+    expect(result?.raw).toBe(JSON.stringify(artifact));
+    expect(result?.findingSummaries).toEqual(['Finding']);
+  });
+
   // WHY afterEach: the WARN log test uses vi.spyOn(process.stderr, 'write').
   // Restoring all mocks after each test prevents spy leakage to other tests
   // in the same process. This is the only acceptable alternative to dep injection

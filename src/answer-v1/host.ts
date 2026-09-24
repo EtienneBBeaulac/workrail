@@ -16,7 +16,7 @@ import { executeStartWorkflow } from '../v2/usecases/start-workflow.js';
 import { createWorkflow } from '../types/workflow.js';
 import { createUserDirectorySource } from '../types/workflow-source.js';
 import { hasWorkflowDefinitionShape, isStandardStepDefinition } from '../types/workflow-definition.js';
-export const runtimeCapabilities: RuntimeCapabilityDescriptor = Object.freeze({ enrollmentFormatVersion: 1, journalFormatVersion: 1, supportedOutputs: Object.freeze(['notes' as const]) });
+export const runtimeCapabilities: RuntimeCapabilityDescriptor = Object.freeze({ enrollmentFormatVersion: 1, journalFormatVersion: 1, supportedOutputs: Object.freeze(['notes' as const, 'wr.contracts.review_verdict' as const]) });
 const Pointer = z.object({ formatVersion: z.literal(1), executionId: z.string().regex(/^sess_[a-z0-9]+$/), recoveryLocator: z.string().min(1) }).strict();
 const Request = AnswerHostRequestSchema.refine(request => isAbsolute(request.workspacePath));
 export async function createAnswerRuntime(config: AnswerHostConfig, lifetime: AbortSignal, mode: 'host_bound' | 'unbound'): Promise<CreateAnswerHostResult> {
@@ -84,8 +84,8 @@ export async function createAnswerRuntime(config: AnswerHostConfig, lifetime: Ab
             if (view.kind === 'finished') {
                 if (view.execution.kind === 'incomplete')
                     return { kind: 'stopped', execution: enrollment.execution, reason: view.execution.reason, detail: view.execution.detail, read: view.read };
-                const last = [...state.records].reverse().find(r => r.kind === 'committed');
-                return last?.kind === 'committed' ? { kind: 'settled', receipt: last.receipt as ReceiptRef, view } : { kind: 'refused', reason: 'corrupt', detail: 'Missing completion receipt' };
+                const last = [...state.records].reverse().find(r => r.kind === 'committed' || r.kind === 'review_committed');
+                return (last?.kind === 'committed' || last?.kind === 'review_committed') ? { kind: 'settled', receipt: last.receipt as ReceiptRef, view } : { kind: 'refused', reason: 'corrupt', detail: 'Missing completion receipt' };
             }
             if (mode.kind === 'conditional' && !owns(state, mode.expected))
                 return { kind: 'refused', reason: 'ownership_changed', detail: 'Expected owner is no longer current' };
@@ -123,8 +123,8 @@ export async function createAnswerRuntime(config: AnswerHostConfig, lifetime: Ab
             catch {
                 return { kind: 'refused', reason: 'unsupported_workflow', detail: 'Cannot load requested workflow' };
             }
-            if (!hasWorkflowDefinitionShape(raw) || raw.id !== input.workflowId || !raw.steps.every(s => isStandardStepDefinition(s) && !s.requireConfirmation && !s.outputContract && !s.validationCriteria && !s.assessmentRefs && !s.runCondition))
-                return { kind: 'refused', reason: 'unsupported_workflow', detail: 'This build enrolls linear notes workflows without gates or output contracts' };
+            if (!hasWorkflowDefinitionShape(raw) || raw.id !== input.workflowId || !raw.steps.every(s => isStandardStepDefinition(s) && !s.requireConfirmation && (!s.outputContract || s.outputContract.contractRef === 'wr.contracts.review_verdict') && !s.validationCriteria && !s.assessmentRefs && !s.runCondition))
+                return { kind: 'refused', reason: 'unsupported_workflow', detail: 'This build enrolls linear notes and review workflows without gates' };
             const workflow = createWorkflow(raw, createUserDirectorySource(config.workflowStoragePath));
             const recovery = engine.idFactory.mintEventId() as RecoveryRef;
             let enrollment: HostEnrollment | undefined;

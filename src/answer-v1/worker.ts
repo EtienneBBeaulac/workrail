@@ -91,7 +91,7 @@ export async function createAnswerWorker(config: AnswerWorkerConfig, lifetime: A
                 if (delivery.kind !== 'delivered')
                     return { kind: 'not_retained' as const, reason: 'unavailable_storage' as const };
                 const payload = answer.kind === 'unvalidated_json' ? answer.value
-                    : answer.kind === 'notes' ? { notes: answer.notes } : answer;
+                    : answer.kind === 'notes' ? { notes: answer.notes } : answer.fields;
                 const captured = await ports.journal.captureResponse(delivery.delivery, { responseText: '', calls: [{ id: 'answer', name: 'answer_work', argumentsJson: JSON.stringify({ answer: payload }) }] }, owner, signal);
                 if (captured.kind === 'unconfirmed')
                     return { kind: 'unconfirmed' as const, reason: 'commit_uncertain' as const };
@@ -101,17 +101,30 @@ export async function createAnswerWorker(config: AnswerWorkerConfig, lifetime: A
                     const currentView=await workView(engine,current.state);
                     if(currentView.kind==='unavailable')return {kind:'unconfirmed' as const,reason:'commit_uncertain' as const};
                     const priorCapture = current.state.records.find(r => r.kind === 'captured' && r.delivery === delivery.delivery);
-                    const priorPrepared = priorCapture?.kind === 'captured' ? current.state.records.find(r => r.kind === 'prepared' && r.response === priorCapture.response) : undefined;
-                    const prior = current.state.records.find(r => (r.kind === 'committed' && priorPrepared?.kind === 'prepared' && r.invocation === priorPrepared.invocation) || (r.kind === 'rejected' && r.delivery === delivery.delivery));
-                    if (captured.kind === 'refused' && captured.reason === 'conflict' && prior && (prior.kind === 'committed' || prior.kind === 'rejected'))
+                    const priorPrepared = priorCapture?.kind === 'captured' ? current.state.records.find(r => (r.kind === 'prepared' || r.kind === 'review_prepared') && r.response === priorCapture.response) : undefined;
+                    const prior = current.state.records.find(r => ((r.kind === 'committed' || r.kind === 'review_committed') && (priorPrepared?.kind === 'prepared' || priorPrepared?.kind === 'review_prepared') && r.invocation === priorPrepared.invocation) || ((r.kind === 'rejected' || r.kind === 'review_partial' || r.kind === 'review_correction') && r.delivery === delivery.delivery));
+                    if (captured.kind === 'refused' && captured.reason === 'conflict' && prior && (prior.kind === 'committed' || prior.kind === 'review_committed' || prior.kind === 'review_partial' || prior.kind === 'review_correction' || prior.kind === 'rejected'))
                         return { kind: 'conflict' as const, original: prior.receipt as ReceiptRef, current: inspection(currentView) };
+                    if (captured.kind === 'refused' && captured.reason === 'invalid_delivery') return { kind: 'not_retained' as const, reason: 'stale_reference' as const };
+                    if (captured.kind === 'refused' && captured.reason === 'stopped') return { kind: 'not_retained' as const, reason: 'session_terminated' as const };
                     return captured.kind==='refused'&&captured.reason==='payload_too_large'
                       ? {kind:'not_retained' as const,reason:'capture_limit' as const}
                       : {kind:'unconfirmed' as const,reason:'commit_uncertain' as const};
                 }
+                const priorContribution = state.records.find(r => (r.kind === 'rejected' || r.kind === 'review_partial' || r.kind === 'review_correction') && r.response === captured.response.response);
+                if (priorContribution && (priorContribution.kind === 'rejected' || priorContribution.kind === 'review_partial' || priorContribution.kind === 'review_correction')) {
+                    const index = state.truth.events.findIndex(e => e.kind === 'answer_host_recorded' && 'receipt' in e.data && e.data.receipt === priorContribution.receipt);
+                    const priorDelivery = state.records.find(r => r.kind === 'delivered' && r.delivery === priorContribution.delivery);
+                    if (priorDelivery?.kind !== 'delivered') return { kind: 'unconfirmed' as const, reason: 'commit_uncertain' as const };
+                    const original = await workView(engine, { ...state,
+                        node: priorDelivery.node,
+                        records: state.records.slice(0, state.records.indexOf(priorContribution) + 1), truth: { ...state.truth, events: state.truth.events.slice(0, index + 1) } });
+                    if (original.kind === 'unavailable') return { kind: 'unconfirmed' as const, reason: 'commit_uncertain' as const };
+                    return { kind: 'replay' as const, receipt: priorContribution.receipt as ReceiptRef, original: inspection(original) };
+                }
                 const prepared = await ports.journal.prepare(captured.response, owner, signal);
-                if (prepared.kind === 'rejected')
-                    return { kind: 'recorded' as const, receipt: prepared.receipt, disposition: 'rejected' as const, view: prepared.view };
+                if (prepared.kind === 'rejected' || prepared.kind === 'partial')
+                    return { kind: 'recorded' as const, receipt: prepared.receipt, disposition: prepared.kind, view: prepared.view };
                 if (prepared.kind !== 'prepared')
                     return { kind: 'unconfirmed' as const, reason: 'commit_uncertain' as const };
                 const result = await ports.dispatcher.dispatch(prepared.answer, owner, signal);

@@ -1,3 +1,6 @@
+import { completeReviewFromJson } from './review-history.js';
+import { materializeReview } from './review-answer.js';
+import { toCanonicalBytes } from '../v2/durable-core/canonical/jcs.js';
 import { errAsync } from 'neverthrow';
 import type { FencedAnswerCommitter, FencedCommitResult, OwnerFence, PreparedAnswer } from './contracts/invocation-contract.js';
 import type { ReceiptRef } from './contracts/answer-contract.js';
@@ -21,15 +24,21 @@ export class AnswerCommitter implements FencedAnswerCommitter {
                 return { kind: 'stale_owner' };
             if (state.records.some(r => r.kind === 'stopped'))
                 return { kind: 'not_retained', reason: 'session_terminated' };
-            const prepared = state.records.find(r => r.kind === 'prepared' && r.invocation === answer.invocation);
-            if (prepared?.kind !== 'prepared')
+            const prepared = state.records.find(r => (r.kind === 'prepared' || r.kind === 'review_prepared') && r.invocation === answer.invocation);
+            if (prepared?.kind !== 'prepared' && prepared?.kind !== 'review_prepared')
                 return { kind: 'not_retained', reason: 'invalid_reference' };
+            const review = prepared.kind === 'review_prepared' ? completeReviewFromJson(prepared.reviewJson) : undefined;
+            if (prepared.kind === 'review_prepared' && !review) return { kind: 'not_retained', reason: 'unavailable_storage' };
             const original = preparedAnswer(state, prepared);
-            if (answer.execution !== original.execution || answer.delivery !== original.delivery || answer.response !== original.response || answer.toolCallId !== original.toolCallId || answer.reply !== original.reply || answer.answer.kind !== 'notes' || answer.answer.notes !== prepared.notes)
+            const submitted = toCanonicalBytes(answer.answer.kind === 'notes' ? { notes: answer.answer.notes } : answer.answer.fields);
+            const expected = toCanonicalBytes(original.answer.kind === 'notes' ? { notes: original.answer.notes } : original.answer.fields);
+            const matches = answer.answer.kind === original.answer.kind && submitted.isOk() && expected.isOk()
+                && Buffer.from(submitted.value).equals(Buffer.from(expected.value));
+            if (answer.execution !== original.execution || answer.delivery !== original.delivery || answer.response !== original.response || answer.toolCallId !== original.toolCallId || answer.reply !== original.reply || !matches)
                 return { kind: 'not_retained', reason: 'invalid_reference' };
-            const prior = state.records.find(r => r.kind === 'committed' && r.invocation === answer.invocation);
-            if (prior?.kind === 'committed') {
-                const eventIndex = state.truth.events.findIndex(e => e.kind === 'answer_host_recorded' && e.data.kind === 'committed' && e.data.invocation === answer.invocation);
+            const prior = state.records.find(r => (r.kind === 'committed' || r.kind === 'review_committed') && r.invocation === answer.invocation);
+            if (prior?.kind === 'committed' || prior?.kind === 'review_committed') {
+                const eventIndex = state.truth.events.findIndex(e => e.kind === 'answer_host_recorded' && (e.data.kind === 'committed' || e.data.kind === 'review_committed') && e.data.invocation === answer.invocation);
                 const prefix = state.truth.events.slice(0, eventIndex + 1);
                 const view = await workView(j.engine, { ...state, node: prior.successorNode,
                     records: state.records.slice(0, state.records.indexOf(prior) + 1), truth: { ...state.truth, events: prefix } });
@@ -53,7 +62,7 @@ export class AnswerCommitter implements FencedAnswerCommitter {
             const advanced = await executeAdvanceCore({ answerOwner:owner, mode: { kind: 'fresh', sourceNodeId: asNodeId(state.node), snapshot: snapshot.value },
                 truth: state.truth, sessionId: asSessionId(state.enrollment.execution), runId: asRunId(state.run.scope.runId),
                 attemptId: j.engine.idFactory.mintAttemptId(), workflowHash: state.run.data.workflowHash, dedupeKey: `answer:${answer.invocation}`, inputContext: undefined,
-                inputOutput: { notesMarkdown: prepared.notes }, lock, pinnedWorkflow: getCachedWorkflow(state.run.data.workflowHash, pinned.value.definition),
+                inputOutput: prepared.kind === 'prepared' ? { notesMarkdown: prepared.notes } : { notesMarkdown: review!.notes, artifacts: [...materializeReview(review!).artifacts] }, lock, pinnedWorkflow: getCachedWorkflow(state.run.data.workflowHash, pinned.value.definition),
                 lockedIndex: buildSessionIndex(sorted.value), ports: { ...j.engine, sessionStore: { append: (_lock, plan) => {
                             const next = plan.events.find(e => e.kind === 'advance_recorded');
                             if (next?.kind !== 'advance_recorded' || next.data.outcome.kind !== 'advanced')
@@ -61,7 +70,7 @@ export class AnswerCommitter implements FencedAnswerCommitter {
                             if (!j.available(signal))
                                 return errAsync({ code: 'SESSION_STORE_IO_ERROR' as const, message: 'Cancelled before commit' });
                             attempted = true;
-                            return j.engine.sessionStore.append(lock, { ...plan, events: [...plan.events, hostEvent(j.engine, state, { kind: 'committed', invocation: answer.invocation, receipt, successorNode: next.data.outcome.toNodeId, notes: prepared.notes }, state.truth.events.length + plan.events.length)] }, state.truth);
+                            return j.engine.sessionStore.append(lock, { ...plan, events: [...plan.events, hostEvent(j.engine, state, prepared.kind === 'prepared' ? { kind: 'committed', invocation: answer.invocation, receipt, successorNode: next.data.outcome.toNodeId, notes: prepared.notes } : { kind: 'review_committed', invocation: answer.invocation, receipt, successorNode: next.data.outcome.toNodeId, rawAnswer: prepared.rawAnswer }, state.truth.events.length + plan.events.length)] }, state.truth);
                         } } } });
             if (advanced.isErr())
                 return attempted ? { kind: 'commit_uncertain', invocation: answer.invocation } : { kind: 'not_retained', reason: 'unavailable_storage' };

@@ -20,8 +20,18 @@ const answerTool: AgentTool = {
   description: 'Submit your answer to the current instruction. This ends the current turn.',
   inputSchema: {
     type: 'object', additionalProperties: false, required: ['answer'],
-    properties: { answer: { type: 'object', additionalProperties: false, required: ['notes'],
-      properties: { notes: { type: 'string' } } } },
+    properties: { answer: { type: 'object', additionalProperties: false, minProperties: 1,
+      properties: {
+        notes: { type: 'string', minLength: 1 },
+        verdict: { type: 'string', enum: ['clean', 'minor', 'blocking'] },
+        confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+        findings: { type: 'array', items: { type: 'object', additionalProperties: true,
+          required: ['severity', 'summary'], properties: {
+            severity: { type: 'string', enum: ['critical', 'major', 'minor', 'nit'] },
+            summary: { type: 'string', minLength: 1 },
+          } } },
+        summary: { type: 'string', minLength: 1 },
+      } } },
   },
   async execute() {
     return { content: [{ type: 'text', text: 'Answer requires host capture.' }], details: { kind: 'refused' } };

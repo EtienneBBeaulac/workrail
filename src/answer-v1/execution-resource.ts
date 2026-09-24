@@ -14,7 +14,7 @@ export interface ManagedExecution {
 
 function endsExecution(outcome: TurnOutcome): boolean {
   switch (outcome.kind) {
-    case 'advanced': return outcome.nextView.kind === 'finished';
+    case 'partial': case 'advanced': return outcome.nextView.kind === 'finished';
     case 'settled': return outcome.view.kind === 'finished';
     case 'rejected': return outcome.correctionView.kind === 'finished';
     case 'no_work_required': return outcome.view.kind === 'finished';

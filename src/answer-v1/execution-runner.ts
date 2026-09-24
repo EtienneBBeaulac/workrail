@@ -125,6 +125,7 @@ export function createExecutionRunner(engine: AnswerEngine, config: AnswerHostCo
             }
             if (!prepared && response) {
                 const result = await p.journal.prepare(response, owner, signal);
+                if (result.kind === 'partial') return { kind: 'partial', receipt: result.receipt, nextView: result.view };
                 if (result.kind === 'rejected')
                     return { kind: 'rejected', receipt: result.receipt, correctionView: result.view };
                 if (result.kind === 'refused')

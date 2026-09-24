@@ -1,3 +1,6 @@
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { composeServer } from '../../../src/mcp/server.js';
 import { createDaemonDeliveryModelFactory } from '../../../src/daemon/runner/delivery-answer-model.js';
 import { createDaemonAnswerModel } from '../../../src/daemon/runner/answer-model.js';
 import { createAnswerWorker } from '../../../src/answer-v1/worker.js';
@@ -122,62 +125,75 @@ it('unbound workers refuse active and released host sessions, and recover their 
     await scheduler.close(signal());
 }));
 
-it('MCP exposes only answer tools and preserves host isolation through the transport',()=>fixture(async config=>{
-  const oldProfile=process.env.WORKRAIL_AGENT_PROFILE;
-  process.env.WORKRAIL_AGENT_PROFILE='answers';
-  const {Client}=await import('@modelcontextprotocol/sdk/client/index.js');
-  const {InMemoryTransport}=await import('@modelcontextprotocol/sdk/inMemory.js');
-  const {composeServer}=await import('../../../src/mcp/server.js');
-  const {scheduler,enrolled,reply}=await enroll(config);
-  const {model:_model,...answerAuthority}=config;
-  const composed=await composeServer({answerAuthority});
-  const client=new Client({name:'answer-boundary',version:'1'});
-  try{
-    const [clientTransport,serverTransport]=InMemoryTransport.createLinkedPair();
-    await Promise.all([client.connect(clientTransport),composed.server.connect(serverTransport)]);
-    expect((await client.listTools()).tools.map(t=>t.name).sort()).toEqual(['answer_work','inspect_work','open_work','recover_work']);
-    const call=async(name:string,args:Record<string,unknown>)=>{
-      const result=await client.callTool({name,arguments:args});
+type AnswerTransport = Readonly<{
+  client: Client;
+  composed: Awaited<ReturnType<typeof composeServer>>;
+  call(name: string, args: Record<string, unknown>): Promise<any>;
+}>;
+async function withAnswerTransport(config: AnswerHostConfig, run: (transport: AnswerTransport) => Promise<void>) {
+  const oldProfile = process.env.WORKRAIL_AGENT_PROFILE;
+  process.env.WORKRAIL_AGENT_PROFILE = 'answers';
+  const client = new Client({ name: 'answer-boundary', version: '1' });
+  let composed: Awaited<ReturnType<typeof composeServer>> | undefined;
+  try {
+    const { model: _model, ...answerAuthority } = config;
+    composed = await composeServer({ answerAuthority });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([client.connect(clientTransport), composed.server.connect(serverTransport)]);
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const result = await client.callTool({ name, arguments: args });
       expect(result.isError).not.toBe(true);
-      const content=result.content as {type:string;text:string}[];
+      const content = result.content as { type: string; text: string }[];
       return JSON.parse(content[0]!.text);
     };
-    expect(await call('answer_work',{reply,answer:{notes:'foreign'}})).toEqual({kind:'not_retained',reason:'bound_session_required'});
-    for (const invalid of [{ notes: 42, unknownField: 'kept' }, { notes: 'attempt', approval: true }, JSON.parse('{"notes":42,"__proto__":{"retained":true}}'), null, ['unexpected']]) {
-      const work=await call('open_work',{workflowId:'lifecycle',goal:'rejection',workspacePath:config.workflowStoragePath});
-      const rejected=await call('answer_work',{reply:work.view.reply,answer:invalid});
-      expect(rejected).toMatchObject({kind:'recorded',disposition:'rejected',view:{kind:'question',instruction:work.view.instruction}});
-      const receipt=await call('inspect_work',{read:rejected.view.read,receipt:rejected.receipt});
-      expect(receipt).toMatchObject({kind:'complete',disposition:'rejected',encoding:'canonical_json'});
-      expect(JSON.parse(receipt.chunk)).toEqual(invalid);
-      const repaired=await call('answer_work',{reply:rejected.view.reply,answer:{notes:'valid correction'}});
-      expect(repaired).toMatchObject({kind:'recorded',disposition:'accepted',view:{kind:'question'}});
-      expect(await call('answer_work',{reply:repaired.view.reply,answer:{notes:'last'}})).toMatchObject({kind:'recorded',view:{kind:'finished'}});
-    }
-    const opened=await call('open_work',{workflowId:'lifecycle',goal:'transport',workspacePath:config.workflowStoragePath});
-    const first=await call('answer_work',{reply:opened.view.reply,answer:{notes:'first'}});
-    expect(first).toMatchObject({kind:'recorded',view:{kind:'question'}});
-    const viewed=await call('inspect_work',{read:first.view.read});
-    expect(viewed).not.toHaveProperty('reply');
-    expect(await call('answer_work',{reply:first.view.reply,answer:{notes:'last'}})).toMatchObject({kind:'recorded',view:{kind:'finished'}});
-    let enter!:()=>void, release!:()=>void;
-    const entered=new Promise<void>(resolve=>{enter=resolve;});
-    const blocked=new Promise<void>(resolve=>{release=resolve;});
-    composed.handlers.inspect_work=async()=>{enter();await blocked;return {content:[{type:'text',text:'retained'}]};};
-    const pending=client.callTool({name:'inspect_work',arguments:{read:first.view.read}});
-    await entered;
-    let drained=false;
-    const closing=composed.closeRequests().then(()=>{drained=true;});
-    await new Promise<void>(resolve=>setImmediate(resolve));
-    expect(drained).toBe(false);
-    expect((await client.callTool({name:'inspect_work',arguments:{read:first.view.read}})).isError).toBe(true);
-    release();await pending;await closing;
-
-  }finally{
-    await client.close();await composed.server.close();await scheduler.close(signal());
-    if(oldProfile===undefined)delete process.env.WORKRAIL_AGENT_PROFILE;else process.env.WORKRAIL_AGENT_PROFILE=oldProfile;
+    await run({ client, composed, call });
+  } finally {
+    try { await client.close(); await composed?.server.close(); }
+    finally { if (oldProfile === undefined) delete process.env.WORKRAIL_AGENT_PROFILE; else process.env.WORKRAIL_AGENT_PROFILE = oldProfile; }
   }
+}
+
+it('MCP exposes only answer tools and preserves host isolation through the transport', () => fixture(async config => {
+  const { scheduler, reply } = await enroll(config);
+  try { await withAnswerTransport(config, async ({ client, call }) => {
+    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['answer_work', 'inspect_work', 'open_work', 'recover_work']);
+    expect(await call('answer_work', { reply, answer: { notes: 'foreign' } })).toEqual({ kind: 'not_retained', reason: 'bound_session_required' });
+    const opened = await call('open_work', { workflowId: 'lifecycle', goal: 'transport', workspacePath: config.workflowStoragePath });
+    const first = await call('answer_work', { reply: opened.view.reply, answer: { notes: 'first' } });
+    expect(first).toMatchObject({ kind: 'recorded', view: { kind: 'question' } });
+    expect(await call('inspect_work', { read: first.view.read })).not.toHaveProperty('reply');
+    expect(await call('answer_work', { reply: first.view.reply, answer: { notes: 'last' } })).toMatchObject({ kind: 'recorded', view: { kind: 'finished' } });
+  }); } finally { await scheduler.close(signal()); }
 }));
+
+it.each([{ notes: 42, unknownField: 'kept' }, { notes: 'attempt', approval: true }, JSON.parse('{"notes":42,"__proto__":{"retained":true}}'), null, ['unexpected']].map(value => ({ value })))(
+  'MCP preserves invalid JSON and completes after correction: %j', ({ value: invalid }) => fixture(config => withAnswerTransport(config, async ({ call }) => {
+    const work = await call('open_work', { workflowId: 'lifecycle', goal: 'rejection', workspacePath: config.workflowStoragePath });
+    const rejected = await call('answer_work', { reply: work.view.reply, answer: invalid });
+    expect(rejected).toMatchObject({ kind: 'recorded', disposition: 'rejected', view: { kind: 'question', instruction: work.view.instruction } });
+    const receipt = await call('inspect_work', { read: rejected.view.read, receipt: rejected.receipt });
+    expect(receipt).toMatchObject({ kind: 'complete', disposition: 'rejected', encoding: 'canonical_json' });
+    expect(JSON.parse(receipt.chunk)).toEqual(invalid);
+    const repaired = await call('answer_work', { reply: rejected.view.reply, answer: { notes: 'valid correction' } });
+    expect(repaired).toMatchObject({ kind: 'recorded', disposition: 'accepted', view: { kind: 'question' } });
+    expect(await call('answer_work', { reply: repaired.view.reply, answer: { notes: 'last' } })).toMatchObject({ kind: 'recorded', view: { kind: 'finished' } });
+  })));
+
+it('MCP shutdown drains accepted requests and refuses new requests', () => fixture(config => withAnswerTransport(config, async ({ client, composed }) => {
+  let enter!: () => void, release!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  composed.handlers.inspect_work = async () => { enter(); await blocked; return { content: [{ type: 'text', text: 'retained' }] }; };
+  const pending = client.callTool({ name: 'inspect_work', arguments: { read: 'retained-read' } });
+  await entered;
+  let drained = false;
+  const closing = composed.closeRequests().then(() => { drained = true; });
+  try {
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(drained).toBe(false);
+    expect((await client.callTool({ name: 'inspect_work', arguments: { read: 'retained-read' } })).isError).toBe(true);
+  } finally { release(); await pending; await closing; }
+})));
 
 it.each(['missing','foreign','stale','released','stopped'] as const)('legacy engine advancement cannot bypass %s answer ownership',mode=>fixture(async config=>{
   const {scheduler,enrolled}=await enroll(config);

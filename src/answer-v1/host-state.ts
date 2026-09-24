@@ -1,3 +1,5 @@
+import { reviewHistory } from './review-history.js';
+import { reviewQuestions } from './review-answer.js';
 import { foldSupervisor } from './supervisor-state.js';
 import type { AnswerEngine, AnswerReadEngine } from './engine-composition.js';
 import type { AnswerHostRecord } from '../v2/durable-core/schemas/session/answer-host.js';
@@ -53,13 +55,17 @@ export async function readHostState(engine: AnswerReadEngine, enrollment: HostEn
     if (!run)
         return { kind: 'unavailable', reason: 'corrupt', detail: 'Missing engine run' };
     const records = events.filter(e => e.scope.runId === run.scope.runId).map(e => e.data);
+    const reviewNodes = new Set(records.flatMap(r => r.kind === 'review_partial' || r.kind === 'review_correction' ? [r.node] : []));
+    for (const node of reviewNodes) {
+        if (reviewHistory(records, node).kind === 'corrupt') return { kind: 'unavailable', reason: 'corrupt', detail: 'Invalid review contribution history' };
+    }
     const supervisor = foldSupervisor(records);
     if (supervisor.kind === 'invalid')
         return { kind: 'unavailable', reason: 'corrupt', detail: `Invalid supervisor history at record ${supervisor.recordIndex}: ${supervisor.reason}` };
     const owner = [...records].reverse().find(e => e.kind === 'owner_acquired' || e.kind === 'owner_released');
-    const committed = [...records].reverse().find(e => e.kind === 'committed');
+    const committed = [...records].reverse().find(e => (e.kind === 'committed' || e.kind === 'review_committed'));
     return { kind: 'loaded', state: { truth: loaded.value, mode: entry.data.mode, enrollment, run, records,
-            node: committed?.kind === 'committed' ? committed.successorNode : entry.data.initialNode,
+            node: (committed?.kind === 'committed' || committed?.kind === 'review_committed') ? committed.successorNode : entry.data.initialNode,
             epoch: owner ? BigInt(owner.epoch) : 0n, owned: owner?.kind === 'owner_acquired' } };
 }
 export function owns(state: HostState, owner: OwnerFence): boolean {
@@ -86,7 +92,7 @@ export async function workView(engine: AnswerReadEngine, state: HostState, node 
     detail: string;
 }> {
     const read = capability(engine, state, 'read') as ReadRef;
-    const retained = state.records.flatMap(r => r.kind === 'committed' || r.kind === 'rejected' ? [{ receipt: r.receipt as ReceiptRef, description: 'Retained answer' }] : []);
+    const retained = state.records.flatMap(r => r.kind === 'committed' || r.kind === 'review_committed' || r.kind === 'review_partial' || r.kind === 'review_correction' || r.kind === 'rejected' ? [{ receipt: r.receipt as ReceiptRef, description: 'Retained answer' }] : []);
     const stopped = state.records.find(r => r.kind === 'stopped');
     if (stopped?.kind === 'stopped')
         return { kind: 'finished', read, retained, execution: { kind: 'incomplete', reason: stopped.reason, detail: stopped.detail }, taskOutcome: 'unknown' };
@@ -109,9 +115,15 @@ export async function workView(engine: AnswerReadEngine, state: HostState, node 
     const rendered = renderPendingPrompt({ workflow, stepId: pending.stepId, loopPath: pending.loopPath, truth: state.truth, runId: asRunId(state.run.scope.runId), nodeId: asNodeId(node), rehydrateOnly: false, cleanResponseFormat: true });
     if (rendered.isErr())
         return { kind: 'unavailable', detail: rendered.error.message };
-    const rejected = [...state.records].reverse().find(r => r.kind === 'rejected');
-    const lastResult = [...state.records].reverse().find(r => r.kind === 'rejected' || r.kind === 'committed');
-    const issues = lastResult?.kind === 'rejected' ? [{ kind: 'field' as const, field: 'notes' as const, reason: lastResult.reason }] : [];
-    const revision = rejected?.kind === 'rejected' ? rejected.receipt : '';
+    const step = pinned.value.definition.steps.find(s => s.id === pending.stepId);
+    const review = step && 'outputContract' in step && step.outputContract?.contractRef === 'wr.contracts.review_verdict';
+    const history = reviewHistory(state.records, node);
+    if (history.kind === 'corrupt') return { kind: 'unavailable', detail: 'Invalid review history' };
+    const lastResult = [...state.records].reverse().find(r => r.kind === 'rejected' || r.kind === 'committed' || r.kind === 'review_committed' || r.kind === 'review_partial' || r.kind === 'review_correction');
+    const issues = lastResult?.kind === 'rejected' ? lastResult.issues ?? [{ kind: 'field' as const, field: 'notes' as const, reason: lastResult.reason }] : review ? reviewQuestions(history.state) : [];
+    // Preserve the notes-only token derivation for existing pending deliveries.
+    // Commits already change node identity; only unresolved-answer outcomes revise it.
+    const revisionRecord = [...state.records].reverse().find(r => r.kind === 'rejected' || r.kind === 'review_partial' || r.kind === 'review_correction');
+    const revision = revisionRecord?.receipt ?? '';
     return { kind: 'question', read, reply: capability(engine, state, 'reply', node + ':' + revision) as ReplyRef, instruction: rendered.value.prompt, issues, retained };
 }

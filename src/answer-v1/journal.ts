@@ -1,3 +1,7 @@
+import { outputObligation } from './output-obligation.js';
+import { contributeReview, parseReviewFragment } from './review-answer.js';
+import { reviewHistory, reviewFieldsJson, completeReviewFromJson } from './review-history.js';
+import type { ValidatedFinding } from './contracts/answer-contract.js';
 import type { ExecutionSessionGateErrorV2 } from '../v2/usecases/execution-session-gate.js';
 import { AnswerJsonSchema } from './answer-json.js';
 import { toCanonicalBytes } from '../v2/durable-core/canonical/jcs.js';
@@ -21,14 +25,15 @@ function hasUncapturedModelWork(records: readonly AnswerHostRecord[]): boolean {
     return records.some(r => r.kind === 'model_call_reserved' && !captured.has(r.delivery));
 }
 export type PreparedRecord = Extract<AnswerHostRecord, {
-    kind: 'prepared';
+    kind: 'prepared' | 'review_prepared';
 }>;
 export function preparedAnswer(state: HostState, record: PreparedRecord): PreparedAnswer {
     const delivery = state.records.find(r => r.kind === 'delivered' && r.delivery === record.delivery);
+    const review = record.kind === 'review_prepared' ? completeReviewFromJson(record.reviewJson) : undefined;
     return { execution: state.enrollment.execution, delivery: record.delivery as DeliveryRef, response: record.response as ResponseRef,
         invocation: record.invocation as InvocationRef, toolCallId: record.toolCallId,
         reply: (delivery?.kind === 'delivered' ? delivery.reply : '') as ReplyRef,
-        answer: { kind: 'notes', notes: record.notes } } as PreparedAnswer;
+        answer: record.kind === 'prepared' ? { kind: 'notes', notes: record.notes } : { kind: 'review', fields: { ...review!, findings: review!.findings.map(f => f.original as unknown as ValidatedFinding) } } } as PreparedAnswer;
 }
 export type JournalConfig = Readonly<{ faultSeam?: DurableJournalFaultSeam }>;
 
@@ -147,9 +152,15 @@ export class SessionJournal implements InvocationJournal {
             const captured = state.records.find(r => r.kind === 'captured' && r.response === response.response && r.delivery === response.delivery);
             if (response.execution !== this.enrollment.execution || captured?.kind !== 'captured')
                 return { kind: 'refused', reason: 'invalid_delivery' };
-            const old = state.records.find(r => r.kind === 'prepared' && r.response === response.response);
-            if (old?.kind === 'prepared')
+            const old = state.records.find(r => (r.kind === 'prepared' || r.kind === 'review_prepared') && r.response === response.response);
+            if (old?.kind === 'prepared' || old?.kind === 'review_prepared')
                 return { kind: 'prepared', answer: preparedAnswer(state, old) };
+            const contribution = state.records.find(r => (r.kind === 'review_partial' || r.kind === 'review_correction') && r.response === response.response);
+            if (contribution?.kind === 'review_partial' || contribution?.kind === 'review_correction') {
+                const view = await workView(this.engine, state);
+                return view.kind === 'unavailable' ? { kind: 'unconfirmed', reason: 'storage_unavailable' }
+                    : contribution.kind === 'review_partial' ? { kind: 'partial', receipt: contribution.receipt as ReceiptRef, view } : { kind: 'rejected', receipt: contribution.receipt as ReceiptRef, view };
+            }
             const rejection = state.records.find(r => r.kind === 'rejected' && r.response === response.response);
             if (rejection?.kind === 'rejected') {
                 const view = await workView(this.engine, state);
@@ -167,13 +178,39 @@ export class SessionJournal implements InvocationJournal {
             catch {
                 input = undefined;
             }
+            const obligation = await outputObligation(this.engine, state);
+            if (obligation === 'unavailable') return { kind: 'unconfirmed', reason: 'storage_unavailable' };
+            const reviewEnvelope = z.object({ answer: AnswerJsonSchema }).strict().safeParse(input);
+            const review = obligation === 'review' && reviewEnvelope.success ? parseReviewFragment(reviewEnvelope.data.answer) : undefined;
+            if (review?.kind === 'valid' && reviewEnvelope.success && call) {
+                const history = reviewHistory(state.records, state.node);
+                if (history.kind === 'corrupt') return { kind: 'unconfirmed', reason: 'storage_unavailable' };
+                const transition = contributeReview(history.state, review.fragment);
+                const bytes = toCanonicalBytes(reviewEnvelope.data.answer);
+                if (bytes.isErr()) return { kind: 'unconfirmed', reason: 'storage_unavailable' };
+                const rawAnswer = Buffer.from(bytes.value).toString('utf8');
+                if (transition.kind === 'complete') {
+                    const reviewJson = reviewFieldsJson(transition.fields);
+                    if (!reviewJson) return { kind: 'unconfirmed', reason: 'storage_unavailable' };
+                    const record: PreparedRecord = { kind: 'review_prepared', delivery: response.delivery, response: response.response,
+                        invocation: this.engine.idFactory.mintEventId(), toolCallId: call.id, node: state.node, reviewJson, rawAnswer };
+                    return await this.append(state, lock, record, signal) ? { kind: 'prepared', answer: preparedAnswer(state, record) } : { kind: 'unconfirmed', reason: 'commit_uncertain' };
+                }
+                const receipt = this.engine.idFactory.mintEventId() as ReceiptRef;
+                const record: AnswerHostRecord = { kind: transition.kind === 'partial' ? 'review_partial' : 'review_correction',
+                    delivery: response.delivery, response: response.response, receipt, node: state.node, rawAnswer };
+                if (!await this.append(state, lock, record, signal)) return { kind: 'unconfirmed', reason: 'commit_uncertain' };
+                const next = await readHostState(this.engine, this.enrollment);
+                const view = next.kind === 'loaded' ? await workView(this.engine, next.state) : undefined;
+                return view && view.kind !== 'unavailable' ? transition.kind === 'partial' ? { kind: 'partial', receipt, view } : { kind: 'rejected', receipt, view } : { kind: 'unconfirmed', reason: 'commit_uncertain' };
+            }
             const answer = NotesAnswer.safeParse(input);
-            if (!answer.success || !call) {
+            if (obligation === 'review' || !answer.success || !call) {
                 const receipt = this.engine.idFactory.mintEventId() as ReceiptRef;
                 const envelope = z.object({ answer: AnswerJsonSchema }).safeParse(input);
                 const canonical = envelope.success ? toCanonicalBytes(envelope.data.answer) : undefined;
                 const evidence = canonical?.isOk() ? { encoding: 'canonical_json' as const, rawAnswer: Buffer.from(canonical.value).toString('utf8') } : { encoding: 'raw_utf8' as const, rawAnswer: call?.argumentsJson ?? captured.payload.responseText };
-                const record: AnswerHostRecord = { kind: 'rejected', delivery: response.delivery, response: response.response, receipt, reason: 'Provide answer_work with a nonempty notes answer.', ...evidence };
+                const record: AnswerHostRecord = { kind: 'rejected', delivery: response.delivery, response: response.response, receipt, ...(review?.kind === 'invalid' ? { issues: review.issues.filter((i): i is Extract<typeof i, { kind: 'field' }> => i.kind === 'field') } : {}), reason: obligation === 'review' ? review?.kind === 'invalid' ? review.issues.map(i => i.kind === 'field' ? i.field + ': ' + i.reason : i.rationale).join('; ') : 'Provide review answer fields only.' : 'Provide answer_work with a nonempty notes answer.', ...evidence };
                 if (!await this.append(state, lock, record, signal))
                     return { kind: 'unconfirmed', reason: 'commit_uncertain' };
                 const next = await readHostState(this.engine, this.enrollment);
@@ -183,7 +220,7 @@ export class SessionJournal implements InvocationJournal {
             const record: PreparedRecord = { kind: 'prepared', delivery: response.delivery, response: response.response, invocation: this.engine.idFactory.mintEventId(), toolCallId: call.id, notes: answer.data.answer.notes };
             return await this.append(state, lock, record, signal) ? { kind: 'prepared', answer: preparedAnswer(state, record) } : { kind: 'unconfirmed', reason: 'commit_uncertain' };
         });
-        return (result.kind === 'prepared' || result.kind === 'rejected') && !await this.fault('after_prepare_commit', signal) ? { kind: 'unconfirmed', reason: 'commit_uncertain' } : result;
+        return (result.kind === 'prepared' || result.kind === 'rejected' || result.kind === 'partial') && !await this.fault('after_prepare_commit', signal) ? { kind: 'unconfirmed', reason: 'commit_uncertain' } : result;
     }
     async commitStop(owner: OwnerFence, reason: 'cancelled' | 'gate_rejected' | 'timeout' | 'failed', detail: string, signal: AbortSignal): Promise<CommitStopResult> {
         if (!await this.fault('before_stop_commit', signal))
@@ -213,8 +250,8 @@ export class SessionJournal implements InvocationJournal {
             const view = await workView(this.engine, state);
             if (view.kind === 'unavailable')
                 return { kind: 'refused', reason: 'storage_unavailable' };
-            const lastCommit = [...state.records].reverse().find(r => r.kind === 'committed');
-            if (view.kind === 'finished' && lastCommit?.kind === 'committed')
+            const lastCommit = [...state.records].reverse().find(r => r.kind === 'committed' || r.kind === 'review_committed');
+            if (view.kind === 'finished' && (lastCommit?.kind === 'committed' || lastCommit?.kind === 'review_committed'))
                 return { kind: 'settled', result: { kind: 'replay', receipt: lastCommit.receipt as ReceiptRef, original: inspection(view) }, view };
             if (view.kind !== 'question')
                 return { kind: 'refused', reason: 'corrupt' };
@@ -224,8 +261,8 @@ export class SessionJournal implements InvocationJournal {
             const captured = state.records.find(r => r.kind === 'captured' && r.delivery === delivery.delivery);
             if (captured?.kind !== 'captured')
                 return { kind: 'redeliver', oldDelivery: delivery.delivery as DeliveryRef, view };
-            const prepared = state.records.find(r => r.kind === 'prepared' && r.response === captured.response);
-            if (prepared?.kind === 'prepared')
+            const prepared = state.records.find(r => (r.kind === 'prepared' || r.kind === 'review_prepared') && r.response === captured.response);
+            if (prepared?.kind === 'prepared' || prepared?.kind === 'review_prepared')
                 return { kind: 'replay', answer: preparedAnswer(state, prepared) };
             return { kind: 'prepare_response', response: { execution: this.enrollment.execution, delivery: delivery.delivery as DeliveryRef, response: captured.response as ResponseRef } as CapturedResponse };
         });

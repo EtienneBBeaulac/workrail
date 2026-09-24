@@ -85,6 +85,7 @@ export type CommitStopResult =
 export type PrepareResult =
   | Readonly<{ kind: 'prepared'; answer: PreparedAnswer }>
   | Readonly<{ kind: 'rejected'; receipt: ReceiptRef; view: WorkView }>
+  | Readonly<{ kind: 'partial'; receipt: ReceiptRef; view: WorkView }>
   | Readonly<{ kind: 'refused'; reason: 'conflict' | 'stale_owner' | 'stopped' | 'invalid_delivery' }>
   | Readonly<{ kind: 'unconfirmed'; reason: 'storage_unavailable' | 'commit_uncertain' }>;
 
