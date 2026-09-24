@@ -1,3 +1,4 @@
+import { answerInvocationDirectory } from '../tools/answer-invocation.js';
 /**
  * Session finalization for completed daemon workflow runs.
  *
@@ -71,7 +72,9 @@ export async function finalizeSession(
   const lifecycle = sidecardLifecycleFor(result._tag, ctx.branchStrategy);
   switch (lifecycle.kind) {
     case 'delete_now':
-      await fs.unlink(path.join(ctx.sessionsDir, `${ctx.sessionId}.json`)).catch(() => {});
+      await fs.unlink(path.join(ctx.sessionsDir, `${ctx.sessionId}.json`))
+        .then(() => fs.rm(answerInvocationDirectory(ctx.sessionsDir, ctx.sessionId), { recursive: true, force: true }))
+        .catch(() => {});
       break;
     case 'retain_for_delivery':
     case 'retain_for_gate':

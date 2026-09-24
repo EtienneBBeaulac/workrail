@@ -1,3 +1,4 @@
+import { answerInvocationDirectory } from '../../src/daemon/tools/answer-invocation.js';
 /** Existing daemon adapter with a token-idempotent fake engine boundary.
  * This exposes duplicate tool-call rebinding, not process restart or model-batch proof.
  */
@@ -49,5 +50,6 @@ it.each(['duplicate', 'fresh'] as const)('binds %s tool-call delivery to its ass
   } finally {
     // Only the real adapter's owned sidecar is removed; existing daemon sessions are untouched.
     await rm(join(DAEMON_SESSIONS_DIR, `${sessionId}.json`), { force: true });
+    await rm(answerInvocationDirectory(DAEMON_SESSIONS_DIR, sessionId), { recursive: true, force: true });
   }
 });

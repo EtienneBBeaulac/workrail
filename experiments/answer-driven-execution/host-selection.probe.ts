@@ -16,7 +16,7 @@
  * - DI6 Case 3: Duplicate tool-call IDs refuse at capture before prepare or dispatch,
  *   preserving storage, while distinct IDs valid control succeeds.
  *
- * Production module 'src/answer-v1/host.ts' is currently absent.
+ * Loads the production host module; absence is an explicit failure.
  * Per probe contract, module absence fails explicitly with 'runtime_unavailable: src/answer-v1/host.ts'.
  * Import errors in an existing module propagate as runtime_error. Tests never skip or pass.
  */
@@ -36,13 +36,13 @@ import type {
   ModelCompletionResult,
   ModelInferenceBoundary,
   ModelPromptInput,
-} from './host-composition.js';
+} from '../../src/answer-v1/contracts/host-composition.js';
 import type {
   ExecutionRef,
   RawModelResponse,
-} from './invocation-contract.js';
+} from '../../src/answer-v1/contracts/invocation-contract.js';
 
-import type { WorkView } from './answer-contract.js';
+import type { WorkView } from '../../src/answer-v1/contracts/answer-contract.js';
 
 function expectPrompt(input: ModelPromptInput, view: Extract<WorkView, { kind: 'question' }>): void {
   expect(input).toEqual({ instruction: view.instruction, issues: view.issues, retainedSummaries: view.retained });
@@ -51,7 +51,7 @@ function expectPrompt(input: ModelPromptInput, view: Extract<WorkView, { kind: '
 const PRODUCTION_MODULE_PATH = 'src/answer-v1/host.ts';
 
 /** Loads the production module factory. Fails via explicit assertion when absent. */
-async function loadCandidateHostFactory(): Promise<typeof import('./host-composition.js').createAnswerHost> {
+async function loadCandidateHostFactory(): Promise<typeof import('../../src/answer-v1/contracts/host-composition.js').createAnswerHost> {
   const absoluteSourcePath = resolve(process.cwd(), PRODUCTION_MODULE_PATH);
   try {
     await stat(absoluteSourcePath);
@@ -62,7 +62,7 @@ async function loadCandidateHostFactory(): Promise<typeof import('./host-composi
     throw err;
   }
 
-  let mod: { createAnswerHost?: typeof import('./host-composition.js').createAnswerHost };
+  let mod: { createAnswerHost?: typeof import('../../src/answer-v1/contracts/host-composition.js').createAnswerHost };
   try {
     mod = await import(/* @vite-ignore */ absoluteSourcePath);
   } catch (err: unknown) {
@@ -156,7 +156,7 @@ interface HostFixtureContext {
   root: string;
   storageConfig: HostJournalStorageConfig;
   workflowsDir: string;
-  loadFactory: () => Promise<typeof import('./host-composition.js').createAnswerHost>;
+  loadFactory: () => Promise<typeof import('../../src/answer-v1/contracts/host-composition.js').createAnswerHost>;
   snapshotFiles: () => Promise<Record<string, string>>;
 }
 

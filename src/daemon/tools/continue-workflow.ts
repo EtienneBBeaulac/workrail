@@ -30,6 +30,7 @@ export function makeContinueWorkflowTool(
 ): AgentTool {
   return {
     name: 'continue_workflow',
+    responsePolicy: 'first_answer',
     description:
       '[DEPRECATED in daemon sessions -- use complete_step instead] ' +
       'Advance the WorkRail workflow to the next step. Call this after completing all work ' +
@@ -286,7 +287,7 @@ export function makeCompleteStepTool(
       // sees this token -- we inject it here so the engine can authenticate the
       // advance call. This is the core value of complete_step over continue_workflow.
       const continueToken = getCurrentToken();
-      const bound = await bindInvocation(sessionId, toolCallId, continueToken, JSON.stringify(params));
+      const bound = await bindInvocation(sessionId, toolCallId, continueToken, params);
       if (bound.kind === 'refused' || bound.token !== continueToken) {
         return { isError: true, content: [{ type: 'text', text: bound.kind === 'refused'
           ? `Answer invocation refused: ${bound.reason}`

@@ -1,3 +1,4 @@
+import { answerInvocationDirectory, createAnswerInvocationBinder } from '../../src/daemon/tools/answer-invocation.js';
 /**
  * Unit tests for runner/finalize-session.ts
  *
@@ -301,4 +302,15 @@ it('retains recovery evidence and clears liveness without recording completion',
   expect(registry.snapshot().size).toBe(0);
   expect(await fs.readdir(tmpDir)).toEqual(before);
   expect(await fs.readFile(ctx.conversationPath, 'utf8')).toBe('{"role":"user"}\n');
+});
+
+it('deletes only the finalized session invocation evidence after deleting its sidecar', async () => {
+  const ctx = makeCtx();
+  await writeSidecar(makeSidecar(tmpDir, ctx.sessionId));
+  const bind = createAnswerInvocationBinder(tmpDir);
+  await bind(ctx.sessionId, 'call', 'token', { notes: 'retained' });
+  await bind('other-session', 'call', 'token', { notes: 'retained' });
+  await finalizeSession({ _tag: 'success', workflowId: 'wr.test', stopReason: 'stop' }, ctx);
+  await expect(fs.access(answerInvocationDirectory(tmpDir, ctx.sessionId))).rejects.toThrow();
+  await expect(fs.access(answerInvocationDirectory(tmpDir, 'other-session'))).resolves.toBeUndefined();
 });

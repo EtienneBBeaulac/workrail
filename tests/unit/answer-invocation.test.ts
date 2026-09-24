@@ -1,3 +1,4 @@
+import { answerInvocationDirectory } from '../../src/daemon/tools/answer-invocation.js';
 import { expect, it } from 'vitest';
 import { mkdtemp, rm, writeFile, readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -23,7 +24,7 @@ it('refuses unreadable or corrupt retained bindings without replacing them', asy
   try {
     const bind = createAnswerInvocationBinder(root);
     await bind('run', 'call', 'first', 'notes');
-    const directory = join(root, 'answer-invocations');
+    const directory = answerInvocationDirectory(root, 'run');
     const file = join(directory, (await readdir(directory))[0]!);
     await writeFile(file, 'corrupt');
     expect(await bind('run', 'call', 'second', 'notes')).toEqual({ kind: 'refused', reason: 'storage_unavailable' });
@@ -31,5 +32,19 @@ it('refuses unreadable or corrupt retained bindings without replacing them', asy
     const unavailable = join(root, 'not-directory');
     await writeFile(unavailable, 'file');
     expect(await createAnswerInvocationBinder(unavailable)('run', 'call', 'first', 'notes')).toEqual({ kind: 'refused', reason: 'storage_unavailable' });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it('accepts semantically identical reordered JSON and keeps different sessions isolated', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'answer-binding-'));
+  try {
+    const bind = createAnswerInvocationBinder(root);
+    expect(await bind('run', 'call', 'first', { notes: 'same', context: { a: 1, b: 2 } })).toEqual({ kind: 'bound', token: 'first' });
+    expect(await bind('run', 'call', 'second', { context: { b: 2, a: 1 }, notes: 'same' })).toEqual({ kind: 'bound', token: 'first' });
+    const directory = answerInvocationDirectory(root, 'run');
+    const before = await readdir(directory);
+    expect(before).toHaveLength(1);
+    expect(await bind('other', 'call', 'second', { notes: 'same' })).toEqual({ kind: 'bound', token: 'second' });
+    expect(await readdir(directory)).toEqual(before);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

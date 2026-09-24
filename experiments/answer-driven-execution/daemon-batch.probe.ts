@@ -1,3 +1,4 @@
+import { answerInvocationDirectory } from '../../src/daemon/tools/answer-invocation.js';
 /** Real AgentLoop + real complete_step adapter; fake model and token-idempotent engine.
  * No gateway, full workflow-runner lifecycle, or process-restart proof.
  */
@@ -78,6 +79,7 @@ it.each(['same-response', 'separate-responses'] as const)(
     } finally {
       agent.abort();
       await rm(join(DAEMON_SESSIONS_DIR, `${sessionId}.json`), { force: true });
+    await rm(answerInvocationDirectory(DAEMON_SESSIONS_DIR, sessionId), { recursive: true, force: true });
     }
   });
 
