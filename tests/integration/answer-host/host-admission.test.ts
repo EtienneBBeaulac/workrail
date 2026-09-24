@@ -887,3 +887,75 @@ it.skipIf(process.platform === 'win32').each(['supervisor', 'enrollment'] as con
     } finally {await host.scheduler.close(signal);}
   } finally {await rm(root,{recursive:true,force:true});}
 });
+
+it.skipIf(process.platform === 'win32').each(['normal','intent_ack','transition_ack','start_ack','stop_ack','cancelled'] as const)(
+  'fences canonical supervisor journal writes across %s and reopen', async failure => {
+    const {reserveSupervisor,retainSupervisorTransition}=await import('../../../src/answer-v1/supervisor-journal.js');
+    const {foldSupervisor}=await import('../../../src/answer-v1/supervisor-state.js');
+    const root=await mkdtemp(join(tmpdir(),'supervisor-writes-'));
+    const controller=new AbortController(),signal=controller.signal;
+    try {
+      const {engine,prepared,expected,candidate,config}=await setup(root);
+      const admitted=await publishAndReconcileHostAdmission(engine,root,expected,candidate.bytes,signal);
+      if(admitted.kind!=='admitted')throw new Error(admitted.kind);
+      const hostConfig={...config,model:{async generate(){return {kind:'unavailable' as const,detail:'unused'};}}};
+      const host=await createAnswerHost(hostConfig,signal);
+      if(host.kind!=='created')throw new Error(host.kind);
+      try {
+        const hydrated=await host.scheduler.hydrator.hydrate(admitted.pointer,signal);
+        if(hydrated.kind!=='hydrated')throw new Error(hydrated.kind);
+        const journal=new SessionJournal(engine,hydrated.enrollment,hostConfig,s=>!s.aborted);
+        const owner={execution:hydrated.enrollment.execution,epoch:1n} as OwnerFence;
+        expect(await journal.locked(signal,false,(state,lock)=>journal.append(state,lock,{kind:'owner_acquired',epoch:'1'},signal))).toBe(true);
+        let transitionAcknowledgments=0;
+        const faulted=new SessionJournal(engine,hydrated.enrollment,{...hostConfig,faultSeam:{async intercept(boundary){
+          if(boundary==='after_supervisor_transition_append')transitionAcknowledgments++;
+          return (failure==='intent_ack'&&boundary==='after_supervisor_intent_append')
+            ||(boundary==='after_supervisor_transition_append'&&((failure==='transition_ack'&&transitionAcknowledgments===1)
+              ||(failure==='start_ack'&&transitionAcknowledgments===2)||(failure==='stop_ack'&&transitionAcknowledgments===4)))
+            ? {kind:'simulate_uncertain',message:'lost ack'} : {kind:'proceed'};
+        }}},s=>!s.aborted);
+        const before=await engine.sessionStore.load(prepared.sessionId);
+        expect(await reserveSupervisor(journal,owner,{configurationDigest:'bad'},signal)).toEqual({kind:'refused',reason:'invalid_input'});
+        expect(await reserveSupervisor(journal,{...owner,epoch:2n},{configurationDigest:'a'.repeat(64)},signal)).toEqual({kind:'refused',reason:'stale_owner'});
+        expect(await engine.sessionStore.load(prepared.sessionId)).toEqual(before);
+        if(failure==='cancelled')controller.abort();
+        const attempts=await Promise.all(Array.from({length:failure==='normal'?2:1},()=>reserveSupervisor(faulted,owner,{configurationDigest:'a'.repeat(64)},signal)));
+        if(failure==='normal')expect(attempts.map(r=>r.kind).sort()).toEqual(['refused','reserved']);
+        if(failure==='intent_ack')expect(attempts[0]).toEqual({kind:'unconfirmed',reason:'commit_uncertain'});
+        if(failure==='cancelled')expect(attempts[0]).toEqual({kind:'refused',reason:'not_started'});
+        const reserved=attempts.find(r=>r.kind==='reserved');
+        if(reserved?.kind==='reserved') {
+          const created={kind:'supervisor_created',supervisor:reserved.supervisor,binding:{daemon:'d',environment:'exact'}};
+          expect(await retainSupervisorTransition(faulted,owner,created,signal)).toEqual(failure==='transition_ack'?{kind:'unconfirmed',reason:'commit_uncertain'}:{kind:'retained'});
+          expect(await retainSupervisorTransition(journal,owner,created,signal)).toEqual({kind:'refused',reason:'invalid_transition'});
+          if(failure==='start_ack'||failure==='stop_ack') {
+            expect(await retainSupervisorTransition(faulted,owner,{...created,kind:'supervisor_start_intended'},signal)).toEqual(failure==='start_ack'?{kind:'unconfirmed',reason:'commit_uncertain'}:{kind:'retained'});
+            if(failure==='stop_ack') {
+              expect(await retainSupervisorTransition(faulted,owner,{...created,kind:'supervisor_started'},signal)).toEqual({kind:'retained'});
+              expect(await retainSupervisorTransition(faulted,owner,{...created,kind:'supervisor_stop_intended'},signal)).toEqual({kind:'unconfirmed',reason:'commit_uncertain'});
+            }
+          }
+          if(failure==='normal') {
+            const start={...created,kind:'supervisor_start_intended'};
+            expect(await retainSupervisorTransition(journal,owner,{...start,binding:{daemon:'d',environment:'replacement'}},signal)).toEqual({kind:'refused',reason:'invalid_transition'});
+            expect(await retainSupervisorTransition(journal,{...owner,epoch:2n},start,signal)).toEqual({kind:'refused',reason:'stale_owner'});
+            expect((await Promise.all([1,2].map(()=>retainSupervisorTransition(journal,owner,start,signal)))).map(r=>r.kind).sort()).toEqual(['refused','retained']);
+          }
+        }
+        const reopened=await composeAnswerEngine(config);
+        if(reopened.kind!=='ready')throw new Error(reopened.kind);
+        const loaded=await readHostState(reopened,hydrated.enrollment);
+        if(loaded.kind!=='loaded')throw new Error(loaded.kind);
+        expect(foldSupervisor(loaded.state.records)).toMatchObject({kind:'valid',state:{kind:
+          failure==='cancelled'?'absent':failure==='intent_ack'?'create_pending':failure==='normal'||failure==='start_ack'?'start_pending':failure==='stop_ack'?'stop_pending':'created'}});
+        const coldSignal=new AbortController().signal;
+        const cold=new SessionJournal(reopened,hydrated.enrollment,hostConfig,s=>!s.aborted);
+        if(failure!=='cancelled')expect(await reserveSupervisor(cold,owner,{configurationDigest:'a'.repeat(64)},coldSignal)).toEqual({kind:'refused',reason:'invalid_transition'});
+        if(reserved?.kind==='reserved') {
+          const duplicateKind=failure==='transition_ack'?'supervisor_created':failure==='stop_ack'?'supervisor_stop_intended':'supervisor_start_intended';
+          expect(await retainSupervisorTransition(cold,owner,{kind:duplicateKind,supervisor:reserved.supervisor,binding:{daemon:'d',environment:'exact'}},coldSignal)).toEqual({kind:'refused',reason:'invalid_transition'});
+        }
+      } finally {await host.scheduler.close(new AbortController().signal);}
+    } finally {await rm(root,{recursive:true,force:true});}
+  });
