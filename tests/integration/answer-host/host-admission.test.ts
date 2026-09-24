@@ -9,7 +9,7 @@ import { bindBudgetedProvider, reserveModelCall } from '../../../src/answer-v1/m
 import type { OwnerFence } from '../../../src/answer-v1/contracts/invocation-contract.js';
 import { decodeDaemonExecutionPolicy } from '../../../src/answer-v1/daemon-policy.js';
 import { errAsync, okAsync } from 'neverthrow';
-import { it, expect } from 'vitest';
+import { it, expect, vi } from 'vitest';
 import { mkdtemp, rm, readFile, writeFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1133,3 +1133,166 @@ it.skipIf(process.env.WORKRAIL_TEST_LINUX_SCRATCH !== '1').each([
     await rm(root,{recursive:true,force:true});
   }
 },90000);
+
+([
+  'two_turns', 'correction', 'expired_idle', 'cancel', 'shutdown', 'credentials',
+  'real_two_turns', 'real_expired_idle',
+  'provider_unknown', 'call_timeout', 'workspace_unknown', 'capture_unknown', 'stale_owner', 'cleanup_unknown',
+] as const).forEach(testCase => {
+  const real = testCase.startsWith('real_');
+  it.skipIf(process.platform === 'win32' || (real && process.env.WORKRAIL_TEST_LINUX_SCRATCH !== '1'))(
+    `execution resource spans canonical deliveries and closes on ${testCase}`, async () => {
+  const scenario = testCase === 'real_two_turns' ? 'two_turns' : testCase === 'real_expired_idle' ? 'expired_idle' : testCase;
+  const { bindLinuxScratchExecution } = await import('../../../src/daemon/runner/linux-scratch/execution.js');
+  const root = await mkdtemp(join(tmpdir(), 'execution-resource-'));
+  const lifetime = new AbortController(), caller = new AbortController();
+  // This matrix drives execution expiry through AdmissionClock. SDK/loop wall timers
+  // are tested separately; do not let host load inject an unrelated 50ms call expiry.
+  if (!real) vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  let operatorCleanup = async () => {};
+  try {
+    const { engine, expected, candidate, config } = await freshFixture(root, 2);
+    const clock = new AdmissionClock(), authority = createFreshAdmissionAuthority(engine, clock, lifetime.signal);
+    const signal = new AbortController().signal;
+    const admitted = await authority.admit(root, expected, candidate.bytes, signal);
+    if (admitted.kind !== 'fresh') throw new Error(admitted.kind);
+    const claimed = await authority.claim(admitted.handoff, signal);
+    if (claimed.kind !== 'owned') throw new Error(claimed.kind);
+    let calls = 0, tools = 0, finishes = 0, correctionSent = false;
+    let scratch = '';
+    const active = new Set<Promise<unknown>>();
+    const track = <T>(p: Promise<T>): Promise<T> => {
+      active.add(p); void p.then(() => active.delete(p), () => active.delete(p)); return p;
+    };
+    let workspace: import('../../../src/daemon/runner/linux-scratch/workspace.js').LinuxScratchWorkspace = {
+      supervisor: 'fake-resource',
+      async execute(name: string, input: unknown) {
+        tools++;
+        if (scenario === 'workspace_unknown') return { kind: 'unknown' as const };
+        if (name === 'Write') scratch = (input as { content: string }).content;
+        else { expect(name).toBe('Read'); expect(scratch).toBe('survives next delivery'); }
+        return { kind: 'completed' as const, text: scratch, isError: false };
+      },
+      async finish(cleanupSignal: AbortSignal) {
+        finishes++;
+        expect(cleanupSignal.aborted).toBe(false);
+        return { inspection: { kind: 'unavailable' as const }, cleanup: scenario === 'cleanup_unknown' ? 'unconfirmed' as const : 'removed' as const };
+      },
+    };
+    if (real) {
+      const { DockerCli } = await import('../../../src/daemon/runner/linux-scratch/docker-cli.js');
+      const { createLinuxScratchWorkspace } = await import('../../../src/daemon/runner/linux-scratch/workspace.js');
+      const docker = DockerCli.local(process.env.WORKRAIL_TEST_DOCKER_BINARY!, process.env.WORKRAIL_TEST_DOCKER_SOCKET!);
+      if (!docker) throw new Error('Explicit Docker binary and socket required');
+      const ids: string[] = [];
+      operatorCleanup = async () => {
+        for (const id of ids) {
+          if ((await docker.run(['inspect', id], signal)).kind === 'completed') {
+            await docker.run(['stop', '--time', '1', id], signal);
+            const inspected = await docker.run(['inspect', id], signal);
+            if (inspected.kind === 'completed' && JSON.parse(inspected.bytes.toString())[0].State.Running === false)
+              await docker.run(['rm', id], signal);
+          }
+        }
+      };
+      const journal = new SessionJournal(engine, claimed.enrollment, { ...config, model: { async generate() { return { kind: 'cancelled' }; } } },
+        s => !s.aborted && claimed.deadline.check().kind === 'active');
+      const created = await createLinuxScratchWorkspace({ journal, owner: claimed.owner, deadline: claimed.deadline,
+        profile: { kind: 'linux_scratch', image: 'python@sha256:eb5be8e5b4d0a159c237946bbdd06356dda5d19c30fc4f7843e8046d3a590333',
+          platform: 'linux/arm64', snapshot: { kind: 'explicit_files', description: 'Empty private lifecycle fixture', files: [] } },
+        artifactDirectory: join(root, 'artifacts'), docker: { stream: docker.stream.bind(docker), async run(...args: Parameters<typeof docker.run>) {
+          const result = await docker.run(...args);
+          if (args[0][0] === 'create' && result.kind === 'completed') ids.push(result.bytes.toString().trim());
+          return result;
+        } } });
+      if (created.kind !== 'ready') throw new Error(JSON.stringify(created));
+      const ownedWorkspace = created.workspace;
+      workspace = { ...ownedWorkspace, async execute(...args) { tools++; return ownedWorkspace.execute(...args); }, async finish(s) {
+        finishes++; expect(s.aborted).toBe(false);
+        const result = await ownedWorkspace.finish(s);
+        expect(ids).toHaveLength(1);
+        expect((await docker.run(['inspect', ids[0]!], signal)).kind).toBe('unknown');
+        return result;
+      } };
+    }
+    const fetch: NonNullable<import('@anthropic-ai/sdk/client').ClientOptions['fetch']> = async (_url, init) => {
+        calls++;
+        if (scenario === 'provider_unknown') throw new Error('lost provider response');
+        const body = JSON.parse(String(init?.body));
+        expect(JSON.stringify(body.messages)).toContain('Changes do not update the user checkout');
+        expect(body.system).toBe('original prompt');
+        const content = body.messages.at(-1)?.content;
+        const toolResult = Array.isArray(content) ? content.find((b: { type: string }) => b.type === 'tool_result') : undefined;
+        const responding = Boolean(toolResult);
+        if (responding) expect(toolResult.is_error).not.toBe(true);
+        if (responding && calls >= 4) expect(JSON.stringify(toolResult.content)).toContain('survives next delivery');
+        const invalid = scenario === 'correction' && responding && !correctionSent;
+        if (invalid) correctionSent = true;
+        const name = responding || (scenario === 'correction' && correctionSent && calls === 3) ? 'answer_work' : calls === 1 ? 'Write' : 'Read';
+        const input = name === 'answer_work' ? (invalid ? { answer: {} } : { answer: { notes: 'verified scratch' } })
+          : name === 'Write' ? { path: 'state.txt', content: 'survives next delivery' } : { path: 'state.txt' };
+        return new Response(JSON.stringify({ id: `response-${calls}`, type: 'message', role: 'assistant', model: 'original-model',
+          content: [{ type: 'tool_use', id: `call-${calls}`, name, input }], stop_reason: 'tool_use', stop_sequence: null,
+          usage: { input_tokens: 1, output_tokens: 1 } }), { headers: { 'content-type': 'application/json' } });
+      };
+    const runnerConfig: import('../../../src/answer-v1/contracts/host-composition.js').SharedAuthorityConfig & Pick<AnswerHostConfig, 'faultSeam'> = { ...config, faultSeam: { async intercept(boundary) {
+      if (scenario === 'call_timeout' && boundary === 'after_model_call_append') await vi.advanceTimersByTimeAsync(50);
+      return scenario === 'capture_unknown' && boundary === 'after_capture_append'
+        ? { kind: 'simulate_uncertain', message: 'capture reply lost' } : { kind: 'proceed' };
+    } } };
+    const managed = bindLinuxScratchExecution({ engine, config: runnerConfig, enrollment: claimed.enrollment,
+      owner: claimed.owner, deadline: claimed.deadline, workspace,
+      credentials: { provider: 'anthropic', apiKey: scenario === 'credentials' ? '' : 'fixture' },
+      fetch, lifetime: lifetime.signal, track });
+    try {
+      if (scenario === 'stale_owner') {
+        const journal = new SessionJournal(engine, claimed.enrollment, { ...runnerConfig, model: { async generate() { return { kind: 'cancelled' }; } } }, s => !s.aborted);
+        expect(await journal.locked(signal, false, (s, l) => journal.append(s, l, { kind: 'owner_acquired', epoch: '2' }, signal))).toBe(true);
+      }
+      if (scenario === 'cancel') caller.abort();
+      if (scenario === 'shutdown') lifetime.abort();
+      let first = await managed.runner.runTurn(caller.signal);
+      if (scenario === 'correction') {
+        expect(first.kind).toBe('rejected'); expect(finishes).toBe(0);
+        first = await managed.runner.runTurn(signal);
+      }
+      if (['two_turns', 'correction', 'expired_idle', 'cleanup_unknown'].includes(scenario)) {
+        expect(first.kind, JSON.stringify(first)).toBe('advanced'); expect(finishes).toBe(0);
+        if (scenario === 'expired_idle') {
+          clock.mono = 101;
+          for (const wake of [...clock.timers]) { clock.timers.delete(wake); wake(); }
+          // Expiry must initiate tracked cleanup without a subsequent turn or close call.
+          await Promise.all([...active]); expect(finishes).toBe(1);
+          expect((await managed.runner.runTurn(signal)).kind).toBe('cancelled');
+          expect(calls).toBe(2);
+        } else {
+          clock.mono = 40;
+          expect(claimed.deadline.check()).toEqual({ kind: 'active', remainingMs: 60 });
+          const second = await managed.runner.runTurn(signal);
+          expect(second).toMatchObject({ kind: 'advanced', nextView: { kind: 'finished' } });
+          expect(tools).toBe(2); expect(calls).toBe(scenario === 'correction' ? 5 : 4);
+        }
+      } else expect(first.kind).not.toBe('advanced');
+      if (scenario === 'call_timeout') {
+        expect(first).toMatchObject({ kind: 'unconfirmed', uncertainty: { stage: 'model_call', failure: { reason: 'commit_uncertain' } } });
+        expect(calls).toBe(0);
+      }
+      const { lifecycle: cleanup } = await managed.close();
+      expect(cleanup.kind).toBe(scenario === 'cleanup_unknown' ? 'incomplete' : 'closed');
+      expect(finishes).toBe(1);
+      const previousCalls = calls;
+      expect((await managed.runner.runTurn(signal)).kind).toBe('cancelled');
+      expect(calls).toBe(previousCalls);
+      const truth = await readHostState(engine, claimed.enrollment);
+      if (truth.kind !== 'loaded') throw new Error(truth.kind);
+      const reservations = truth.state.records.filter(r => r.kind === 'model_call_reserved');
+      if (scenario === 'two_turns') {
+        expect(reservations).toHaveLength(4);
+        expect(new Set(reservations.map(r => r.delivery)).size).toBe(2);
+        expect(truth.state.records.filter(r => r.kind === 'workspace_effect_completed')).toHaveLength(2);
+      }
+      expect(clock.timers.size).toBe(0);
+    } finally { await managed.close(); authority.close(); }
+  } finally { lifetime.abort(); if (!real) vi.useRealTimers(); await operatorCleanup(); await rm(root, { recursive: true, force: true }); }
+});
+});

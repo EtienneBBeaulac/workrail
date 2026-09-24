@@ -49,6 +49,26 @@ It never uses force removal, shared pruning, retries of effects, or a second cle
 Unknown bootstrap/cleanup requires operator reconciliation using canonical evidence. A Docker
 ID check is an observation, not an atomic expected-daemon conditional API or restart guarantee.
 
+## Execution ownership
+
+The internal `bindLinuxScratchExecution` adapter adopts one prepared workspace and the original
+admission deadline. It binds each delivery to fresh canonical model/effect accounting while
+keeping scratch files across accepted nonfinal answers and corrections. The canonical runner
+still owns answer capture and commit; there is no parallel answer engine or execution registry.
+The scratch warning travels in the turn input because the transport owns the retained system
+prompt. It reaches the actual provider request without replacing that retained prompt.
+
+Final answers, failures, uncertainty, cancellation and idle expiry revoke inference and join one
+tracked cleanup operation. Cleanup uses its own bounded capability. An accepted answer remains
+accepted even if cleanup is unconfirmed. `close` exposes both the lifecycle result and workspace
+inspection/cleanup outcome; a provider still settling is reported as work in flight even when the
+workspace is removed. It never reports a thrown cleanup boundary as successful.
+
+This adapter starts after provisioning. Public policy schema, bootstrap failure/unknown handling,
+host enrollment registration and ownership-release integration remain outstanding. The public
+runtime continues refusing daemon policy enrollment. The adapter cannot resume a lost stream or
+reconstruct deadline continuity from a persisted pointer.
+
 ## Verification
 
 Deterministic channel/profile and canonical controller tests run in the ordinary suite. The
@@ -66,3 +86,8 @@ That proof uses a fake model and real canonical journal/controller/backend. It v
 tools, shell-error propagation, retained file contents, cancellation after a write and during a
 running shell, lost replies, stale owners, bootstrap uncertainty, deadline refusal and symlink
 escape refusal. It does not establish improved AI review quality or safe automatic host writeback.
+
+The `execution resource spans` matrix additionally exercises fresh admission, the canonical runner,
+budgeted SDK transport and execution ownership. Ordinary cases use a fake workspace; opt-in
+`real_two_turns` and `real_expired_idle` use Docker, proving one allocation, cross-turn file content
+and cleanup triggered while idle. These are trusted source-composition tests, not public enrollment.

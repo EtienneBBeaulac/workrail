@@ -19,8 +19,15 @@ export function createLinuxScratchAnswerModel(
   journal:SessionJournal,delivery:DeliveryRef,owner:OwnerFence,workspace:LinuxScratchWorkspace,
   options:Omit<Extract<AnswerModelOptions,{readonly provider:unknown}>,'workspaceTools'|'effects'>,
 ){
-  return createDaemonAnswerModel({...options,
-    systemPrompt:options.systemPrompt+'\nYou are working in an isolated Linux scratch copy. Changes do not update the user checkout. Inspection artifacts may be retained by the host; do not claim export or merge.',
+  const result = createDaemonAnswerModel({...options,
     workspaceTools:descriptors,effects:createWorkspaceEffectController(journal,delivery,owner,workspace),
   });
+  if (result.kind !== 'created') return result;
+  // The budgeted transport owns the retained system prompt. Bind workspace semantics
+  // to the turn input so they reach both that transport and directly injected providers.
+  return { kind: 'created' as const, model: { generate(input: Parameters<typeof result.model.generate>[0], signal: AbortSignal) {
+    return result.model.generate({ ...input, instruction:
+      'You are working in an isolated Linux scratch copy. Changes do not update the user checkout. '
+      + 'Inspection artifacts may be retained by the host; do not claim export or merge.\n\n' + input.instruction }, signal);
+  } } };
 }
