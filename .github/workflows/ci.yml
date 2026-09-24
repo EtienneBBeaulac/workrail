@@ -419,7 +419,10 @@ jobs:
         run: npm run -s codemod:test-platform-guard
 
       - name: Run unit and integration tests
-        run: npx vitest run --exclude="tests/contract/**"
+        run: npx vitest run --exclude="tests/contract/**" --exclude="tests/integration/answer-host/operational-e2e.test.ts"
+
+      - name: Answer workflow operational E2E (no retries)
+        run: npm run test:answer-e2e
 
       - name: Upload coverage reports
         if: matrix.node-version == 20

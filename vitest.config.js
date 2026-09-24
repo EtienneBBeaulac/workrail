@@ -6,7 +6,7 @@ import { defineConfig } from 'vitest/config';
 
 // Real Git and CLI fixtures include subprocess startup in their assertions. Run them
 // after functional tests so fixture contention does not consume unchanged deadlines.
-const subprocessFixtures = ['tests/integration/answer-host/supervised-host.test.ts', 'tests/integration/answer-host/stdio-bootstrap.test.ts', 'tests/unit/daemon-workspace-preparation.test.ts', 'tests/integration/mcp-http-transport.test.ts', 'tests/unit/cli-validate.test.ts', 'tests/unit/v2/workspace-anchor-adapter.test.ts', 'tests/integration/git-*.test.ts', 'tests/integration/external-workflow*.test.ts', 'tests/e2e/external-workflows-*.test.ts'];
+const subprocessFixtures = ['tests/integration/answer-host/operational-e2e.test.ts', 'tests/integration/answer-host/supervised-host.test.ts', 'tests/integration/answer-host/stdio-bootstrap.test.ts', 'tests/unit/daemon-workspace-preparation.test.ts', 'tests/integration/mcp-http-transport.test.ts', 'tests/unit/cli-validate.test.ts', 'tests/unit/v2/workspace-anchor-adapter.test.ts', 'tests/integration/git-*.test.ts', 'tests/integration/external-workflow*.test.ts', 'tests/e2e/external-workflows-*.test.ts'];
 
 const shared = {
   // Setup files
