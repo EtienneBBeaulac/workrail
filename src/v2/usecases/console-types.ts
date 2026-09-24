@@ -130,9 +130,11 @@ export interface ConsoleExecutionTraceSummary {
 }
 
 /** Retained observations only, never a live-process or lease-release assertion. */
-export type ConsoleSupervisorStatus =
+export type ConsoleSupervisorObservation =
   | Readonly<{kind:'recorded';phase:'create_pending'|'created'|'start_pending'|'running'|'stop_pending'|'process_stopped'}>
-  | Readonly<{kind:'unconfirmed';operation:'create'|'start'|'stop';reason:'ack_unknown'|'backend_refused'}>
+  | Readonly<{kind:'unconfirmed';operation:'create'|'start'|'stop';reason:'ack_unknown'|'backend_refused'}>;
+export type ConsoleSupervisorStatus = ConsoleSupervisorObservation
+  | Readonly<{kind:'cleanup_fenced';resource:ConsoleSupervisorObservation}>
   | Readonly<{kind:'invalid_history'}>;
 
 export interface ConsoleDagRun {

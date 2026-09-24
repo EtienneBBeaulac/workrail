@@ -44,7 +44,6 @@ export async function createAnswerRuntime(config: AnswerHostConfig, lifetime: Ab
     const tracked = <A extends unknown[], R>(fn: (...args: A) => Promise<R>) => (...args: A): Promise<R> => track(fn(...args));
     const journal = (enrollment: HostEnrollment) => new SessionJournal(engine, enrollment, config, available);
     const ports = (enrollment: HostEnrollment): HostExecutorPorts => createExecutorPorts(engine, config, enrollment, available, track);
-    const ownerOf = (state: HostState): OwnerFence => ({ execution: state.enrollment.execution, epoch: state.epoch }) as OwnerFence;
     const hydrator: TrustedAnswerScheduler['hydrator'] = {
         dehydrate(enrollment) { return { formatVersion: 1, executionId: enrollment.execution, recoveryLocator: enrollment.recovery }; },
         async hydrate(raw, signal) {
@@ -78,6 +77,8 @@ export async function createAnswerRuntime(config: AnswerHostConfig, lifetime: Ab
         return j.locked<RecoverHostSessionResult | ClaimUnownedResult>(signal, { kind: 'refused', reason: 'storage_unavailable', detail: 'Cannot lock recovery' }, async (state, lock) => {
             if (state.records.some(record => record.kind === 'enrolled' && record.request?.daemonPolicy))
                 return { kind: 'refused', reason: 'unsupported_execution_policy', detail: 'This runtime cannot enforce retained daemon policy' };
+            if (state.ownership.kind === 'cleanup')
+                return { kind: 'refused', reason: 'ownership_changed', detail: 'Execution is fenced for cleanup' };
             const view = await workView(engine, state);
             if (view.kind === 'unavailable')
                 return { kind: 'refused', reason: 'storage_unavailable', detail: view.detail };
@@ -89,9 +90,9 @@ export async function createAnswerRuntime(config: AnswerHostConfig, lifetime: Ab
             }
             if (mode.kind === 'conditional' && !owns(state, mode.expected))
                 return { kind: 'refused', reason: 'ownership_changed', detail: 'Expected owner is no longer current' };
-            if (mode.kind === 'unowned' && state.owned)
+            if (mode.kind === 'unowned' && state.ownership.kind !== 'unowned')
                 return { kind: 'busy', detail: 'Execution has an owner' };
-            const owner = { execution: enrollment.execution, epoch: state.epoch + 1n } as OwnerFence;
+            const owner = { execution: enrollment.execution, epoch: state.ownership.epoch + 1n } as OwnerFence;
             if (!await j.append(state, lock, { kind: 'owner_acquired', epoch: owner.epoch.toString() }, signal))
                 return { kind: 'unconfirmed', reason: 'commit_uncertain' };
             return { kind: 'ready', enrollment, owner, runner: runner(enrollment, owner) };

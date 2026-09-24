@@ -9,3 +9,12 @@ function rejectsExecutionAuthority(cleanup: SupervisorCleanup) {
   void cleanup.execute;
 }
 void rejectsExecutionAuthority;
+
+import type { CleanupFence } from '../../../src/answer-v1/cleanup-ownership.js';
+import type { OwnerFence } from '../../../src/answer-v1/contracts/invocation-contract.js';
+function rejectsCleanupAsExecution(cleanup: CleanupFence) {
+  // @ts-expect-error A cleanup fence cannot authorize execution writes.
+  const execution: OwnerFence = cleanup;
+  return execution;
+}
+void rejectsCleanupAsExecution;

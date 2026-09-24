@@ -10,6 +10,7 @@ describe('recorded workspace evidence', () => {
     expect(container.innerHTML).toBe('');
   });
   it.each([
+    [{ kind: 'cleanup_fenced', resource: { kind: 'recorded', phase: 'running' } }, 'Execution fenced for cleanup; Start acknowledged'],
     [{ kind: 'recorded', phase: 'create_pending' }, 'Creation requested'],
     [{ kind: 'recorded', phase: 'created' }, 'Creation acknowledged'],
     [{ kind: 'recorded', phase: 'start_pending' }, 'Start requested'],

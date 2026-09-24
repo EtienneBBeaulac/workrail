@@ -1,3 +1,4 @@
+import { foldAnswerOwnership } from '../../../v2/durable-core/projections/answer-ownership.js';
 /**
  * v2 Advance Core - Public API
  *
@@ -167,10 +168,10 @@ export function executeAdvanceCore(args: {
   // Enforce this under the shared session lock, including legacy/token callers.
   const answerRecords = truth.events.filter(e => e.kind === 'answer_host_recorded' && e.scope.runId === runId);
   if (answerRecords.length > 0) {
-    const ownerEvent = [...answerRecords].reverse().find(e => e.kind === 'answer_host_recorded' && (e.data.kind === 'owner_acquired' || e.data.kind === 'owner_released'));
+    const owner = foldAnswerOwnership(answerRecords.flatMap(e => e.kind === 'answer_host_recorded' ? [e.data] : []));
     const stopped = answerRecords.some(e => e.kind === 'answer_host_recorded' && e.data.kind === 'stopped');
-    if (!lock.assertHeld() || stopped || ownerEvent?.kind !== 'answer_host_recorded' || ownerEvent.data.kind !== 'owner_acquired'
-      || !args.answerOwner || String(args.answerOwner.execution) !== String(sessionId) || args.answerOwner.epoch.toString() !== ownerEvent.data.epoch) {
+    if (!lock.assertHeld() || stopped || owner.kind !== 'valid' || owner.ownership.kind !== 'execution'
+      || !args.answerOwner || String(args.answerOwner.execution) !== String(sessionId) || args.answerOwner.epoch !== owner.ownership.epoch) {
       return errAsync({kind:'answer_owner_required' as const});
     }
   }

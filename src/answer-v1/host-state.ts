@@ -1,3 +1,4 @@
+import { foldAnswerOwnership, type AnswerOwnership } from '../v2/durable-core/projections/answer-ownership.js';
 import { reviewHistory } from './review-history.js';
 import { reviewQuestions } from './review-answer.js';
 import { foldSupervisor } from './supervisor-state.js';
@@ -24,8 +25,7 @@ export type HostState = Readonly<{
     }>;
     records: readonly AnswerHostRecord[];
     node: string;
-    epoch: bigint;
-    owned: boolean;
+    ownership: AnswerOwnership;
 }>;
 export type StateResult = {
     readonly kind: 'loaded';
@@ -62,14 +62,15 @@ export async function readHostState(engine: AnswerReadEngine, enrollment: HostEn
     const supervisor = foldSupervisor(records);
     if (supervisor.kind === 'invalid')
         return { kind: 'unavailable', reason: 'corrupt', detail: `Invalid supervisor history at record ${supervisor.recordIndex}: ${supervisor.reason}` };
-    const owner = [...records].reverse().find(e => e.kind === 'owner_acquired' || e.kind === 'owner_released');
+    const ownership = foldAnswerOwnership(records);
+    if (ownership.kind === 'invalid') return { kind: 'unavailable', reason: 'corrupt', detail: 'Invalid ownership history' };
     const committed = [...records].reverse().find(e => (e.kind === 'committed' || e.kind === 'review_committed'));
     return { kind: 'loaded', state: { truth: loaded.value, mode: entry.data.mode, enrollment, run, records,
             node: (committed?.kind === 'committed' || committed?.kind === 'review_committed') ? committed.successorNode : entry.data.initialNode,
-            epoch: owner ? BigInt(owner.epoch) : 0n, owned: owner?.kind === 'owner_acquired' } };
+            ownership: ownership.ownership } };
 }
 export function owns(state: HostState, owner: OwnerFence): boolean {
-    return state.owned && owner.execution === state.enrollment.execution && owner.epoch === state.epoch;
+    return state.ownership.kind === 'execution' && owner.execution === state.enrollment.execution && owner.epoch === state.ownership.epoch;
 }
 export function hostEvent(engine: AnswerEngine, state: Pick<HostState, 'enrollment' | 'run'>, data: AnswerHostRecord, index: number): HostEvent {
     const eventId = engine.idFactory.mintEventId();

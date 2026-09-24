@@ -32,6 +32,7 @@ export const AnswerHostRecordSchema = z.discriminatedUnion('kind', [
         requiredOutput: z.literal('wr.contracts.review_verdict').optional() }).strict(),
     z.object({ kind: z.literal('owner_acquired'), epoch }).strict(),
     z.object({ kind: z.literal('owner_released'), epoch }).strict(),
+    z.object({ kind: z.literal('cleanup_claimed'), epoch, previousEpoch: epoch, supervisor: id }).strict(),
     z.object({ kind: z.literal('delivered'), delivery: id, node: id, reply: id, epoch }).strict(),
     z.object({ kind: z.literal('model_call_reserved'), delivery: id, call: id, epoch, ordinal: z.number().int().positive().safe() }).strict(),
     z.object({ kind: z.literal('captured'), delivery: id, response: id, payload: raw }).strict(),

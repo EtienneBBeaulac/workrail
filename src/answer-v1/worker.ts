@@ -83,7 +83,7 @@ export async function createAnswerWorker(config: AnswerWorkerConfig, lifetime: A
                 const old = state.records.find(r => r.kind === 'delivered' && r.reply === reply);
                 if (!old && (view.kind !== 'question' || view.reply !== reply))
                     return { kind: 'not_retained' as const, reason: 'invalid_reference' as const };
-                const owner = { execution: state.enrollment.execution, epoch: state.epoch } as OwnerFence;
+                const owner = { execution: state.enrollment.execution, epoch: state.ownership.epoch } as OwnerFence;
                 const ports = scheduler.bindDiagnosticPorts(state.enrollment);
                 const delivery = old?.kind === 'delivered' ? { kind: 'delivered' as const, delivery: old.delivery as import('./contracts/invocation-contract.js').DeliveryRef } : await ports.journal.appendDelivery(reply, owner, signal);
                 if (delivery.kind === 'unconfirmed')

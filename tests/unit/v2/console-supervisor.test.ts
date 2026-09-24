@@ -34,3 +34,15 @@ it('derives canonical order without mutating caller event order',()=>{
   expect(projectConsoleSupervisor(reversed,'run1')).toEqual({kind:'recorded',phase:'created'});
   expect(JSON.stringify(reversed)).toBe(before);
 });
+
+it('shows cleanup fencing separately from resource history and never exposes authority', () => {
+  const retained = records.map(record => record.kind === 'supervisor_create_intended'
+    ? { ...record, daemon: 'private-daemon' } : record);
+  const status = projectConsoleSupervisor(events([...retained,
+    { kind: 'cleanup_claimed', epoch: '2', previousEpoch: '1', supervisor: 'private-id' }]), 'run1');
+  expect(status).toEqual({ kind: 'cleanup_fenced', resource: { kind: 'recorded', phase: 'created' } });
+  expect(JSON.stringify(status)).not.toMatch(/private|epoch|lease|receipt/);
+  expect(projectConsoleSupervisor(events([...retained,
+    { kind: 'cleanup_claimed', epoch: '1', previousEpoch: '1', supervisor: 'private-id' }]), 'run1'))
+    .toEqual({ kind: 'invalid_history' });
+});

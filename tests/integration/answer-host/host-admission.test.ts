@@ -631,7 +631,7 @@ it.skipIf(process.platform === 'win32')('concurrent claims grant exactly one can
     expect(owned.owner.execution).toBe(prepared.sessionId);
     const state = await readHostState(engine, owned.enrollment);
     expect(state.kind).toBe('loaded');
-    if (state.kind === 'loaded') expect([state.state.epoch, state.state.owned]).toEqual([1n, true]);
+    if (state.kind === 'loaded') expect(state.state.ownership).toEqual({ kind: 'execution', epoch: 1n });
     authority.close(); expect(owned.deadline.signal.aborted).toBe(true); expect(clock.timers.size).toBe(0);
   } finally { parent.abort(); await rm(root, { recursive: true, force: true }); }
 });

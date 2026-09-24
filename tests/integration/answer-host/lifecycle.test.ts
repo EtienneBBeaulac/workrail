@@ -195,11 +195,11 @@ it('MCP shutdown drains accepted requests and refuses new requests', () => fixtu
   } finally { release(); await pending; await closing; }
 })));
 
-it.each(['missing','foreign','stale','released','stopped'] as const)('legacy engine advancement cannot bypass %s answer ownership',mode=>fixture(async config=>{
+it.each(['missing','foreign','stale','released','stopped','cleanup','cleanup_epoch'] as const)('legacy engine advancement cannot bypass %s answer ownership',mode=>fixture(async config=>{
   const {scheduler,enrolled}=await enroll(config);
   if(mode==='released')await scheduler.releaseOwnership(enrolled.enrollment,enrolled.owner,signal());
   if(mode==='stopped')await scheduler.bindDiagnosticPorts(enrolled.enrollment).journal.commitStop(enrolled.owner,'cancelled','test stop',signal());
-  const answerOwner=mode==='missing'?undefined:mode==='foreign'?{...enrolled.owner,execution:'sess_foreign' as typeof enrolled.owner.execution}:mode==='stale'?{...enrolled.owner,epoch:enrolled.owner.epoch+1n}:enrolled.owner;
+  const answerOwner=mode==='missing'?undefined:mode==='foreign'?{...enrolled.owner,execution:'sess_foreign' as typeof enrolled.owner.execution}:(mode==='stale'||mode==='cleanup_epoch')?{...enrolled.owner,epoch:enrolled.owner.epoch+1n}:enrolled.owner;
   const {composeAnswerEngine}=await import('../../../src/answer-v1/engine-composition.js');
   const {readHostState}=await import('../../../src/answer-v1/host-state.js');
   const {executeAdvanceCore}=await import('../../../src/mcp/handlers/v2-advance-core/index.js');
@@ -210,6 +210,15 @@ it.each(['missing','foreign','stale','released','stopped'] as const)('legacy eng
   const {hasWorkflowDefinitionShape}=await import('../../../src/types/workflow-definition.js');
   const engine=await composeAnswerEngine(config);
   if(engine.kind!=='ready')throw new Error(engine.kind);
+  if (mode === 'cleanup' || mode === 'cleanup_epoch') {
+    const { SessionJournal } = await import('../../../src/answer-v1/journal.js');
+    const { reserveSupervisor } = await import('../../../src/answer-v1/supervisor-journal.js');
+    const { claimCleanupOwnership } = await import('../../../src/answer-v1/cleanup-ownership.js');
+    const journal = new SessionJournal(engine, enrolled.enrollment, {}, s => !s.aborted);
+    const reserved = await reserveSupervisor(journal, enrolled.owner, { configurationDigest: 'a'.repeat(64), daemon: 'fixture' }, signal());
+    if (reserved.kind !== 'reserved') throw new Error(reserved.kind);
+    expect((await claimCleanupOwnership(journal, enrolled.owner, reserved.supervisor, signal())).kind).toBe('claimed');
+  }
   const loaded=await readHostState(engine,enrolled.enrollment);
   if(loaded.kind!=='loaded')throw new Error(loaded.kind);
   const state=loaded.state;
@@ -436,4 +445,62 @@ it('refuses rebuilding a model for uncaptured work after workspace uncertainty',
     expect(await enrolled.runner.runTurn(signal())).toMatchObject({kind:'refused',reason:'reconciliation_required'});
     expect(bindings).toBe(1);
   } finally {await scheduler.close(signal());}
+}));
+
+it.each(['normal', 'lost_ack'] as const)('cleanup claim survives %s and reopening without enabling execution', scenario => fixture(async config => {
+  const { scheduler, enrolled, reply } = await enroll(config);
+  const { composeAnswerEngine } = await import('../../../src/answer-v1/engine-composition.js');
+  const { SessionJournal } = await import('../../../src/answer-v1/journal.js');
+  const { reserveSupervisor, retainSupervisorTransition } = await import('../../../src/answer-v1/supervisor-journal.js');
+  const { claimCleanupOwnership } = await import('../../../src/answer-v1/cleanup-ownership.js');
+  const { readHostState } = await import('../../../src/answer-v1/host-state.js');
+  const engine = await composeAnswerEngine(config);
+  if (engine.kind !== 'ready') throw new Error(engine.kind);
+  const journal = new SessionJournal(engine, enrolled.enrollment, {}, s => !s.aborted);
+  expect(await claimCleanupOwnership(journal, enrolled.owner, 'missing', signal()))
+    .toEqual({ kind: 'refused', reason: 'missing_identity' });
+  const reserved = await reserveSupervisor(journal, enrolled.owner, { configurationDigest: 'a'.repeat(64), daemon: 'fixture' }, signal());
+  if (reserved.kind !== 'reserved') throw new Error(reserved.kind);
+  const ports = scheduler.bindDiagnosticPorts(enrolled.enrollment);
+  const delivered = await ports.journal.appendDelivery(reply, enrolled.owner, signal());
+  if (delivered.kind !== 'delivered') throw new Error(delivered.kind);
+  const captured = await ports.journal.captureResponse(delivered.delivery, response('retained before fencing'), enrolled.owner, signal());
+  if (captured.kind !== 'captured') throw new Error(captured.kind);
+  const prepared = await ports.journal.prepare(captured.response, enrolled.owner, signal());
+  if (prepared.kind !== 'prepared') throw new Error(prepared.kind);
+  const before = await readHostState(engine, enrolled.enrollment);
+  expect(await claimCleanupOwnership(journal, enrolled.owner, 'wrong', signal())).toEqual({ kind: 'refused', reason: 'invalid_scope' });
+  expect(await readHostState(engine, enrolled.enrollment)).toEqual(before);
+  const claimJournal = scenario === 'normal' ? journal : new class extends SessionJournal {
+    override async append(...args: Parameters<SessionJournal['append']>) {
+      const saved = await super.append(...args);
+      return args[2].kind === 'cleanup_claimed' ? false : saved;
+    }
+  }(engine, enrolled.enrollment, {}, s => !s.aborted);
+  const attempt = await claimCleanupOwnership(claimJournal, enrolled.owner, reserved.supervisor, signal());
+  if (scenario === 'lost_ack') expect(attempt).toEqual({ kind: 'unconfirmed', reason: 'commit_uncertain' });
+  const claim = await claimCleanupOwnership(journal, enrolled.owner, reserved.supervisor, signal());
+  expect(claim).toMatchObject({ kind: 'claimed', fence: { epoch: 2n, previousEpoch: 1n, supervisor: reserved.supervisor } });
+  const retained = await readHostState(engine, enrolled.enrollment);
+  expect(retained).toMatchObject({ kind: 'loaded', state: { ownership: { kind: 'cleanup', epoch: 2n } } });
+  expect(await ports.journal.appendDelivery(reply, enrolled.owner, signal())).toEqual({ kind: 'stale_owner' });
+  expect(await ports.journal.appendDelivery(reply, { ...enrolled.owner, epoch: 2n }, signal())).toEqual({ kind: 'stale_owner' });
+  expect(await ports.journal.captureResponse(delivered.delivery, response('late'), enrolled.owner, signal())).toEqual({ kind: 'stale_owner' });
+  expect(await ports.dispatcher.dispatch(prepared.answer, enrolled.owner, signal())).toEqual({ kind: 'stale_owner' });
+  expect(await scheduler.releaseOwnership(enrolled.enrollment, enrolled.owner, signal())).toEqual({ kind: 'stale_owner' });
+  expect(await retainSupervisorTransition(journal, enrolled.owner, { kind: 'supervisor_created', supervisor: reserved.supervisor,
+    binding: { daemon: 'fixture', environment: 'a'.repeat(64) } }, signal())).toEqual({ kind: 'refused', reason: 'stale_owner' });
+  const reopened = await composeAnswerEngine(config);
+  if (reopened.kind !== 'ready') throw new Error(reopened.kind);
+  const cold = new SessionJournal(reopened, enrolled.enrollment, {}, s => !s.aborted);
+  expect(await claimCleanupOwnership(cold, enrolled.owner, reserved.supervisor, signal())).toEqual(claim);
+  expect(await claimCleanupOwnership(cold, { ...enrolled.owner, epoch: 2n }, reserved.supervisor, signal()))
+    .toEqual({ kind: 'refused', reason: 'ownership_changed' });
+  const pointer = scheduler.hydrator.dehydrate(enrolled.enrollment);
+  for (const result of [await scheduler.recover(pointer, signal()),
+    await scheduler.automaticRecovery.claimUnowned(pointer, signal()),
+    await scheduler.conditionalRecovery.replaceIfCurrent(pointer, enrolled.owner, signal())])
+    expect(result).toMatchObject({ kind: 'refused', reason: 'ownership_changed' });
+  expect(await readHostState(reopened, enrolled.enrollment)).toEqual(retained);
+  await scheduler.close(signal());
 }));

@@ -22,7 +22,8 @@ export function foldWorkspaceEffects(records: readonly AnswerHostRecord[]): Work
       ({ kind: 'invalid', recordIndex, reason });
     switch (record.kind) {
       case 'owner_acquired': owner = record.epoch; modelCall = undefined; break;
-      case 'owner_released': owner = undefined; modelCall = undefined; break;
+      case 'owner_released':
+      case 'cleanup_claimed': owner = undefined; modelCall = undefined; break;
       case 'delivered': delivery = record; modelCall = undefined; break;
       case 'model_call_reserved': modelCall = record; break;
       case 'captured':

@@ -16,6 +16,7 @@ function describe(status: ConsoleSupervisorStatus): string {
       const action = { create: 'Creation', start: 'Start', stop: 'Stop' } as const;
       return `${action[status.operation]} unconfirmed: ${status.reason === 'ack_unknown' ? 'acknowledgment unknown' : 'backend refused the request'}`;
     }
+    case 'cleanup_fenced': return `Execution fenced for cleanup; ${describe(status.resource)}`;
     case 'invalid_history': return 'Conflicting workspace records';
     default: { const unreachable: never = status; return unreachable; }
   }

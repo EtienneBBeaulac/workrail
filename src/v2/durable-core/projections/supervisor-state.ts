@@ -26,6 +26,13 @@ export function foldSupervisor(records: readonly AnswerHostRecord[]): Supervisor
     switch (record.kind) {
       case 'owner_acquired': owner = record.epoch; break;
       case 'owner_released': owner = undefined; break;
+      case 'cleanup_claimed': {
+        const intent = state.kind === 'absent' ? undefined : state.kind === 'unconfirmed' ? state.pending.intent : state.intent;
+        if (!intent || !owner || owner !== record.previousEpoch || intent.epoch !== owner
+          || intent.supervisor !== record.supervisor || !intent.daemon) return invalid('invalid_scope');
+        owner = undefined;
+        break;
+      }
       case 'stopped': stopped = true; break;
       case 'supervisor_create_intended':
         if (!owner || owner !== record.epoch || stopped) return invalid('invalid_scope');
