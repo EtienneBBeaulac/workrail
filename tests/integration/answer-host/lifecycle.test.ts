@@ -1,3 +1,4 @@
+import { createDaemonAnswerModel } from '../../../src/daemon/runner/answer-model.js';
 import { createAnswerWorker } from '../../../src/answer-v1/worker.js';
 import { it, expect } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm, rename, readFile } from 'node:fs/promises';
@@ -262,4 +263,31 @@ it('retains the original request in the canonical enrollment across caller and w
     expect(AnswerHostRecordSchema.parse(legacy)).not.toHaveProperty('request');
     expect(AnswerHostRecordSchema.safeParse({ ...record, request: { ...original, owner: 'forged' } }).success).toBe(false);
   } finally { await replacement.scheduler.close(signal()); }
+}));
+
+
+it.each([
+  { kind: 'refused', reason: 'budget_exhausted' },
+  { kind: 'unconfirmed', reason: 'commit_uncertain' },
+  { kind: 'unconfirmed', reason: 'provider_outcome_unknown' },
+] as const)('retains model call failure $reason as a host outcome', failure => fixture(async config => {
+  let captureAttempts = 0;
+  const adapter = createDaemonAnswerModel({ modelId: 'fake', systemPrompt: 'Answer', workspaceTools: [],
+    provider: { async invoke() { return failure; } },
+  });
+  if (adapter.kind !== 'created') throw new Error(adapter.kind);
+  const { scheduler, enrolled } = await enroll({ ...config,
+    model: adapter.model,
+    faultSeam: { async intercept(boundary) {
+      if (boundary === 'before_capture_append') captureAttempts++;
+      return { kind: 'proceed' };
+    } },
+  });
+  try {
+    const result = await enrolled.runner.runTurn(signal());
+    expect(result).toMatchObject(failure.kind === 'refused'
+      ? { kind: 'refused', reason: 'model_call_refused', failure }
+      : { kind: 'unconfirmed', uncertainty: { stage: 'model_call', failure } });
+    expect(captureAttempts).toBe(0);
+  } finally { await scheduler.close(signal()); }
 }));

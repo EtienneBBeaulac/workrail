@@ -2,10 +2,8 @@ import type { DeliveryRef, OwnerFence } from './contracts/invocation-contract.js
 import { owns } from './host-state.js';
 import type { SessionJournal } from './journal.js';
 
-export type ReserveModelCallResult =
-  | Readonly<{ kind: 'reserved'; call: string; ordinal: number }>
-  | Readonly<{ kind: 'refused'; reason: 'storage_unavailable' | 'stale_owner' | 'stopped' | 'invalid_delivery' | 'missing_policy' | 'budget_exhausted' }>
-  | Readonly<{ kind: 'unconfirmed'; reason: 'commit_uncertain' }>;
+import type { ReserveModelCallResult, BudgetedProviderResult } from './contracts/model-call-contract.js';
+export type { ReserveModelCallResult, BudgetedProviderResult } from './contracts/model-call-contract.js';
 
 /** A reservation spends budget even if its acknowledgement or provider response is lost.
  * It is never replayed as a fresh grant. This primitive does not authorize restart. */
@@ -33,12 +31,6 @@ export async function reserveModelCall(
   return result.kind === 'reserved' && !await journal.fault('after_model_call_append', signal)
     ? { kind: 'unconfirmed', reason: 'commit_uncertain' } : result;
 }
-
-export type BudgetedProviderResult<T> =
-  | Readonly<{ kind: 'completed'; value: T }>
-  | Exclude<ReserveModelCallResult, { kind: 'reserved' }>
-  | Readonly<{ kind: 'refused'; reason: 'busy' | 'reconciliation_required' }>
-  | Readonly<{ kind: 'unconfirmed'; reason: 'provider_outcome_unknown' }>;
 
 /** Host-only composition. The adapter gets invoke, never a journal, owner or reusable
  * grant. The supplied transport must disable hidden retries. No automatic recovery

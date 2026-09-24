@@ -46,6 +46,18 @@ export interface AgentClientInterface {
   };
 }
 
+/** An awaited host boundary may halt inference without fabricating a model response. */
+export interface ControlledInference {
+  generate(params: Anthropic.MessageCreateParamsNonStreaming, signal: AbortSignal): Promise<
+    | Readonly<{ kind: 'response'; response: Anthropic.Message }>
+    | Readonly<{ kind: 'halted' }>
+  >;
+}
+export type ControlledAgentLoopOptions = Omit<AgentLoopOptions, 'client' | 'inference'> & {
+  readonly client?: never;
+  readonly inference: ControlledInference;
+};
+
 /**
  * Result returned by a tool's execute() function.
  *
@@ -202,6 +214,7 @@ export interface AgentLoopCallbacks {
 
 /** Options for constructing an AgentLoop. */
 export interface AgentLoopOptions {
+  readonly inference?: never;
   /** A host-owned answer ends this model turn before any tool in its response runs.
    * The host captures the whole response durably before selecting or committing it. */
   readonly responseHandoff?: {
@@ -293,7 +306,7 @@ export interface AgentLoopOptions {
  * for the surface area used by workflow-runner.ts.
  */
 export class AgentLoop {
-  private readonly _options: AgentLoopOptions;
+  private readonly _options: AgentLoopOptions | ControlledAgentLoopOptions;
   private readonly _listeners: Array<(event: AgentEvent) => Promise<void> | void> = [];
   private readonly _steerQueue: Array<AgentInternalUserMessage> = [];
   private _messages: AgentInternalMessage[] = [];
@@ -315,7 +328,7 @@ export class AgentLoop {
    */
   private _stallTimerHandle: ReturnType<typeof setTimeout> | undefined = undefined;
 
-  constructor(options: AgentLoopOptions) {
+  constructor(options: AgentLoopOptions | ControlledAgentLoopOptions) {
     this._options = options;
   }
 
@@ -470,7 +483,7 @@ export class AgentLoop {
   // ---------------------------------------------------------------------------
 
   private async _runLoop(): Promise<void> {
-    const { client, modelId, systemPrompt, tools, maxTokens = 8192, callbacks, stallTimeoutMs, llmCallTimeoutMs } = this._options;
+    const { modelId, systemPrompt, tools, maxTokens = 8192, callbacks, stallTimeoutMs, llmCallTimeoutMs } = this._options;
 
     while (true) {
       // Check abort before each LLM call.
@@ -526,16 +539,19 @@ export class AgentLoop {
 
       let response: Anthropic.Message;
       try {
-        response = await client.messages.create(
-          {
-            model: modelId,
-            system: systemPrompt,
-            messages: apiMessages,
-            tools: apiTools,
-            max_tokens: maxTokens,
-          },
-          { signal: this._abortController.signal },
-        );
+        const request: Anthropic.MessageCreateParamsNonStreaming = {
+          model: modelId, system: systemPrompt, messages: apiMessages, tools: apiTools, max_tokens: maxTokens,
+        };
+        if (this._options.inference) {
+          const result = await this._options.inference.generate(request, this._abortController.signal);
+          if (result.kind === 'halted') {
+            await this._emitEvent({ type: 'agent_end' });
+            return;
+          }
+          response = result.response;
+        } else {
+          response = await this._options.client.messages.create(request, { signal: this._abortController.signal });
+        }
       } catch (err: unknown) {
         // Distinguish abort from genuine API error.
         const isAbort =

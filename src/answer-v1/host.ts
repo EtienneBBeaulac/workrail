@@ -120,6 +120,10 @@ export async function createAnswerRuntime(config: AnswerHostConfig, lifetime: Ab
                 catch (error) {
                     return signal.aborted ? { kind: 'cancelled' } : { kind: 'refused', reason: 'model_unavailable', detail: String(error) };
                 }
+                if (completion.kind === 'call_failed')
+                    return completion.failure.kind === 'unconfirmed'
+                        ? { kind: 'unconfirmed', uncertainty: { stage: 'model_call', execution: enrollment.execution, delivery: delivery.delivery, failure: completion.failure } }
+                        : { kind: 'refused', reason: 'model_call_refused', failure: completion.failure, detail: completion.failure.reason };
                 if (completion.kind === 'cancelled')
                     return { kind: 'cancelled' };
                 if (completion.kind === 'unavailable')

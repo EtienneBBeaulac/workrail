@@ -1,3 +1,4 @@
+import type { BudgetedProviderResult, ModelCallFailure } from '../../answer-v1/contracts/model-call-contract.js';
 import type Anthropic from '@anthropic-ai/sdk';
 import { AgentLoop, type AgentLoopOptions, type AgentTool } from '../agent-loop.js';
 import type { ModelInferenceBoundary } from '../../answer-v1/contracts/host-composition.js';
@@ -5,8 +6,13 @@ import type { RawModelResponse } from '../../answer-v1/contracts/invocation-cont
 
 /** Composition supplies workspace capabilities only. Engine mutation stays in the host. */
 export type AnswerModelOptions = Pick<AgentLoopOptions,
-  'client' | 'modelId' | 'systemPrompt' | 'maxTokens' | 'callbacks' | 'stallTimeoutMs'
-> & { readonly workspaceTools: readonly AgentTool[] };
+  'modelId' | 'systemPrompt' | 'maxTokens' | 'callbacks' | 'stallTimeoutMs' | 'llmCallTimeoutMs'
+> & { readonly workspaceTools: readonly AgentTool[] } & (
+  | { readonly client: AgentLoopOptions['client']; readonly provider?: never }
+  | { readonly client?: never; readonly provider: {
+      invoke(input: Anthropic.MessageCreateParamsNonStreaming, signal: AbortSignal): Promise<BudgetedProviderResult<Anthropic.Message>>;
+    } }
+);
 
 const answerTool: AgentTool = {
   name: 'answer_work', label: 'Answer work',
@@ -46,18 +52,28 @@ export function createDaemonAnswerModel(options: AnswerModelOptions): CreateDaem
     return { kind: 'refused', reason: 'unsupported_workspace_tool' };
   }
   if (new Set(names).size !== names.length) return { kind: 'refused', reason: 'duplicate_tool_name' };
-  const { workspaceTools, ...loopOptions } = options;
+  const { workspaceTools, client, provider, ...loopOptions } = options;
   const tools = [...workspaceTools, answerTool];
   return { kind: 'created', model: { async generate(input, signal) {
     if (signal.aborted) return { kind: 'cancelled' };
     let response: RawModelResponse | undefined;
-    const loop = new AgentLoop({ ...loopOptions, tools,
+    let failure: ModelCallFailure | undefined;
+    const transport = provider ? { inference: { async generate(params: Anthropic.MessageCreateParamsNonStreaming, callSignal: AbortSignal) {
+      let result: BudgetedProviderResult<Anthropic.Message>;
+      try { result = await provider.invoke(params, callSignal); }
+      catch { result = { kind: 'unconfirmed', reason: 'provider_outcome_unknown' }; }
+      if (result.kind === 'completed') return { kind: 'response' as const, response: result.value };
+      failure = result;
+      return { kind: 'halted' as const };
+    } } } : { client: options.client };
+    const loop = new AgentLoop({ ...loopOptions, ...transport, tools,
       responseHandoff: { toolName: answerTool.name, accept(message) { response = raw(message); } },
     });
     const abort = () => loop.abort();
     signal.addEventListener('abort', abort, { once: true });
     try {
       await loop.prompt({ role: 'user', content: JSON.stringify(input), timestamp: 0 });
+      if (failure) return { kind: 'call_failed', failure };
       if (signal.aborted) return { kind: 'cancelled' };
       if (response) return { kind: 'completed', response };
       const last = loop.state.messages.at(-1);

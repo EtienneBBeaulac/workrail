@@ -1,3 +1,4 @@
+import type { ModelCallFailure } from './model-call-contract.js';
 import type { DaemonExecutionPolicy } from '../../v2/durable-core/schemas/session/daemon-policy.js';
 import type { ConditionalRecoveryPort } from './conditional-recovery-contract.js';
 import type { AutomaticRecoveryPort } from './automatic-recovery-contract.js';
@@ -88,6 +89,7 @@ export type ModelPromptInput = Readonly<{
 }>;
 
 export type ModelCompletionResult =
+  | Readonly<{ kind: 'call_failed'; failure: ModelCallFailure }>
   | Readonly<{ kind: 'completed'; response: RawModelResponse }>
   | Readonly<{ kind: 'unavailable'; detail: string }>
   | Readonly<{ kind: 'cancelled' }>;
@@ -118,12 +120,14 @@ export interface DurableJournalFaultSeam {
 }
 
 export type TurnUncertainty =
+  | Readonly<{ stage: 'model_call'; execution: ExecutionRef; delivery: DeliveryRef; failure: Extract<ModelCallFailure, { kind: 'unconfirmed' }> }>
   | Readonly<{ stage: 'delivery'; execution: ExecutionRef; reply: ReplyRef }>
   | Readonly<{ stage: 'capture'; execution: ExecutionRef; delivery: DeliveryRef }>
   | Readonly<{ stage: 'prepare'; execution: ExecutionRef; delivery: DeliveryRef; response: ResponseRef }>
   | Readonly<{ stage: 'commit_or_dispatch'; invocation: InvocationRef }>;
 
 export type TurnOutcome =
+  | Readonly<{ kind: 'refused'; reason: 'model_call_refused'; failure: Extract<ModelCallFailure, { kind: 'refused' }>; detail: string }>
   | Readonly<{ kind: 'advanced'; receipt: ReceiptRef; nextView: WorkView }>
   | Readonly<{ kind: 'rejected'; receipt: ReceiptRef; correctionView: WorkView }>
   | Readonly<{ kind: 'settled'; receipt: ReceiptRef; view: WorkView }>

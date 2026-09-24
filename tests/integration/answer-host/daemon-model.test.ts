@@ -134,3 +134,72 @@ it('returns provider failure as data and refuses duplicate workspace names', asy
   const read = tool('Read', async () => ({ content: [], details: null }));
   expect(createDaemonAnswerModel(options(client, [read, read]))).toEqual({ kind: 'refused', reason: 'duplicate_tool_name' });
 });
+
+
+it('routes every workspace round through controlled inference', async () => {
+  let requests = 0, executions = 0;
+  const created = createDaemonAnswerModel({ modelId: 'fake', systemPrompt: 'Answer',
+    workspaceTools: [tool('Read', async () => { executions++; return { content: [{ type: 'text', text: 'controlled evidence' }], details: null }; })],
+    provider: { async invoke(params) {
+      requests++;
+      if (requests === 1) return { kind: 'completed', value: message([{ type: 'tool_use', id: 'read', name: 'Read', input: {} }]) };
+      expect(JSON.stringify(params.messages)).toContain('controlled evidence');
+      return { kind: 'completed', value: message([answer('done', 'verified')]) };
+    } },
+  });
+  if (created.kind !== 'created') throw new Error(created.kind);
+  expect(await created.model.generate(prompt, signal())).toMatchObject({ kind: 'completed', response: { calls: [{ id: 'done' }] } });
+  expect([requests, executions]).toEqual([2, 1]);
+});
+
+it.each([
+  { kind: 'refused', reason: 'budget_exhausted' },
+  { kind: 'unconfirmed', reason: 'commit_uncertain' },
+  { kind: 'unconfirmed', reason: 'provider_outcome_unknown' },
+] as const)('preserves controlled failure $reason without executing tools', async failure => {
+  let requests = 0, executions = 0;
+  const created = createDaemonAnswerModel({ modelId: 'fake', systemPrompt: 'Answer',
+    workspaceTools: [tool('Read', async () => { executions++; return { content: [], details: null }; })],
+    provider: { async invoke() { requests++; return failure; } },
+  });
+  if (created.kind !== 'created') throw new Error(created.kind);
+  expect(await created.model.generate(prompt, signal())).toEqual({ kind: 'call_failed', failure });
+  expect([requests, executions]).toEqual([1, 0]);
+});
+
+it('preserves unknown provider outcome when cancellation races with its return', async () => {
+  const control = new AbortController();
+  const failure = { kind: 'unconfirmed', reason: 'provider_outcome_unknown' } as const;
+  const created = createDaemonAnswerModel({ modelId: 'fake', systemPrompt: 'Answer', workspaceTools: [],
+    provider: { async invoke() { control.abort(); return failure; } },
+  });
+  if (created.kind !== 'created') throw new Error(created.kind);
+  expect(await created.model.generate(prompt, control.signal)).toEqual({ kind: 'call_failed', failure });
+});
+
+
+it.each([
+  { kind: 'refused', reason: 'budget_exhausted' },
+  { kind: 'unconfirmed', reason: 'provider_outcome_unknown' },
+] as const)('halts after a workspace round when the next call returns $reason', async failure => {
+  let requests = 0, executions = 0;
+  const created = createDaemonAnswerModel({ modelId: 'fake', systemPrompt: 'Answer',
+    workspaceTools: [tool('Read', async () => { executions++; return { content: [], details: null }; })],
+    provider: { async invoke() {
+      if (++requests === 1) return { kind: 'completed', value: message([{ type: 'tool_use', id: 'read', name: 'Read', input: {} }]) };
+      return failure;
+    } },
+  });
+  if (created.kind !== 'created') throw new Error(created.kind);
+  expect(await created.model.generate(prompt, signal())).toEqual({ kind: 'call_failed', failure });
+  expect([requests, executions]).toEqual([2, 1]);
+});
+
+it('treats an unexpectedly rejected controlled provider as an unknown outcome', async () => {
+  const created = createDaemonAnswerModel({ modelId: 'fake', systemPrompt: 'Answer', workspaceTools: [],
+    provider: { async invoke() { throw new Error('lost provider response'); } },
+  });
+  if (created.kind !== 'created') throw new Error(created.kind);
+  expect(await created.model.generate(prompt, signal())).toEqual({ kind: 'call_failed',
+    failure: { kind: 'unconfirmed', reason: 'provider_outcome_unknown' } });
+});
