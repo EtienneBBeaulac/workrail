@@ -1,3 +1,5 @@
+import type { HostEnrollment, ExecutionRef, OwnerFence } from './contracts/invocation-contract.js';
+import type { RecoveryRef } from './contracts/answer-contract.js';
 import { startExecutionDeadline, type DeadlineClock, type ExecutionDeadline, type DeadlineStopReason, type StartDeadlineResult } from './execution-deadline.js';
 import { z } from 'zod';
 import type { JsonValue } from '../v2/durable-core/canonical/json-types.js';
@@ -165,17 +167,19 @@ export type FreshAdmissionResult = FreshAdmissionFailure
   | Readonly<{ kind: 'fresh'; handoff: FreshAdmission }>
   | Readonly<{ kind: 'existing'; pointer: PersistedHostPointer }>
   | Readonly<{ kind: 'unconfirmed'; reason: 'deadline_stopped'; deadlineReason: DeadlineStopReason }>;
-export type ConsumeFreshAdmissionResult =
-  | Readonly<{ kind: 'consumed'; reservation: AdmissionReservation; deadline: ExecutionDeadline }>
-  | Readonly<{ kind: 'refused'; reason: 'invalid_handoff' }>;
+export type ClaimFreshAdmissionResult =
+  | Readonly<{ kind: 'owned'; reservation: AdmissionReservation; deadline: ExecutionDeadline; enrollment: HostEnrollment; owner: OwnerFence }>
+  | Readonly<{ kind: 'refused'; reason: 'invalid_handoff' | 'journal_changed' | 'cancelled' }>
+  | Readonly<{ kind: 'unconfirmed'; reason: 'storage_unavailable' }>
+  | Readonly<{ kind: 'unconfirmed'; reason: 'deadline_stopped'; deadlineReason: DeadlineStopReason }>;
 
-/** Trusted admission composition only. Consuming transfers deadline cleanup to the host;
- * it does not acquire ownership or permit tools. The host must still validate the exact
- * canonical prefix under its owner lock and enforce workspace capabilities. */
-export function createFreshAdmissionAuthority(engine: AdmissionEngine, clock: DeadlineClock, lifetime: AbortSignal) {
+
+/** Trusted admission composition only. Claiming transfers deadline cleanup and the first
+ * canonical owner to the host. It does not grant a runner or workspace tool capabilities. */
+export function createFreshAdmissionAuthority(engine: AdmissionEngine & Pick<AnswerEngine, 'idFactory'>, clock: DeadlineClock, lifetime: AbortSignal) {
   const shutdown = new AbortController();
   const parent = AbortSignal.any([lifetime, shutdown.signal]);
-  const pending = new Map<FreshAdmission, Readonly<{ reservation: AdmissionReservation; deadline: ExecutionDeadline; detach(): void }>>();
+  const pending = new Map<FreshAdmission, Readonly<{ reservation: AdmissionReservation; deadline: ExecutionDeadline; detach(): void; state: 'pending' | 'claiming' }>>();
   const discard = () => { for (const entry of pending.values()) entry.deadline.close(); pending.clear(); };
   parent.addEventListener('abort', discard, { once: true });
   return {
@@ -214,21 +218,63 @@ export function createFreshAdmissionAuthority(engine: AdmissionEngine, clock: De
         const handoff: FreshAdmission = Object.freeze({ [freshAdmissionBrand]: true });
         const expired = () => { pending.delete(handoff); };
         deadline.signal.addEventListener('abort', expired, { once: true });
-        pending.set(handoff, { reservation: winner.reservation, deadline,
+        pending.set(handoff, { reservation: winner.reservation, deadline, state: 'pending',
           detach() { deadline.signal.removeEventListener('abort', expired); } });
         transferred = true;
         return { kind: 'fresh', handoff };
       } catch { return diagnose({ kind: 'unconfirmed', reason: 'storage_unavailable' }); }
       finally { if (!transferred) deadline.close(); }
     },
-    /** Consumed, expired, closed and foreign handles are all invalid for transfer. */
-    consume(handoff: FreshAdmission): ConsumeFreshAdmissionResult {
+    /** One attempt owns the handoff; a failed/uncertain append never grants a retry. */
+    async claim(handoff: FreshAdmission, requestSignal: AbortSignal): Promise<ClaimFreshAdmissionResult> {
       const entry = pending.get(handoff);
-      if (!entry) return { kind: 'refused', reason: 'invalid_handoff' };
-      pending.delete(handoff);
-      entry.detach();
-      if (entry.deadline.check().kind === 'stopped') { entry.deadline.close(); return { kind: 'refused', reason: 'invalid_handoff' }; }
-      return { kind: 'consumed', reservation: entry.reservation, deadline: entry.deadline };
+      if (!entry || entry.state !== 'pending') return { kind: 'refused', reason: 'invalid_handoff' };
+      const claiming = { ...entry, state: 'claiming' as const };
+      pending.set(handoff, claiming);
+      const signal = AbortSignal.any([requestSignal, entry.deadline.signal]);
+      const available = () => !signal.aborted && entry.deadline.check().kind === 'active';
+      let transferred = false;
+      try {
+        const initialStatus = entry.deadline.check();
+        if (initialStatus.kind === 'stopped') return { kind: 'unconfirmed', reason: 'deadline_stopped', deadlineReason: initialStatus.reason };
+        if (requestSignal.aborted) return { kind: 'refused', reason: 'cancelled' };
+        const reservation = entry.reservation;
+        const result = await engine.gate.withHealthySessionLock(asSessionId(reservation.sessionId), lock =>
+          ResultAsync.fromPromise((async (): Promise<ClaimFreshAdmissionResult> => {
+            if (pending.get(handoff) !== claiming || !available()) return { kind: 'refused', reason: 'invalid_handoff' };
+            pending.delete(handoff); entry.detach();
+            const loaded = await engine.sessionStore.load(asSessionId(reservation.sessionId));
+            if (loaded.isErr()) return { kind: 'unconfirmed', reason: 'storage_unavailable' };
+            // Exact initial truth excludes even released prior owners and uncaptured effects.
+            if (loaded.value.events.length !== reservation.plan.events.length || !matchesAdmissionPrefix(reservation, loaded.value.events))
+              return { kind: 'refused', reason: 'journal_changed' };
+            if (!available()) return { kind: 'refused', reason: 'cancelled' };
+            const enrollment = { execution: reservation.sessionId as ExecutionRef, recovery: reservation.recovery as RecoveryRef } as HostEnrollment;
+            const owner = { execution: enrollment.execution, epoch: 1n } as OwnerFence;
+            const now = clock.read();
+            if (now.kind !== 'reading' || !Number.isSafeInteger(now.wallMs) || now.wallMs < 0) return { kind: 'unconfirmed', reason: 'deadline_stopped', deadlineReason: 'clock_continuity_unavailable' };
+            const event = DomainEventV1Schema.safeParse({ v: 1, kind: 'answer_host_recorded', sessionId: reservation.sessionId,
+              scope: { runId: reservation.runId }, eventId: engine.idFactory.mintEventId(), eventIndex: loaded.value.events.length,
+              timestampMs: now.wallMs,
+              dedupeKey: `answer_host:${reservation.sessionId}:${loaded.value.events.length}`, data: { kind: 'owner_acquired', epoch: '1' } });
+            if (!event.success) return { kind: 'unconfirmed', reason: 'storage_unavailable' };
+            if (!available()) return { kind: 'refused', reason: 'cancelled' };
+            const appended = await engine.sessionStore.append(lock, { events: [event.data], snapshotPins: [] }, loaded.value);
+            if (appended.isErr() || !available()) return { kind: 'unconfirmed', reason: 'storage_unavailable' };
+            return { kind: 'owned', enrollment, owner, reservation, deadline: entry.deadline };
+          })(), () => ({ code: 'FRESH_OWNER_IO_ERROR' as const })));
+        const status = entry.deadline.check();
+        if (status.kind === 'stopped') return { kind: 'unconfirmed', reason: 'deadline_stopped', deadlineReason: status.reason };
+        if (requestSignal.aborted) return { kind: 'unconfirmed', reason: 'storage_unavailable' };
+        if (result.isErr()) return { kind: 'unconfirmed', reason: 'storage_unavailable' };
+        transferred = result.value.kind === 'owned';
+        return result.value;
+      } catch { return { kind: 'unconfirmed', reason: 'storage_unavailable' }; }
+      finally {
+        if (pending.get(handoff) === claiming) pending.delete(handoff);
+        entry.detach();
+        if (!transferred) entry.deadline.close();
+      }
     },
     close() { shutdown.abort(); discard(); },
   };

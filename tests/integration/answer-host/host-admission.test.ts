@@ -458,15 +458,15 @@ it.skipIf(process.platform === 'win32')('fresh handoff belongs to one authority,
     expect(results.map(r => r.kind).sort()).toEqual(['existing', 'fresh']);
     const fresh = results.find(r => r.kind === 'fresh');
     if (!fresh || fresh.kind !== 'fresh') throw new Error('no handoff');
-    expect(foreign.consume(fresh.handoff)).toEqual({ kind: 'refused', reason: 'invalid_handoff' });
-    expect(authority.consume({ ...fresh.handoff })).toEqual({ kind: 'refused', reason: 'invalid_handoff' });
+    expect(await foreign.claim(fresh.handoff, new AbortController().signal)).toEqual({ kind: 'refused', reason: 'invalid_handoff' });
+    expect(await authority.claim({ ...fresh.handoff }, new AbortController().signal)).toEqual({ kind: 'refused', reason: 'invalid_handoff' });
     clock.mono = 40; clock.wall = 500;
     request.abort(); // A completed admission request does not own execution lifetime.
-    const consumed = authority.consume(fresh.handoff);
-    expect(consumed.kind).toBe('consumed');
-    if (consumed.kind !== 'consumed') throw new Error('not consumed');
+    const consumed = await authority.claim(fresh.handoff, new AbortController().signal);
+    expect(consumed.kind).toBe('owned');
+    if (consumed.kind !== 'owned') throw new Error('not consumed');
     expect(consumed.deadline.check()).toEqual({ kind: 'active', remainingMs: 60 });
-    expect(authority.consume(fresh.handoff)).toEqual({ kind: 'refused', reason: 'invalid_handoff' });
+    expect(await authority.claim(fresh.handoff, new AbortController().signal)).toEqual({ kind: 'refused', reason: 'invalid_handoff' });
     expect((await authority.admit(root, expected, candidate.bytes, new AbortController().signal)).kind).toBe('existing');
     expect(clock.timers.size).toBe(1);
     authority.close(); foreign.close();
@@ -519,7 +519,7 @@ it.skipIf(process.platform === 'win32')('closing an authority invalidates pendin
     const result = await authority.admit(root, expected, candidate.bytes, new AbortController().signal);
     if (result.kind !== 'fresh') throw new Error('missing fresh handoff');
     authority.close();
-    expect(authority.consume(result.handoff)).toEqual({ kind: 'refused', reason: 'invalid_handoff' });
+    expect(await authority.claim(result.handoff, new AbortController().signal)).toEqual({ kind: 'refused', reason: 'invalid_handoff' });
     expect(await authority.admit(root, expected, candidate.bytes, new AbortController().signal))
       .toEqual({ kind: 'refused', reason: 'cancelled' });
     expect(clock.timers.size).toBe(0);
@@ -540,12 +540,12 @@ it.skipIf(process.platform === 'win32')('time consumed inside canonical admissio
     const authority = createFreshAdmissionAuthority(delayed, clock, parent.signal);
     const result = await authority.admit(root, expected, candidate.bytes, new AbortController().signal);
     if (result.kind !== 'fresh') throw new Error('missing handoff');
-    const consumed = authority.consume(result.handoff);
-    if (consumed.kind !== 'consumed') throw new Error('not consumed');
+    const consumed = await authority.claim(result.handoff, new AbortController().signal);
+    if (consumed.kind !== 'owned') throw new Error('not consumed');
     expect(consumed.deadline.check()).toEqual({ kind: 'active', remainingMs: 60 });
     const loaded = await engine.sessionStore.load(prepared.sessionId);
     if (loaded.isErr()) throw new Error('load failed');
-    expect(loaded.value.events.filter(e => e.kind === 'answer_host_recorded').map(e => e.data.kind)).toEqual(['enrolled']);
+    expect(loaded.value.events.filter(e => e.kind === 'answer_host_recorded').map(e => e.data.kind)).toEqual(['enrolled', 'owner_acquired']);
     consumed.deadline.close(); authority.close();
     expect(clock.timers.size).toBe(0);
   } finally { parent.abort(); await rm(root, { recursive: true, force: true }); }
@@ -564,6 +564,87 @@ it.skipIf(process.platform === 'win32')('new publication cannot grant fresh hand
     const authority = createFreshAdmissionAuthority(engine, clock, parent.signal);
     expect(await authority.admit(root, newExpected, Buffer.from(JSON.stringify(raw)), signal))
       .toEqual({ kind: 'refused', reason: 'journal_conflict' });
+    expect(await engine.sessionStore.load(prepared.sessionId)).toEqual(before);
+    expect(clock.timers.size).toBe(0); authority.close();
+  } finally { parent.abort(); await rm(root, { recursive: true, force: true }); }
+});
+
+
+it.skipIf(process.platform === 'win32').each(['intervening_owner', 'lost_ack', 'expiry', 'request_cancel'])('fresh owner acquisition fails closed after %s and cannot reuse its handoff', async scenario => {
+  const root = await mkdtemp(join(tmpdir(), 'fresh-owner-')), parent = new AbortController(), request = new AbortController();
+  try {
+    const { engine, expected, candidate, prepared } = await freshFixture(root), clock = new AdmissionClock();
+    let claiming = false;
+    const controlled = { ...engine, sessionStore: {
+      load: async (...args: Parameters<typeof engine.sessionStore.load>) => {
+        const loaded = await engine.sessionStore.load(...args);
+        if (claiming && scenario === 'expiry') clock.mono = 101;
+        if (claiming && scenario === 'request_cancel') request.abort();
+        return loaded;
+      },
+      append: (...args: Parameters<typeof engine.sessionStore.append>) => engine.sessionStore.append(...args).andThen(value =>
+        claiming && scenario === 'lost_ack' ? errAsync({ code: 'SESSION_STORE_IO_ERROR' as const, message: 'owner acknowledgement lost' }) : okAsync(value)),
+    } };
+    const authority = createFreshAdmissionAuthority(controlled, clock, parent.signal);
+    const admitted = await authority.admit(root, expected, candidate.bytes, request.signal);
+    if (admitted.kind !== 'fresh') throw new Error('no fresh handoff');
+    if (scenario === 'intervening_owner') {
+      const decoded = decodeAdmissionReservation(candidate.bytes, expected);
+      if (decoded.kind !== 'validated') throw new Error('fixture');
+      const result = await engine.gate.withHealthySessionLock(prepared.sessionId, lock => engine.sessionStore.append(lock, {
+        events: [{ v: 1, kind: 'answer_host_recorded', sessionId: prepared.sessionId, scope: { runId: prepared.runId },
+          eventId: engine.idFactory.mintEventId(), eventIndex: decoded.reservation.plan.events.length, timestampMs: 1000,
+          dedupeKey: `answer_host:${prepared.sessionId}:${decoded.reservation.plan.events.length}`, data: { kind: 'owner_acquired', epoch: '1' } }], snapshotPins: [],
+      }));
+      expect(result.isOk()).toBe(true);
+    }
+    const before = await engine.sessionStore.load(prepared.sessionId);
+    claiming = true;
+    const result = await authority.claim(admitted.handoff, request.signal);
+    expect(result).toEqual(scenario === 'intervening_owner' ? { kind: 'refused', reason: 'journal_changed' }
+      : scenario === 'expiry' ? { kind: 'unconfirmed', reason: 'deadline_stopped', deadlineReason: 'expired' }
+      : { kind: 'unconfirmed', reason: 'storage_unavailable' });
+    expect(await authority.claim(admitted.handoff, new AbortController().signal)).toEqual({ kind: 'refused', reason: 'invalid_handoff' });
+    const after = await engine.sessionStore.load(prepared.sessionId);
+    if (after.isErr()) throw new Error('load');
+    expect(after.value.events.filter(e => e.kind === 'answer_host_recorded' && e.data.kind === 'owner_acquired'))
+      .toHaveLength(scenario === 'lost_ack' || scenario === 'intervening_owner' ? 1 : 0);
+    if (scenario !== 'lost_ack') expect(after).toEqual(before);
+    expect(clock.timers.size).toBe(0); authority.close();
+  } finally { parent.abort(); await rm(root, { recursive: true, force: true }); }
+});
+
+it.skipIf(process.platform === 'win32')('concurrent claims grant exactly one canonical first owner', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fresh-owner-race-')), parent = new AbortController();
+  try {
+    const { engine, expected, candidate, prepared } = await freshFixture(root), clock = new AdmissionClock();
+    const authority = createFreshAdmissionAuthority(engine, clock, parent.signal), signal = new AbortController().signal;
+    const admitted = await authority.admit(root, expected, candidate.bytes, signal);
+    if (admitted.kind !== 'fresh') throw new Error('missing handoff');
+    const results = await Promise.all([1, 2].map(() => authority.claim(admitted.handoff, signal)));
+    expect(results.map(r => r.kind).sort()).toEqual(['owned', 'refused']);
+    const owned = results.find(r => r.kind === 'owned');
+    if (!owned || owned.kind !== 'owned') throw new Error('no owner');
+    expect(owned.owner.epoch).toBe(1n);
+    expect(owned.owner.execution).toBe(prepared.sessionId);
+    const state = await readHostState(engine, owned.enrollment);
+    expect(state.kind).toBe('loaded');
+    if (state.kind === 'loaded') expect([state.state.epoch, state.state.owned]).toEqual([1n, true]);
+    authority.close(); expect(owned.deadline.signal.aborted).toBe(true); expect(clock.timers.size).toBe(0);
+  } finally { parent.abort(); await rm(root, { recursive: true, force: true }); }
+});
+
+
+it.skipIf(process.platform === 'win32')('expiry discovered before the owner lock retains its reason and writes no owner', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fresh-owner-expired-')), parent = new AbortController();
+  try {
+    const { engine, expected, candidate, prepared } = await freshFixture(root), clock = new AdmissionClock();
+    const authority = createFreshAdmissionAuthority(engine, clock, parent.signal), signal = new AbortController().signal;
+    const admitted = await authority.admit(root, expected, candidate.bytes, signal);
+    if (admitted.kind !== 'fresh') throw new Error('missing handoff');
+    const before = await engine.sessionStore.load(prepared.sessionId);
+    clock.mono = 101;
+    expect(await authority.claim(admitted.handoff, signal)).toEqual({ kind: 'unconfirmed', reason: 'deadline_stopped', deadlineReason: 'expired' });
     expect(await engine.sessionStore.load(prepared.sessionId)).toEqual(before);
     expect(clock.timers.size).toBe(0); authority.close();
   } finally { parent.abort(); await rm(root, { recursive: true, force: true }); }
