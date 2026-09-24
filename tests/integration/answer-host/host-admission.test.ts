@@ -1,3 +1,5 @@
+import { createExecutionRunner } from '../../../src/answer-v1/execution-runner.js';
+import type { AnswerHostConfig } from '../../../src/answer-v1/contracts/host-composition.js';
 import { createFreshAdmissionAuthority } from '../../../src/answer-v1/host-admission.js';
 import type { DeadlineClock } from '../../../src/answer-v1/execution-deadline.js';
 import { createDeliveryAnswerModel } from '../../../src/daemon/runner/delivery-answer-model.js';
@@ -22,13 +24,13 @@ import { publishAdmissionFile } from '../../../src/answer-v1/immutable-admission
 import { decodeAdmissionReservation } from '../../../src/answer-v1/admission-reservation.js';
 import { asSessionId, asSnapshotRef, asSha256Digest } from '../../../src/v2/durable-core/ids/index.js';
 
-async function setup(root: string) {
+async function setup(root: string, stepCount = 1) {
   const config = { storage: { journalRootDir: join(root, 'sessions'), hostIndexRootDir: join(root, 'index') },
     keyringPath: join(root, 'keys', 'keyring.json'), workflowStoragePath: join(root, 'workflow-source') };
   const engine = await composeAnswerEngine(config);
   if (engine.kind !== 'ready') throw new Error(engine.kind);
   const workflow = createWorkflow({ id: 'admission', name: 'Admission', description: 'Admission fixture', version: '1.0.0',
-    steps: [{ id: 'first', title: 'First', prompt: 'Original' }] }, createUserDirectorySource(config.workflowStoragePath));
+    steps: Array.from({ length: stepCount }, (_, i) => ({ id: i === 0 ? 'first' : 'second', title: 'Step', prompt: 'Original' })) }, createUserDirectorySource(config.workflowStoragePath));
   const request = { workflowId: 'admission', goal: 'original goal', workspacePath: root };
   const prepare = async () => {
     const result = await prepareStartWorkflow({ ...engine, fallbackWorkflowReader: { getWorkflowById: async () => workflow } },
@@ -433,8 +435,8 @@ class AdmissionClock implements DeadlineClock {
     this.timers.add(wake); return { kind: 'scheduled', cancel: () => { this.timers.delete(wake); } };
   }
 }
-async function freshFixture(root: string) {
-  const fixture = await setup(root);
+async function freshFixture(root: string, stepCount = 1) {
+  const fixture = await setup(root, stepCount);
   const parsed = decodeDaemonExecutionPolicy({ formatVersion: 1, profile: 'daemon_answers_v1',
     model: { provider: 'anthropic', modelId: 'original-model' }, systemPrompt: 'original prompt',
     limits: { expiresAtMs: 1100, maxModelCalls: 5, maxOutputTokens: 100, stallTimeoutMs: 100, callTimeoutMs: 50 },
@@ -647,5 +649,65 @@ it.skipIf(process.platform === 'win32')('expiry discovered before the owner lock
     expect(await authority.claim(admitted.handoff, signal)).toEqual({ kind: 'unconfirmed', reason: 'deadline_stopped', deadlineReason: 'expired' });
     expect(await engine.sessionStore.load(prepared.sessionId)).toEqual(before);
     expect(clock.timers.size).toBe(0); authority.close();
+  } finally { parent.abort(); await rm(root, { recursive: true, force: true }); }
+});
+
+
+it.skipIf(process.platform === 'win32').each(['two_turns', 'expired_idle', 'expired_model', 'expired_commit', 'shutdown'])('claimed deadline bounds the actual execution runner through %s', async scenario => {
+  const root = await mkdtemp(join(tmpdir(), 'deadline-runner-')), parent = new AbortController();
+  try {
+    const { engine, expected, candidate, prepared, config } = await freshFixture(root, 2), clock = new AdmissionClock();
+    const authority = createFreshAdmissionAuthority(engine, clock, parent.signal), signal = new AbortController().signal;
+    const admitted = await authority.admit(root, expected, candidate.bytes, signal);
+    if (admitted.kind !== 'fresh') throw new Error('no admission');
+    const claimed = await authority.claim(admitted.handoff, signal);
+    if (claimed.kind !== 'owned') throw new Error('no ownership');
+    let generations = 0;
+    let observedModelSignal: AbortSignal | undefined;
+    const runnerConfig: AnswerHostConfig = { ...config,
+      faultSeam: { async intercept(boundary) {
+        if (scenario === 'expired_commit' && boundary === 'before_engine_transaction') clock.mono = 101;
+        return { kind: 'proceed' };
+      } },
+      model: { async generate(_input, modelSignal) {
+        generations++;
+        if (scenario === 'expired_model') {
+          clock.mono = 101;
+          for (const wake of [...clock.timers]) { clock.timers.delete(wake); wake(); }
+          observedModelSignal = modelSignal;
+          return { kind: 'cancelled' };
+        }
+        return { kind: 'completed', response: { responseText: '', calls: [{ id: `answer-${generations}`, name: 'answer_work',
+          argumentsJson: JSON.stringify({ answer: { notes: 'retained notes' } }) }] } };
+      } },
+    };
+    const runner = createExecutionRunner(engine, runnerConfig, claimed.enrollment, claimed.owner, parent.signal, p => p,
+      { kind: 'deadline', deadline: claimed.deadline });
+    if (scenario === 'shutdown') parent.abort();
+    const first = await runner.runTurn(signal);
+    if (scenario === 'two_turns' || scenario === 'expired_idle') {
+      expect(first.kind).toBe('advanced');
+      clock.mono = scenario === 'two_turns' ? 40 : 101;
+      clock.wall = 500; // Idle wall rollback must not reset monotonic execution budget.
+      if (scenario === 'two_turns') expect(claimed.deadline.check()).toEqual({ kind: 'active', remainingMs: 60 });
+      const second = await runner.runTurn(signal);
+      expect(second.kind).toBe(scenario === 'two_turns' ? 'advanced' : 'cancelled');
+      if (scenario === 'two_turns' && second.kind === 'advanced') expect(second.nextView.kind).toBe('finished');
+      expect(generations).toBe(scenario === 'two_turns' ? 2 : 1);
+    } else {
+      expect(first.kind).not.toBe('advanced');
+      expect(generations).toBe(scenario === 'shutdown' ? 0 : 1);
+    }
+    const loaded = await engine.sessionStore.load(prepared.sessionId);
+    if (loaded.isErr()) throw new Error('load failed');
+    const records = loaded.value.events.filter(e => e.kind === 'answer_host_recorded');
+    expect(records.filter(e => e.data.kind === 'committed')).toHaveLength(scenario === 'two_turns' ? 2 : scenario === 'expired_idle' ? 1 : 0);
+    if (scenario === 'expired_model') {
+      expect(observedModelSignal?.aborted).toBe(true);
+      expect(records.filter(e => e.data.kind === 'captured')).toHaveLength(0);
+    }
+    expect(claimed.deadline.signal.aborted).toBe(true);
+    expect(clock.timers.size).toBe(0);
+    authority.close();
   } finally { parent.abort(); await rm(root, { recursive: true, force: true }); }
 });
