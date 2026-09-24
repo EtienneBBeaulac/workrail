@@ -1,3 +1,4 @@
+import { createDeliveryAnswerModel } from '../../../src/daemon/runner/delivery-answer-model.js';
 import { SessionJournal } from '../../../src/answer-v1/journal.js';
 import { readHostState, workView } from '../../../src/answer-v1/host-state.js';
 import { bindBudgetedProvider, reserveModelCall } from '../../../src/answer-v1/model-call-budget.js';
@@ -333,5 +334,90 @@ it.skipIf(process.platform === 'win32').each(['reservation', 'provider'])('charg
       expect(await reserveModelCall(coldJournal, successorDelivery.delivery, owner, signal)).toEqual({ kind: 'refused', reason: 'budget_exhausted' });
       expect(await reserveModelCall(coldJournal, delivery.delivery, { ...owner, epoch: 2n }, signal)).toEqual({ kind: 'refused', reason: 'stale_owner' });
     } finally { await host.scheduler.close(signal); }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+it.skipIf(process.platform === 'win32').each(['answer', 'budget', 'unknown', 'stale', 'replaced', 'stall', 'stale_before', 'tools', 'credentials', 'missing_policy', 'abort'])('binds canonical delivery through the SDK and model loop: %s', async scenario => {
+  const root = await mkdtemp(join(tmpdir(), 'delivery-model-'));
+  const control = new AbortController();
+  const signal = control.signal;
+  try {
+    const { engine, prepared, expected, config } = await setup(root);
+    const decoded = decodeDaemonExecutionPolicy({ formatVersion: 1, profile: 'daemon_answers_v1',
+      model: { provider: 'anthropic', modelId: 'original-model' }, systemPrompt: 'original',
+      limits: { expiresAtMs: 100000, maxModelCalls: 1, maxOutputTokens: 100, stallTimeoutMs: scenario === 'stall' ? 2147483648 : 5000, callTimeoutMs: 5000 },
+      workspace: { kind: 'existing', workspacePath: root }, delivery: { kind: 'none' },
+      restart: { kind: 'requires_explicit_reconciliation' } });
+    if (decoded.kind !== 'validated') throw new Error('invalid fixture');
+    const request = scenario === 'missing_policy' ? expected.request : { ...expected.request, daemonPolicy: decoded.policy };
+    const candidate = buildHostAdmissionCandidate(prepared, request, expected.operationId, engine, () => 1);
+    if (candidate.kind !== 'candidate') throw new Error(candidate.kind);
+    const admitted = await publishAndReconcileHostAdmission(engine, root, { ...expected, request }, candidate.bytes, signal);
+    if (admitted.kind !== 'admitted') throw new Error(admitted.kind);
+    let calls = 0;
+    const hostConfig = { ...config, model: { async generate() { return { kind: 'unavailable' as const, detail: 'unused' }; } } };
+    const host = await createAnswerHost(hostConfig, signal);
+    if (host.kind !== 'created') throw new Error(host.kind);
+    try {
+      const hydrated = await host.scheduler.hydrator.hydrate(admitted.pointer, signal);
+      if (hydrated.kind !== 'hydrated') throw new Error(hydrated.kind);
+      const journal = new SessionJournal(engine, hydrated.enrollment, hostConfig, s => !s.aborted);
+      // Trusted test fixture seeds canonical ownership. Production scheduler still refuses policy.
+      const owner = { execution: hydrated.enrollment.execution, epoch: 1n } as OwnerFence;
+      expect(await journal.locked(signal, false, (state, lock) => journal.append(state, lock,
+        { kind: 'owner_acquired', epoch: '1' }, signal))).toBe(true);
+      const state = await readHostState(engine, hydrated.enrollment);
+      if (state.kind !== 'loaded') throw new Error(state.kind);
+      const view = await workView(engine, state.state);
+      if (view.kind !== 'question') throw new Error(view.kind);
+      const delivery = await journal.appendDelivery(view.reply, owner, signal);
+      if (delivery.kind !== 'delivered') throw new Error(delivery.kind);
+
+      let toolRuns = 0;
+      const reservationCounts: number[] = [];
+      const model = await createDeliveryAnswerModel(journal, delivery.delivery, scenario === 'stale_before' ? { ...owner, epoch: 2n } : owner,
+        scenario === 'credentials' ? { provider: 'amazon_bedrock', accessKeyId: 'fake', secretAccessKey: 'fake' } : { provider: 'anthropic', apiKey: 'fake-test-key' }, [{ name: scenario === 'tools' ? 'unsupported' : 'Read', label: 'Read', description: 'Read',
+          inputSchema: { type: 'object', properties: {} }, async execute() { toolRuns++; return { content: [], details: null }; } }],
+        async (_url, init) => {
+          calls++;
+          const truth = await engine.sessionStore.load(prepared.sessionId);
+          if (truth.isErr()) throw new Error(truth.error.code);
+          reservationCounts.push(truth.value.events.filter(e => e.kind === 'answer_host_recorded' && e.data.kind === 'model_call_reserved').length);
+          const requestBody = JSON.parse(String(init?.body));
+          expect(requestBody.model).toBe('original-model');
+          expect(requestBody.system).toBe('original');
+          if (scenario === 'abort') { control.abort(); throw new Error('aborted network response'); }
+          if (scenario === 'unknown') throw new Error('lost network response');
+          return new Response(JSON.stringify({ id: 'result', type: 'message', role: 'assistant', model: 'original-model',
+            content: [{ type: 'tool_use', id: 'call', name: scenario === 'budget' ? 'Read' : 'answer_work',
+              input: scenario === 'budget' ? {} : { answer: { notes: 'supported' } } }],
+            stop_reason: 'tool_use', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } }),
+            { headers: { 'content-type': 'application/json' } });
+        }, signal);
+      const refusal = { stall: 'unsupported_stall_timeout', stale_before: 'stale_owner', tools: 'unsupported_workspace_tool', credentials: 'credential_mismatch', missing_policy: 'missing_policy' };
+      if (scenario in refusal) {
+        expect(model).toEqual({ kind: 'refused', reason: refusal[scenario as keyof typeof refusal] });
+        expect(calls).toBe(0);
+        return;
+      }
+      if (model.kind !== 'created') throw new Error(model.reason);
+      if (scenario === 'replaced') expect((await journal.redeliver(delivery.delivery, view.reply, owner, signal)).kind).toBe('delivered');
+      if (scenario === 'stale') {
+        expect(await journal.locked(signal, false, (state, lock) => journal.append(state, lock,
+          { kind: 'owner_acquired', epoch: '2' }, signal))).toBe(true);
+      }
+      const prompt = { instruction: 'First', issues: [], retainedSummaries: [] };
+      const result = await model.model.generate(prompt, signal);
+      expect(reservationCounts).toEqual(scenario === 'stale' || scenario === 'replaced' ? [] : [1]);
+      if (scenario === 'answer') expect(result).toMatchObject({ kind: 'completed', response: { calls: [{ name: 'answer_work' }] } });
+      else expect(result).toEqual({ kind: 'call_failed', failure: scenario === 'unknown' || scenario === 'abort'
+        ? { kind: 'unconfirmed', reason: 'provider_outcome_unknown' }
+        : { kind: 'refused', reason: scenario === 'stale' ? 'stale_owner' : scenario === 'replaced' ? 'invalid_delivery' : 'budget_exhausted' } });
+      if (scenario === 'unknown') expect(await model.model.generate(prompt, signal))
+        .toEqual({ kind: 'call_failed', failure: { kind: 'refused', reason: 'reconciliation_required' } });
+      expect(calls).toBe(scenario === 'stale' || scenario === 'replaced' ? 0 : 1);
+      expect(toolRuns).toBe(scenario === 'budget' ? 1 : 0);
+    } finally { await host.scheduler.close(new AbortController().signal); }
   } finally { await rm(root, { recursive: true, force: true }); }
 });
