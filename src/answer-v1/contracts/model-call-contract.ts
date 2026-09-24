@@ -1,6 +1,6 @@
 export type ReserveModelCallResult =
   | Readonly<{ kind: 'reserved'; call: string; ordinal: number }>
-  | Readonly<{ kind: 'refused'; reason: 'storage_unavailable' | 'stale_owner' | 'stopped' | 'invalid_delivery' | 'missing_policy' | 'budget_exhausted' }>
+  | Readonly<{ kind: 'refused'; reason: 'storage_unavailable' | 'stale_owner' | 'stopped' | 'invalid_delivery' | 'missing_policy' | 'budget_exhausted' | 'reconciliation_required' }>
   | Readonly<{ kind: 'unconfirmed'; reason: 'commit_uncertain' }>;
 
 export type BudgetedProviderResult<T> =

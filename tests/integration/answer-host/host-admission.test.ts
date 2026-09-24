@@ -711,3 +711,73 @@ it.skipIf(process.platform === 'win32').each(['two_turns', 'expired_idle', 'expi
     authority.close();
   } finally { parent.abort(); await rm(root, { recursive: true, force: true }); }
 });
+
+it.skipIf(process.platform === 'win32').each(['normal', 'intent_ack', 'outcome_ack', 'cancelled'] as const)(
+  'journals workspace effects without replay after %s', async failure => {
+    const { reserveWorkspaceEffect, retainWorkspaceEffect } = await import('../../../src/answer-v1/workspace-effect-journal.js');
+    const { foldWorkspaceEffects } = await import('../../../src/answer-v1/workspace-effect-state.js');
+    const root = await mkdtemp(join(tmpdir(), 'workspace-effect-journal-'));
+    const controller = new AbortController();
+    const signal = controller.signal;
+    try {
+      const { engine, prepared, expected, candidate, config } = await setup(root);
+      const admitted = await publishAndReconcileHostAdmission(engine, root, expected, candidate.bytes, signal);
+      if (admitted.kind !== 'admitted') throw new Error(admitted.kind);
+      const hostConfig: AnswerHostConfig = { ...config, model: { async generate() { return {kind:'unavailable',detail:'unused'}; } } };
+      const host = await createAnswerHost(hostConfig, signal);
+      if (host.kind !== 'created') throw new Error(host.kind);
+      try {
+        const hydrated = await host.scheduler.hydrator.hydrate(admitted.pointer, signal);
+        if (hydrated.kind !== 'hydrated') throw new Error(hydrated.kind);
+        const journal = new SessionJournal(engine, hydrated.enrollment, hostConfig, s => !s.aborted);
+        const owner = {execution:hydrated.enrollment.execution,epoch:1n} as OwnerFence;
+        expect(await journal.locked(signal, false, (state, lock) => journal.append(state,lock,{kind:'owner_acquired',epoch:'1'},signal))).toBe(true);
+        const loaded = await readHostState(engine, hydrated.enrollment);
+        if (loaded.kind !== 'loaded') throw new Error(loaded.kind);
+        const view = await workView(engine,loaded.state);
+        if (view.kind !== 'question') throw new Error(view.kind);
+        const delivery = await journal.appendDelivery(view.reply,owner,signal);
+        if (delivery.kind !== 'delivered') throw new Error(delivery.kind);
+        // Seed a trusted provider reservation; this test exercises the effect journal only.
+        expect(await journal.locked(signal,false,(state,lock)=>journal.append(state,lock,
+          {kind:'model_call_reserved',delivery:delivery.delivery,call:'model1',epoch:'1',ordinal:1},signal))).toBe(true);
+        const faulted = new SessionJournal(engine,hydrated.enrollment,{...hostConfig,faultSeam:{async intercept(boundary){
+          return (failure === 'intent_ack' && boundary === 'after_effect_intent_append')
+            || (failure === 'outcome_ack' && boundary === 'after_effect_outcome_append')
+            ? {kind:'simulate_uncertain',message:'lost ack'} : {kind:'proceed'};
+        }}},s=>!s.aborted);
+        const input = {delivery:delivery.delivery,modelCall:'model1',toolCallId:'tool1',position:0,operation:'Write',inputDigest:'a'.repeat(64)};
+        const before = await engine.sessionStore.load(prepared.sessionId);
+        expect(await reserveWorkspaceEffect(journal,owner,{...input,operation:'unknown'},signal)).toMatchObject({kind:'refused',reason:'invalid_input'});
+        expect(await engine.sessionStore.load(prepared.sessionId)).toEqual(before);
+        if (failure === 'cancelled') controller.abort();
+        const attempts = await Promise.all(Array.from({length: failure === 'normal' ? 2 : 1},
+          () => reserveWorkspaceEffect(faulted,owner,input,signal)));
+        if (failure === 'normal') expect(attempts.map(r=>r.kind).sort()).toEqual(['refused','reserved']);
+        const admittedEffect = attempts.find(r=>r.kind === 'reserved') ?? attempts[0]!;
+        let invoked = 0;
+        if (admittedEffect.kind === 'reserved') {
+          invoked++;
+          const outcome = {kind:'workspace_effect_completed',effect:admittedEffect.effect,result:{content:'written',isError:false}};
+          expect(await retainWorkspaceEffect(faulted,owner,outcome,signal)).toEqual(failure === 'outcome_ack'
+            ? {kind:'unconfirmed',reason:'commit_uncertain'} : {kind:'retained'});
+          expect(await retainWorkspaceEffect(journal,owner,outcome,signal)).toMatchObject({kind:'refused',reason:'invalid_transition'});
+        } else expect(admittedEffect).toEqual(failure === 'cancelled'
+          ? {kind:'refused',reason:'not_started'} : {kind:'unconfirmed',reason:'commit_uncertain'});
+        expect(invoked).toBe(failure === 'intent_ack' || failure === 'cancelled' ? 0 : 1);
+        const reopened = await composeAnswerEngine(config);
+        if (reopened.kind !== 'ready') throw new Error(reopened.kind);
+        const reloaded = await readHostState(reopened,hydrated.enrollment);
+        if (reloaded.kind !== 'loaded') throw new Error(reloaded.kind);
+        const projection = foldWorkspaceEffects(reloaded.state.records);
+        expect(projection).toMatchObject({kind:'valid',effects:failure === 'cancelled' ? [] : [{kind:failure === 'intent_ack' ? 'pending':'completed'}]});
+        if (failure !== 'cancelled') {
+          const cold = new SessionJournal(reopened,hydrated.enrollment,hostConfig,s=>!s.aborted);
+          if (failure === 'intent_ack') expect(await reserveModelCall(cold,delivery.delivery,owner,signal))
+            .toEqual({kind:'refused',reason:'reconciliation_required'});
+          expect(await reserveWorkspaceEffect(cold,owner,input,signal)).toMatchObject({kind:'refused',reason:'invalid_transition'});
+          expect(await reserveWorkspaceEffect(cold,{...owner,epoch:2n},input,signal)).toMatchObject({kind:'refused',reason:'stale_owner'});
+        }
+      } finally { await host.scheduler.close(new AbortController().signal); }
+    } finally { await rm(root,{recursive:true,force:true}); }
+  });

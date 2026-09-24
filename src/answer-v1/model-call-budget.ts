@@ -1,3 +1,4 @@
+import { foldWorkspaceEffects } from './workspace-effect-state.js';
 import type { DeliveryRef, OwnerFence } from './contracts/invocation-contract.js';
 import { owns } from './host-state.js';
 import type { SessionJournal } from './journal.js';
@@ -13,6 +14,9 @@ export async function reserveModelCall(
   if (!await journal.fault('before_model_call_append', signal)) return { kind: 'refused', reason: 'storage_unavailable' };
   const result = await journal.locked<ReserveModelCallResult>(signal, { kind: 'unconfirmed', reason: 'commit_uncertain' }, async (state, lock) => {
     if (!owns(state, owner)) return { kind: 'refused', reason: 'stale_owner' };
+    const effects = foldWorkspaceEffects(state.records);
+    if (effects.kind !== 'valid' || effects.effects.some(effect => effect.kind !== 'completed'))
+      return { kind: 'refused', reason: 'reconciliation_required' };
     if (state.records.some(record => record.kind === 'stopped')) return { kind: 'refused', reason: 'stopped' };
     const enrolled = state.records.find(record => record.kind === 'enrolled');
     const policy = enrolled?.kind === 'enrolled' ? enrolled.request?.daemonPolicy : undefined;
