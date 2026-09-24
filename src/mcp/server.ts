@@ -1,3 +1,4 @@
+import { resolveAnswerAuthority } from './answer-authority-config.js';
 import { RequestLifetime } from './request-lifetime.js';
 /**
  * MCP Server Composition Root
@@ -267,8 +268,10 @@ export interface ComposedServerInternal extends ComposedServer {
  */
 export async function composeServer(options?: import('../answer-v1/contracts/host-composition.js').AnswerMcpCompositionOptions): Promise<ComposedServerInternal> {
   const answers = process.env.WORKRAIL_AGENT_PROFILE === 'answers';
-  if (answers && !options?.answerAuthority) throw new Error('Answer profile requires explicit shared authority');
-  if (!answers && options) throw new Error('Answer authority is only valid for the answers profile');
+  const authorityFile = process.env.WORKRAIL_ANSWER_AUTHORITY_FILE;
+  if (!answers && (options || authorityFile !== undefined)) throw new Error('Answer authority is only valid for the answers profile');
+  const authority = answers ? await resolveAnswerAuthority(options, authorityFile) : undefined;
+  if (authority?.kind === 'refused') throw new Error(`Answer profile requires explicit shared authority: ${authority.reason}`);
   // Bootstrap DI container. No runtimeMode override -- detectRuntimeMode() in
   // container.ts is the single source of truth (reads VITEST / NODE_ENV=test).
   // Hardcoding 'production' here bypassed test isolation, causing NodeProcessSignals
@@ -277,9 +280,9 @@ export async function composeServer(options?: import('../answer-v1/contracts/hos
 
   // Create tool context with all dependencies
   const ctx = await createToolContext({initializeV2: !answers});
-  if (answers && options) {
+  if (authority?.kind === 'configured') {
     const {composeAnswerProfile} = await import('./answer-profile.js');
-    return composeAnswerProfile(options.answerAuthority,ctx);
+    return composeAnswerProfile(authority.options.answerAuthority,ctx);
   }
 
   // Upfront console background auto-boot hook (capability-based)
