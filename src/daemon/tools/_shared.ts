@@ -177,12 +177,9 @@ export interface IssueRecord {
 /**
  * Append a single JSON issue record to the per-session JSONL file.
  *
- * WHY void + catch: issue recording is purely observational. A failed write
- * (disk full, permission denied) must not propagate to the caller or interrupt
- * the workflow session. Same fire-and-forget contract as DaemonEventEmitter.
- *
- * WHY separate helper: keeps execute() synchronous from the caller's perspective
- * and makes the async write path independently testable via issuesDirOverride.
+ * Resolves after the filesystem append acknowledges the write. Errors propagate so
+ * a caller cannot claim an issue was recorded when storage failed. This is not an
+ * fsync/power-loss durability guarantee. Cancellation can leave a partial write.
  *
  * @param issuesDir - Directory for issue files (override in tests; production uses ~/.workrail/issues).
  * @param sessionId - Session identifier used as the filename.
@@ -192,11 +189,14 @@ export async function appendIssueAsync(
   issuesDir: string,
   sessionId: string,
   record: IssueRecord,
+  signal?: AbortSignal,
 ): Promise<void> {
+  signal?.throwIfAborted();
   await fs.mkdir(issuesDir, { recursive: true });
   const filePath = path.join(issuesDir, `${sessionId}.jsonl`);
   const line = JSON.stringify({ ...record, ts: Date.now() }) + '\n';
-  await fs.appendFile(filePath, line, 'utf8');
+  signal?.throwIfAborted();
+  await fs.writeFile(filePath, line, { encoding: 'utf8', flag: 'a', signal });
 }
 
 // ---------------------------------------------------------------------------
@@ -216,7 +216,7 @@ export interface SignalRecord {
  * Append a single JSON signal record to the per-session JSONL file.
  *
  * Fire-and-forget: errors are swallowed so a failed write never interrupts
- * the session. Same contract as appendIssueAsync and DaemonEventEmitter.
+ * the session. This telemetry contract differs from acknowledged issue recording.
  */
 export async function appendSignalAsync(
   signalsDir: string,
