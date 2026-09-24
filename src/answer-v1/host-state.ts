@@ -1,5 +1,5 @@
 import { foldSupervisor } from './supervisor-state.js';
-import type { AnswerEngine } from './engine-composition.js';
+import type { AnswerEngine, AnswerReadEngine } from './engine-composition.js';
 import type { AnswerHostRecord } from '../v2/durable-core/schemas/session/answer-host.js';
 import type { DomainEventV1 } from '../v2/durable-core/schemas/session/index.js';
 import type { LoadedSessionTruthV2 } from '../v2/ports/session-event-log-store.port.js';
@@ -33,7 +33,7 @@ export type StateResult = {
     readonly reason: 'missing' | 'corrupt' | 'unsupported_version' | 'storage_unavailable';
     readonly detail: string;
 };
-export async function readHostState(engine: AnswerEngine, enrollment: HostEnrollment): Promise<StateResult> {
+export async function readHostState(engine: AnswerReadEngine, enrollment: HostEnrollment): Promise<StateResult> {
     if (!/^sess_[a-z0-9]+$/.test(enrollment.execution))
         return { kind: 'unavailable', reason: 'corrupt', detail: 'Invalid execution locator' };
     const loaded = await engine.sessionStore.load(asSessionId(enrollment.execution));
@@ -70,7 +70,7 @@ export function hostEvent(engine: AnswerEngine, state: Pick<HostState, 'enrollme
     return { v: 1, kind: 'answer_host_recorded', sessionId: state.enrollment.execution, scope: { runId: state.run.scope.runId },
         eventId, eventIndex: index, timestampMs: Date.now(), dedupeKey: `answer_host:${state.enrollment.execution}:${index}`, data };
 }
-export function capability(engine: AnswerEngine, state: Pick<HostState, 'enrollment' | 'run'>, role: string, ref = ''): string {
+export function capability(engine: AnswerReadEngine, state: Pick<HostState, 'enrollment' | 'run'>, role: string, ref = ''): string {
     const bytes = Buffer.from(JSON.stringify(['answer-host-v1', state.enrollment.execution, state.run.scope.runId, role, ref]));
     const signature = engine.tokenCodecPorts.hmac.hmacSha256(Buffer.from(engine.tokenCodecPorts.keyring.current.keyBase64Url, 'base64url'), bytes);
     return `ah1.${state.enrollment.execution}.${Buffer.from(signature).toString('base64url')}`;
@@ -81,7 +81,7 @@ export function inspection(view: WorkView): InspectionView {
     const { reply: _reply, ...readonly } = view;
     return readonly;
 }
-export async function workView(engine: AnswerEngine, state: HostState, node = state.node): Promise<WorkView | {
+export async function workView(engine: AnswerReadEngine, state: HostState, node = state.node): Promise<WorkView | {
     kind: 'unavailable';
     detail: string;
 }> {

@@ -1,9 +1,9 @@
 import type { HostInspectorPort, EvidenceChunk, EvidenceCursor, ReceiptRef } from './contracts/answer-contract.js';
 import type { HostEnrollment } from './contracts/invocation-contract.js';
-import type { AnswerEngine } from './engine-composition.js';
+import type { AnswerReadEngine } from './engine-composition.js';
 import { capability, inspection, readHostState, workView } from './host-state.js';
 /** Read authority is validated against the task fixed by host composition. */
-export function createInspector(engine: AnswerEngine, enrollment: HostEnrollment): HostInspectorPort {
+export function createInspector(engine: AnswerReadEngine, enrollment: HostEnrollment): HostInspectorPort {
     return {
         scope: 'host_bound',
         async inspect(read, signal) {
