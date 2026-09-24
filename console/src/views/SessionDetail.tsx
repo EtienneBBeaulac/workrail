@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { RecordedWorkspaceState } from '../components/RecordedWorkspaceState';
 import { RunLineageDag } from '../components/RunLineageDag';
 import { RunNarrativeView } from '../components/RunNarrativeView';
 import { StatusBadge } from '../components/StatusBadge';
@@ -465,108 +466,111 @@ function RunCard({
     // CutCornerBox requires explicit height (absolute inner layers).
     // Without tab strip: header py-3 (24px) + text-sm line-height (20px) = 44px + DAG 460px + inset 2px = 506px.
     // With tab strip: add 36px for the tab strip row -> 542px.
-    <CutCornerBox
-      cut={10}
-      background="rgba(27, 31, 44, 0.72)"
-      backdropFilter="blur(8px)"
-      className="relative"
-      style={{ height: hasTrace ? '542px' : '506px' }}
-    >
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0">
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-medium text-[var(--text-primary)]">
-            {run.workflowName ?? run.workflowId ?? 'Run'}
-          </span>
-          <span className="font-mono text-xs text-[var(--text-muted)]">
-            {run.runId}
-          </span>
-          <span className="font-mono text-xs text-[var(--text-muted)]">
-            {run.nodes.length} nodes &middot; {run.tipNodeIds.length} tip{run.tipNodeIds.length !== 1 ? 's' : ''}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          {run.hasUnresolvedCriticalGaps && (
-            <span className="text-xs text-[var(--warning)]">Critical gaps</span>
-          )}
-          <StatusBadge status={run.status} />
-        </div>
-      </div>
-
-      {/* Tab strip -- only shown when execution trace data is available */}
-      {hasTrace && (
-        <div
-          role="tablist"
-          aria-label="Run view mode"
-          className="flex items-center border-b border-[var(--border)] shrink-0 h-9 px-2 gap-0.5"
-          onKeyDown={(e) => {
-            // ARIA tabs pattern: arrow keys move between tabs
-            if (e.key === 'ArrowRight') { e.preventDefault(); setActiveTab('trace'); }
-            if (e.key === 'ArrowLeft')  { e.preventDefault(); setActiveTab('dag'); }
-          }}
-        >
-          <button
-            type="button"
-            id="tab-dag"
-            role="tab"
-            tabIndex={activeTab === 'dag' ? 0 : -1}
-            aria-selected={activeTab === 'dag'}
-            onClick={() => setActiveTab('dag')}
-            className={[
-              'tab-btn px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.25em] transition-colors duration-150',
-              activeTab === 'dag'
-                ? 'tab-btn--active text-[var(--accent)]'
-                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
-            ].join(' ')}
-            style={activeTab === 'dag' ? { backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
-          >
-            <span className="tab-corner tab-corner--tl" aria-hidden="true" />
-            <span className="tab-corner tab-corner--tr" aria-hidden="true" />
-            <span className="tab-corner tab-corner--bl" aria-hidden="true" />
-            <span className="tab-corner tab-corner--br" aria-hidden="true" />
-            DAG
-          </button>
-          <button
-            type="button"
-            id="tab-trace"
-            role="tab"
-            tabIndex={activeTab === 'trace' ? 0 : -1}
-            aria-selected={activeTab === 'trace'}
-            onClick={() => setActiveTab('trace')}
-            className={[
-              'tab-btn px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.25em] transition-colors duration-150',
-              activeTab === 'trace'
-                ? 'tab-btn--active text-[var(--accent)]'
-                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
-            ].join(' ')}
-            style={activeTab === 'trace' ? { backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
-          >
-            <span className="tab-corner tab-corner--tl" aria-hidden="true" />
-            <span className="tab-corner tab-corner--tr" aria-hidden="true" />
-            <span className="tab-corner tab-corner--bl" aria-hidden="true" />
-            <span className="tab-corner tab-corner--br" aria-hidden="true" />
-            TRACE
-          </button>
-        </div>
-      )}
-
-      <div
-        role="tabpanel"
-        aria-labelledby={activeTab === 'dag' ? 'tab-dag' : 'tab-trace'}
-        className="flex-1"
+    <div className="space-y-2">
+      <RecordedWorkspaceState status={run.supervisor} />
+      <CutCornerBox
+        cut={10}
+        background="rgba(27, 31, 44, 0.72)"
+        backdropFilter="blur(8px)"
+        className="relative"
+        style={{ height: hasTrace ? '542px' : '506px' }}
       >
-        {activeTab === 'trace' && run.executionTraceSummary !== null ? (
-          <RunNarrativeView
-            summary={run.executionTraceSummary}
-            runStatus={run.status}
-          />
-        ) : (
-          <RunLineageDag
-            run={run}
-            selectedNodeId={selectedNodeId}
-            onNodeClick={(nodeId) => onNodeClick(run.runId, nodeId)}
-          />
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-[var(--text-primary)]">
+              {run.workflowName ?? run.workflowId ?? 'Run'}
+            </span>
+            <span className="font-mono text-xs text-[var(--text-muted)]">
+              {run.runId}
+            </span>
+            <span className="font-mono text-xs text-[var(--text-muted)]">
+              {run.nodes.length} nodes &middot; {run.tipNodeIds.length} tip{run.tipNodeIds.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            {run.hasUnresolvedCriticalGaps && (
+              <span className="text-xs text-[var(--warning)]">Critical gaps</span>
+            )}
+            <StatusBadge status={run.status} />
+          </div>
+        </div>
+
+        {/* Tab strip -- only shown when execution trace data is available */}
+        {hasTrace && (
+          <div
+            role="tablist"
+            aria-label="Run view mode"
+            className="flex items-center border-b border-[var(--border)] shrink-0 h-9 px-2 gap-0.5"
+            onKeyDown={(e) => {
+              // ARIA tabs pattern: arrow keys move between tabs
+              if (e.key === 'ArrowRight') { e.preventDefault(); setActiveTab('trace'); }
+              if (e.key === 'ArrowLeft')  { e.preventDefault(); setActiveTab('dag'); }
+            }}
+          >
+            <button
+              type="button"
+              id="tab-dag"
+              role="tab"
+              tabIndex={activeTab === 'dag' ? 0 : -1}
+              aria-selected={activeTab === 'dag'}
+              onClick={() => setActiveTab('dag')}
+              className={[
+                'tab-btn px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.25em] transition-colors duration-150',
+                activeTab === 'dag'
+                  ? 'tab-btn--active text-[var(--accent)]'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+              ].join(' ')}
+              style={activeTab === 'dag' ? { backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
+            >
+              <span className="tab-corner tab-corner--tl" aria-hidden="true" />
+              <span className="tab-corner tab-corner--tr" aria-hidden="true" />
+              <span className="tab-corner tab-corner--bl" aria-hidden="true" />
+              <span className="tab-corner tab-corner--br" aria-hidden="true" />
+              DAG
+            </button>
+            <button
+              type="button"
+              id="tab-trace"
+              role="tab"
+              tabIndex={activeTab === 'trace' ? 0 : -1}
+              aria-selected={activeTab === 'trace'}
+              onClick={() => setActiveTab('trace')}
+              className={[
+                'tab-btn px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.25em] transition-colors duration-150',
+                activeTab === 'trace'
+                  ? 'tab-btn--active text-[var(--accent)]'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+              ].join(' ')}
+              style={activeTab === 'trace' ? { backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
+            >
+              <span className="tab-corner tab-corner--tl" aria-hidden="true" />
+              <span className="tab-corner tab-corner--tr" aria-hidden="true" />
+              <span className="tab-corner tab-corner--bl" aria-hidden="true" />
+              <span className="tab-corner tab-corner--br" aria-hidden="true" />
+              TRACE
+            </button>
+          </div>
         )}
-      </div>
-    </CutCornerBox>
+
+        <div
+          role="tabpanel"
+          aria-labelledby={activeTab === 'dag' ? 'tab-dag' : 'tab-trace'}
+          className="flex-1"
+        >
+          {activeTab === 'trace' && run.executionTraceSummary !== null ? (
+            <RunNarrativeView
+              summary={run.executionTraceSummary}
+              runStatus={run.status}
+            />
+          ) : (
+            <RunLineageDag
+              run={run}
+              selectedNodeId={selectedNodeId}
+              onNodeClick={(nodeId) => onNodeClick(run.runId, nodeId)}
+            />
+          )}
+        </div>
+      </CutCornerBox>
+    </div>
   );
 }
