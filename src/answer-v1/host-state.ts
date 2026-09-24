@@ -45,6 +45,8 @@ export async function readHostState(engine: AnswerEngine, enrollment: HostEnroll
     const events = loaded.value.events.filter((e): e is HostEvent => e.kind === 'answer_host_recorded');
     const entries = events.filter(e => e.data.kind === 'enrolled');
     const entry = entries[0];
+    if (entries.length > 1)
+        return { kind: 'unavailable', reason: 'corrupt', detail: 'Duplicate host enrollment records' };
     if (entries.length !== 1 || entry?.data.kind !== 'enrolled' || entry.data.recovery !== enrollment.recovery)
         return { kind: 'unavailable', reason: 'missing', detail: 'Unknown enrollment' };
     const run = loaded.value.events.find((e): e is HostState['run'] => e.kind === 'run_started' && e.scope.runId === entry.scope.runId);

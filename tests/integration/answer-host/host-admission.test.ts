@@ -848,7 +848,7 @@ it.skipIf(process.platform === 'win32').each(['success','duplicate','intent_ack'
     } finally {await rm(root,{recursive:true,force:true});}
   });
 
-it.skipIf(process.platform === 'win32')('validates supervisor records from canonical storage on cold read', async () => {
+it.skipIf(process.platform === 'win32').each(['supervisor', 'enrollment'] as const)('validates %s records from canonical storage on cold read', async corruption => {
   const { foldSupervisor } = await import('../../../src/answer-v1/supervisor-state.js');
   const root = await mkdtemp(join(tmpdir(), 'supervisor-canonical-'));
   const signal = new AbortController().signal;
@@ -878,8 +878,12 @@ it.skipIf(process.platform === 'win32')('validates supervisor records from canon
       if(truth.isErr())throw new Error(truth.error.code);
       expect(truth.value.events.filter(e=>e.kind==='answer_host_recorded'&&e.data.kind==='supervisor_create_intended')).toHaveLength(1);
       // Simulate semantically corrupt but schema-valid historical data, not a public writer.
-      expect(await append({...intent,supervisor:'replacement'})).toBe(true);
-      expect(await readHostState(reopened,hydrated.enrollment)).toMatchObject({kind:'unavailable',reason:'corrupt',detail:expect.stringContaining('duplicate_intent')});
+      const corruptRecord = corruption === 'supervisor' ? {...intent,supervisor:'replacement'}
+        : pending.state.records.find(record=>record.kind==='enrolled');
+      if (!corruptRecord) throw new Error('Missing fixture enrollment');
+      expect(await append(corruptRecord)).toBe(true);
+      expect(await readHostState(reopened,hydrated.enrollment)).toMatchObject({kind:'unavailable',reason:'corrupt',
+        detail:expect.stringContaining(corruption === 'supervisor' ? 'duplicate_intent' : 'Duplicate host enrollment')});
     } finally {await host.scheduler.close(signal);}
   } finally {await rm(root,{recursive:true,force:true});}
 });
