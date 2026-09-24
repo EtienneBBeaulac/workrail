@@ -405,18 +405,36 @@ export function mintStartTokens(args: {
     }));
 }
 
-export function executeStartWorkflow(
-  deps: StartWorkflowDeps,
-  input: {
-    readonly workflowId: string;
-    readonly workspacePath: string;
-    readonly goal: string;
-    readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
-    readonly injectOnboarding?: boolean;
-  },
+export interface StartWorkflowInput {
+  readonly workflowId: string;
+  readonly workspacePath: string;
+  readonly goal: string;
+  readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
+  readonly injectOnboarding?: boolean;
+}
+
+/** Preparation may pin immutable content, but has no session append or lock capability. */
+export type PrepareStartWorkflowDeps = Omit<StartWorkflowDeps, 'gate' | 'sessionStore' | 'tokenAliasStore' | 'entropy'>;
+export interface PreparedWorkflowStart {
+  readonly workflowHashRef: import('../durable-core/ids/index.js').WorkflowHashRef;
+  readonly meta: StepMetadata;
+  readonly sessionId: SessionId;
+  readonly runId: RunId;
+  readonly nodeId: NodeId;
+  readonly workflowHash: WorkflowHash;
+  readonly pinnedWorkflow: import('../../types/workflow.js').Workflow;
+  readonly firstStep: { readonly id: string };
+  readonly resolvedReferences: readonly ResolvedReference[];
+  readonly stalePaths: readonly string[];
+  readonly managedStoreError?: string;
+  readonly appendPlan: import('../ports/session-event-log-store.port.js').AppendPlanV2;
+}
+
+export function prepareStartWorkflow(
+  deps: PrepareStartWorkflowDeps, input: StartWorkflowInput,
   internalContext?: Readonly<Record<string, string>>,
-): RA<StartWorkflowUsecaseResult, StartWorkflowError> {
-  const { gate, sessionStore, snapshotStore, pinnedStore, crypto, tokenCodecPorts, idFactory, validationPipelineDeps, tokenAliasStore, entropy } = deps;
+): RA<PreparedWorkflowStart, StartWorkflowError> {
+  const { snapshotStore, pinnedStore, crypto, tokenCodecPorts, idFactory, validationPipelineDeps } = deps;
 
   let spawnDepth = 0;
   let parentSessionId: string | undefined = internalContext?.['parentSessionId'];
@@ -638,59 +656,60 @@ export function executeStartWorkflow(
               parentSessionId,
             });
 
-            const emptyTruth = { manifest: [], events: [] } as const;
-            return gate.withHealthySessionLock(sessionId, (lock) =>
-              sessionStore.append(lock, {
-                events,
+            return okAsync({ firstStep, workflowHash, pinnedWorkflow, resolvedReferences,
+              sessionId, runId, nodeId, stalePaths, managedStoreError,
+              appendPlan: { events,
                 snapshotPins: [{ snapshotRef, eventIndex: 2, createdByEventId: events[2]!.eventId }],
-              }, emptyTruth)
-            )
-              .mapErr((cause) => ({ kind: 'session_append_failed' as const, cause }))
-              .map(() => ({ workflow, firstStep, workflowHash, pinnedWorkflow, resolvedReferences, sessionId, runId, nodeId, stalePaths, managedStoreError }));
+              },
+            });
           });
       });
-  })
-  .andThen(({ pinnedWorkflow, firstStep, workflowHash, sessionId, runId, nodeId, resolvedReferences, stalePaths, managedStoreError }) => {
-    const wfRefRes = deriveWorkflowHashRef(workflowHash);
-    if (wfRefRes.isErr()) {
-      return neErrorAsync({
-        kind: 'precondition_failed' as const,
-        message: wfRefRes.error.message,
-        suggestion: 'Ensure the pinned workflowHash is a valid sha256 digest.',
-      });
-    }
+  }).andThen(prepared => {
+    const hash = deriveWorkflowHashRef(prepared.workflowHash);
+    if (hash.isErr()) return neErrorAsync({ kind: 'precondition_failed' as const, message: hash.error.message,
+      suggestion: 'Ensure the pinned workflowHash is a valid sha256 digest.' });
+    const rendered = renderPendingPrompt({ workflow: prepared.pinnedWorkflow,
+      stepId: prepared.firstStep.id, loopPath: [], truth: { events: [], manifest: [] },
+      runId: prepared.runId, nodeId: prepared.nodeId, rehydrateOnly: false,
+      cleanResponseFormat: deps.featureFlags?.isEnabled('cleanResponseFormat') ?? false,
+    });
+    if (rendered.isErr()) return neErrorAsync({ kind: 'prompt_render_failed' as const, message: rendered.error.message });
+    return okAsync({ ...prepared, workflowHashRef: hash.value, meta: rendered.value });
+  });
+}
 
+/** Commit a prepared identity once. A retry must reconcile existing truth, not append
+ * another initial batch or silently mint another session. */
+export function commitPreparedWorkflowStart(
+  deps: Pick<StartWorkflowDeps, 'gate' | 'sessionStore' | 'tokenCodecPorts' | 'tokenAliasStore' | 'entropy' | 'idFactory'>,
+  prepared: PreparedWorkflowStart,
+): RA<StartWorkflowUsecaseResult, StartWorkflowError> {
+  const { gate, sessionStore, tokenCodecPorts, tokenAliasStore, entropy, idFactory } = deps;
+  return gate.withHealthySessionLock(prepared.sessionId, lock =>
+    sessionStore.load(prepared.sessionId)
+      .mapErr((cause): StartWorkflowError => ({ kind: 'session_append_failed', cause }))
+      .andThen(truth => {
+        if (truth.events.length || truth.manifest.length) return neErrorAsync({
+          kind: 'invariant_violation' as const,
+          message: 'Prepared workflow identity already has durable state; reconcile it instead of starting again',
+        });
+        return sessionStore.append(lock, prepared.appendPlan, truth)
+          .mapErr((cause): StartWorkflowError => ({ kind: 'session_append_failed', cause }));
+      }),
+  ).mapErr((cause): StartWorkflowError => 'kind' in cause ? cause : { kind: 'session_append_failed', cause })
+  .map(() => prepared)
+  .andThen(({ workflowHashRef, meta, sessionId, runId, nodeId, resolvedReferences, stalePaths, managedStoreError }) => {
     const attemptId = newAttemptId(idFactory);
     return mintStartTokens({
       sessionId,
       runId,
       nodeId,
       attemptId,
-      workflowHashRef: wfRefRes.value,
+      workflowHashRef,
       ports: tokenCodecPorts,
       aliasStore: tokenAliasStore,
       entropy,
     }).andThen((tokens) => {
-      const metaResult = renderPendingPrompt({
-        workflow: pinnedWorkflow,
-        stepId: firstStep.id,
-        loopPath: [],
-        truth: { events: [], manifest: [] },
-        runId: asRunId(String(runId)),
-        nodeId: asNodeId(String(nodeId)),
-        rehydrateOnly: false,
-        cleanResponseFormat: deps.featureFlags?.isEnabled('cleanResponseFormat') ?? false,
-      });
-
-      if (metaResult.isErr()) {
-        return neErrorAsync({
-          kind: 'prompt_render_failed' as const,
-          message: metaResult.error.message,
-        });
-      }
-
-      const meta = metaResult.value;
-
       return okAsync({
         sessionId,
         runId,
@@ -704,6 +723,14 @@ export function executeStartWorkflow(
       });
     });
   });
+}
+
+export function executeStartWorkflow(
+  deps: StartWorkflowDeps, input: StartWorkflowInput,
+  internalContext?: Readonly<Record<string, string>>,
+): RA<StartWorkflowUsecaseResult, StartWorkflowError> {
+  return prepareStartWorkflow(deps, input, internalContext)
+    .andThen(prepared => commitPreparedWorkflowStart(deps, prepared));
 }
 
 function mapWorkflowSourceKind(
