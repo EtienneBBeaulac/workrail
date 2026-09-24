@@ -196,7 +196,7 @@ export interface TrustedAnswerScheduler {
 export type ReleaseOwnershipResult =
   | Readonly<{ kind: 'released' }>
   | Readonly<{ kind: 'stale_owner' }>
-  | Readonly<{ kind: 'refused'; reason: 'missing' | 'corrupt' | 'storage_unavailable' }>
+  | Readonly<{ kind: 'refused'; reason: 'missing' | 'corrupt' | 'storage_unavailable' | 'supervised_cleanup_required' }>
   | Readonly<{ kind: 'unconfirmed'; reason: 'commit_uncertain' }>;
 
 /** Close rejects new work, cancels/drains owned operations and releases owned resources.

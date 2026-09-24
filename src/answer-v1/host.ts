@@ -153,6 +153,8 @@ export async function createAnswerRuntime(config: AnswerHostConfig, lifetime: Ab
             return j.locked<ReleaseOwnershipResult>(signal, { kind: 'refused', reason: 'storage_unavailable' }, async (state, lock) => {
                 if (!owns(state, owner))
                     return { kind: 'stale_owner' };
+                if (state.records.some(record => record.kind === 'enrolled' && record.request?.daemonPolicy))
+                    return { kind: 'refused', reason: 'supervised_cleanup_required' };
                 return await j.append(state, lock, { kind: 'owner_released', epoch: owner.epoch.toString() }, signal) ? { kind: 'released' } : { kind: 'unconfirmed', reason: 'commit_uncertain' };
             });
         },
