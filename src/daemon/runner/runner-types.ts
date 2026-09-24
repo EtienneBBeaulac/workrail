@@ -56,6 +56,7 @@ export const WORKTREES_DIR = path.join(os.homedir(), '.workrail', 'worktrees');
  * rather than hiding it in ambient scope.
  */
 export interface PreAgentSession {
+  readonly bindAnswerInvocation: import('../tools/answer-invocation.js').BindAnswerInvocation;
   readonly persistTokens: typeof import('../tools/_shared.js').persistTokens;
 
   readonly sessionId: RunId;

@@ -92,6 +92,8 @@ export interface AgentTool {
   readonly inputSchema: Record<string, unknown>;
   /** Human-readable label for logging. */
   readonly label: string;
+  /** Answer calls in one model response cannot answer prompts delivered afterward. */
+  readonly responsePolicy?: 'first_answer';
   /**
    * Execute the tool call.
    * May throw on failure -- AgentLoop._executeTools() catches throws and converts them
@@ -713,6 +715,7 @@ export class AgentLoop {
   ): Promise<ToolBatchOutcome> {
     const { callbacks } = this._options;
     const results: AgentToolCallResult[] = [];
+    let answerSelected = false;
 
     for (const block of toolUseBlocks) {
       // Check abort before each tool execution.
@@ -750,6 +753,16 @@ export class AgentLoop {
       // error -- the LLM must see stderr and decide whether to retry, rephrase, or
       // escalate. Same rationale as unknown tool names above.
       const params = (block.input ?? {}) as Record<string, unknown>;
+
+      if (tool.responsePolicy === 'first_answer') {
+        if (answerSelected) {
+          results.push({ toolCallId: block.id, toolName: block.name, isError: true,
+            result: { content: [{ type: 'text', text: 'Only the first answer in a response is selected. Read the resulting prompt before answering again.' }], details: null } });
+          continue;
+        }
+        // Selection precedes validation: a rejected first answer cannot fall through.
+        answerSelected = true;
+      }
 
       // Emit tool_call_started before execute().
       // WHY try/catch: preserves fire-and-forget invariant -- a throwing callback

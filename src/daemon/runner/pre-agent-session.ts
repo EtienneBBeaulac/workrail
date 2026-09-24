@@ -1,3 +1,4 @@
+import { createAnswerInvocationBinder } from '../tools/answer-invocation.js';
 /**
  * Pre-agent I/O phase for daemon workflow sessions.
  *
@@ -248,6 +249,7 @@ export async function buildPreAgentSession(
   return {
     kind: 'ready',
     session: {
+      bindAnswerInvocation: createAnswerInvocationBinder(sessionsDir),
       persistTokens: createTokenPersister(sessionsDir, {
         worktreePath: sessionWorktreePath, workrailSessionId: state.workrailSessionId,
         recoveryContext: { workflowId: trigger.workflowId, goal: trigger.goal, workspacePath: trigger.workspacePath,

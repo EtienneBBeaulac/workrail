@@ -311,6 +311,7 @@ export async function buildAgentReadySession(
   const schemas = getSchemas();
   const scope: SessionScope = {
     persistTokens: preAgentSession.persistTokens,
+    bindAnswerInvocation: preAgentSession.bindAnswerInvocation,
     fileTracker: new DefaultFileStateTracker(preAgentSession.readFileState),
     onAdvance,
     onComplete,

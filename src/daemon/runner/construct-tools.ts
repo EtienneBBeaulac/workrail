@@ -80,6 +80,7 @@ export function constructTools(
       onGateParked,
       { workflowId: scopeWorkflowId, goal: triggerGoal, workspacePath: triggerWorkspacePath, branchStrategy: triggerBranchStrategy, context: triggerContext },
       persist,
+      scope.bindAnswerInvocation,
     ),
     makeContinueWorkflowTool(sid, ctx, onAdvance, onComplete, schemas, executeContinueWorkflow, emitter, workrailSid, onGateParked, { workflowId: scopeWorkflowId, goal: triggerGoal, workspacePath: triggerWorkspacePath, branchStrategy: triggerBranchStrategy, context: triggerContext }, persist),
     // WHY sessionWorkspacePath: when branchStrategy === 'worktree', all agent file operations
