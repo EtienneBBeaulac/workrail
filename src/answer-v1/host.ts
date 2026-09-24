@@ -189,6 +189,8 @@ export async function createAnswerRuntime(config: AnswerHostConfig, lifetime: Ab
             return hydrated;
         const enrollment = hydrated.enrollment, j = journal(enrollment);
         return j.locked<RecoverHostSessionResult | ClaimUnownedResult>(signal, { kind: 'refused', reason: 'storage_unavailable', detail: 'Cannot lock recovery' }, async (state, lock) => {
+            if (state.records.some(record => record.kind === 'enrolled' && record.request?.daemonPolicy))
+                return { kind: 'refused', reason: 'unsupported_execution_policy', detail: 'This runtime cannot enforce retained daemon policy' };
             const view = await workView(engine, state);
             if (view.kind === 'unavailable')
                 return { kind: 'refused', reason: 'storage_unavailable', detail: view.detail };
@@ -225,6 +227,8 @@ export async function createAnswerRuntime(config: AnswerHostConfig, lifetime: Ab
             const parsed = Request.safeParse(input);
             if (!parsed.success)
                 return { kind: 'refused', reason: 'unsupported_workflow', detail: 'Invalid host work request' };
+            if (parsed.data.daemonPolicy)
+                return { kind: 'refused', reason: 'unsupported_execution_policy', detail: 'This runtime cannot enforce retained daemon policy' };
             let raw: unknown;
             try {
                 raw = JSON.parse(await readFile(join(config.workflowStoragePath, parsed.data.workflowId + '.json'), 'utf8'));

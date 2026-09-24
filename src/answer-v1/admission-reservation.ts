@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { decodeDaemonExecutionPolicy } from './daemon-policy.js';
 import { isAbsolute } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { DomainEventV1Schema, type DomainEventV1 } from '../v2/durable-core/schemas/session/index.js';
@@ -8,7 +9,7 @@ import { admissionFileName, MAX_ADMISSION_BYTES } from './immutable-admission-fi
 const digest = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const requestSchema = AnswerHostRequestSchema.refine(request => isAbsolute(request.workspacePath));
 const envelope = z.object({
-  formatVersion: z.literal(1),
+  formatVersion: z.union([z.literal(1), z.literal(2)]),
   operationId: z.string().refine(value => admissionFileName(value) !== undefined),
   request: requestSchema,
   sessionId: z.string().regex(/^sess_[a-z0-9]+$/),
@@ -41,6 +42,8 @@ function freezeTree(value: unknown): void {
 }
 
 function coherent(value: z.infer<typeof envelope>): boolean {
+  if (value.formatVersion !== (value.request.daemonPolicy ? 2 : 1)) return false;
+  if (value.request.daemonPolicy && decodeDaemonExecutionPolicy(value.request.daemonPolicy).kind !== 'validated') return false;
   const { events, snapshotPins } = value.plan;
   const [session, run, node, preferences, context] = events;
   const enrollment = events.at(-1);
@@ -79,7 +82,7 @@ export function decodeAdmissionReservation(
     if (bytes.length === 0 || bytes.length > MAX_ADMISSION_BYTES) return { kind: 'refused', reason: 'corrupt_reservation' };
     const raw: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
     const version = z.object({ formatVersion: z.number().int() }).safeParse(raw);
-    if (version.success && version.data.formatVersion !== 1) return { kind: 'refused', reason: 'unsupported_version' };
+    if (version.success && ![1, 2].includes(version.data.formatVersion)) return { kind: 'refused', reason: 'unsupported_version' };
     const parsed = envelope.safeParse(raw);
     if (!parsed.success || !isDeepStrictEqual(raw, parsed.data) || !coherent(parsed.data))
       return { kind: 'refused', reason: 'corrupt_reservation' };

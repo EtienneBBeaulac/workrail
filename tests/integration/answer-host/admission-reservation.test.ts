@@ -63,7 +63,7 @@ it('distinguishes operation, request and version refusals', () => {
     .toEqual({ kind: 'refused', reason: 'operation_conflict' });
   expect(decodeAdmissionReservation(Buffer.from(serialized), { ...expected, request: { ...expected.request, goal: 'changed' } }))
     .toEqual({ kind: 'refused', reason: 'request_conflict' });
-  const future = JSON.parse(serialized); future.formatVersion = 2;
+  const future = JSON.parse(serialized); future.formatVersion = 3;
   expect(decodeAdmissionReservation(Buffer.from(JSON.stringify(future)), expected))
     .toEqual({ kind: 'refused', reason: 'unsupported_version' });
 });

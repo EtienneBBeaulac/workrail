@@ -1,3 +1,4 @@
+import type { DaemonExecutionPolicy } from '../../v2/durable-core/schemas/session/daemon-policy.js';
 import type { ConditionalRecoveryPort } from './conditional-recovery-contract.js';
 import type { AutomaticRecoveryPort } from './automatic-recovery-contract.js';
 /** Host composition ports. Brands prevent caller confusion, not runtime forgery. */
@@ -46,7 +47,7 @@ export type SharedAuthorityConfig = Readonly<{
 
 export type EngineEnrollResult =
   | Readonly<{ kind: 'enrolled'; enrollment: HostEnrollment; initialView: WorkView }>
-  | Readonly<{ kind: 'refused'; reason: 'unsupported_workflow' | 'storage_unavailable' | 'initialization_failed'; detail: string }>
+  | Readonly<{ kind: 'refused'; reason: 'unsupported_workflow' | 'unsupported_execution_policy' | 'storage_unavailable' | 'initialization_failed'; detail: string }>
   | Readonly<{ kind: 'unconfirmed'; reason: 'commit_uncertain' }>;
 
 /** Request to enroll a host session. Mode is fixed (host_bound); callers cannot select mode or supply idempotency IDs or owner tokens. */
@@ -54,6 +55,7 @@ export type HostWorkRequest = Readonly<{
   workflowId: string;
   goal: string;
   workspacePath: string;
+  daemonPolicy?: DaemonExecutionPolicy;
   enrollmentMode?: never;
   owner?: never;
   fence?: never;
@@ -139,14 +141,14 @@ export interface BoundTurnRunner {
 
 export type EnrollHostSessionResult =
   | Readonly<{ kind: 'enrolled'; enrollment: HostEnrollment; runner: BoundTurnRunner; initialView: WorkView; owner: OwnerFence }>
-  | Readonly<{ kind: 'refused'; reason: 'unsupported_workflow' | 'storage_unavailable' | 'initialization_failed'; detail: string }>
+  | Readonly<{ kind: 'refused'; reason: 'unsupported_workflow' | 'unsupported_execution_policy' | 'storage_unavailable' | 'initialization_failed'; detail: string }>
   | Readonly<{ kind: 'unconfirmed'; reason: 'commit_uncertain'; pointer: PersistedHostPointer }>;
 
 export type RecoverHostSessionResult =
   | Readonly<{ kind: 'ready'; enrollment: HostEnrollment; runner: BoundTurnRunner; owner: OwnerFence }>
   | Readonly<{ kind: 'stopped'; execution: ExecutionRef; reason: TerminalReason; detail: string; read: ReadRef }>
   | Readonly<{ kind: 'settled'; receipt: ReceiptRef; view: Extract<WorkView, { kind: 'finished' }> }>
-  | Readonly<{ kind: 'refused'; reason: 'missing' | 'corrupt' | 'unsupported_version' | 'storage_unavailable' | 'stale_owner' | 'ownership_changed'; detail: string }>
+  | Readonly<{ kind: 'refused'; reason: 'missing' | 'corrupt' | 'unsupported_version' | 'storage_unavailable' | 'stale_owner' | 'ownership_changed' | 'unsupported_execution_policy'; detail: string }>
   | Readonly<{
       kind: 'refused';
       reason: 'unsupported_capability';

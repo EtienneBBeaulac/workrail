@@ -1,3 +1,4 @@
+import { decodeDaemonExecutionPolicy } from '../../../src/answer-v1/daemon-policy.js';
 import { errAsync } from 'neverthrow';
 import { it, expect } from 'vitest';
 import { mkdtemp, rm, readFile, writeFile, readdir } from 'node:fs/promises';
@@ -206,5 +207,64 @@ it.skipIf(process.platform === 'win32')('cold recovery refuses conflicting or co
     const truth = await engine.sessionStore.load(prepared.sessionId);
     if (truth.isErr()) throw new Error(truth.error.code);
     expect(truth.value.events).toEqual([]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it.skipIf(process.platform === 'win32')('binds retained policy and refuses every policy-unaware scheduler entry without writes', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'policy-admission-'));
+  const signal = new AbortController().signal;
+  try {
+    const { engine, prepared, expected, candidate, prepare, config } = await setup(root);
+    const policyResult = decodeDaemonExecutionPolicy({ formatVersion: 1, profile: 'daemon_answers_v1',
+      model: { provider: 'anthropic', modelId: 'original-model' }, systemPrompt: 'original prompt',
+      limits: { expiresAtMs: 100000, maxModelCalls: 5, maxOutputTokens: 100, stallTimeoutMs: 100, callTimeoutMs: 50 },
+      workspace: { kind: 'existing', workspacePath: root }, delivery: { kind: 'none' },
+      restart: { kind: 'requires_explicit_reconciliation' } });
+    if (policyResult.kind !== 'validated') throw new Error('policy fixture invalid');
+    const request = { ...expected.request, daemonPolicy: policyResult.policy };
+    const policyExpected = { operationId: randomUUID(), request };
+    const policyPrepared = await prepare();
+    const policyCandidate = buildHostAdmissionCandidate(policyPrepared, request, policyExpected.operationId, engine, () => 1);
+    if (policyCandidate.kind !== 'candidate') throw new Error(policyCandidate.kind);
+    const decoded = decodeAdmissionReservation(policyCandidate.bytes, policyExpected);
+    expect(decoded.kind).toBe('validated');
+    if (decoded.kind !== 'validated') throw new Error('invalid candidate');
+    expect(decoded.reservation.formatVersion).toBe(2);
+    expect(decoded.reservation.request.daemonPolicy).toEqual(policyResult.policy);
+    const admitted = await publishAndReconcileHostAdmission(engine, root, policyExpected, policyCandidate.bytes, signal);
+    if (admitted.kind !== 'admitted') throw new Error(admitted.kind);
+    const original = await engine.sessionStore.load(policyPrepared.sessionId);
+    expect(await recoverHostAdmission(engine, root, policyExpected, signal)).toEqual(admitted);
+    expect(await engine.sessionStore.load(policyPrepared.sessionId)).toEqual(original);
+    const changed = { ...policyExpected, request: { ...request, daemonPolicy: { ...request.daemonPolicy, systemPrompt: 'changed' } } };
+    expect(await recoverHostAdmission(engine, root, changed, signal)).toEqual({ kind: 'refused', reason: 'request_conflict' });
+    const invalid = JSON.parse(Buffer.from(policyCandidate.bytes).toString());
+    invalid.plan.events.at(-1).data.request.daemonPolicy.model.modelId = 'substituted';
+    expect(decodeAdmissionReservation(Buffer.from(JSON.stringify(invalid)), policyExpected).kind).toBe('refused');
+    const wrongPath = { ...request, workspacePath: join(root, 'different') };
+    expect(buildHostAdmissionCandidate(policyPrepared, wrongPath, randomUUID(), engine, () => 1).kind).toBe('refused');
+    const v1 = JSON.parse(Buffer.from(policyCandidate.bytes).toString()); v1.formatVersion = 1;
+    expect(decodeAdmissionReservation(Buffer.from(JSON.stringify(v1)), policyExpected).kind).toBe('refused');
+    let calls = 0;
+    const host = await createAnswerHost({ ...config, model: { async generate() { calls++; return { kind: 'unavailable', detail: 'must not call' }; } } }, signal);
+    if (host.kind !== 'created') throw new Error(host.kind);
+    try {
+      const legacy = await publishAndReconcileHostAdmission(engine, root, expected, candidate.bytes, signal);
+      if (legacy.kind !== 'admitted') throw new Error(legacy.kind);
+      const claimed = await host.scheduler.automaticRecovery.claimUnowned(legacy.pointer, signal);
+      if (claimed.kind !== 'ready') throw new Error(claimed.kind);
+      const directories = await readdir(config.storage.journalRootDir);
+      for (const outcome of [
+        await host.scheduler.enroll(request, signal),
+        await host.scheduler.recover(admitted.pointer, signal),
+        await host.scheduler.automaticRecovery.claimUnowned(admitted.pointer, signal),
+        await host.scheduler.conditionalRecovery.replaceIfCurrent(admitted.pointer, claimed.owner, signal),
+      ]) expect(outcome).toMatchObject({ kind: 'refused', reason: 'unsupported_execution_policy' });
+      expect(await engine.sessionStore.load(policyPrepared.sessionId)).toEqual(original);
+      expect(await readdir(config.storage.journalRootDir)).toEqual(directories);
+      expect(calls).toBe(0);
+      const legacyTruth = await engine.sessionStore.load(prepared.sessionId);
+      expect(legacyTruth.isOk()).toBe(true);
+    } finally { await host.scheduler.close(signal); }
   } finally { await rm(root, { recursive: true, force: true }); }
 });

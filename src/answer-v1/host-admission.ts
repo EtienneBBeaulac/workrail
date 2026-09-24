@@ -41,7 +41,7 @@ export function buildHostAdmissionCandidate(
     sessionId: prepared.sessionId, timestampMs: now(), kind: 'answer_host_recorded', scope: { runId: prepared.runId },
     dedupeKey: `answer_host:${prepared.sessionId}:${events.length}`,
     data: { kind: 'enrolled', mode: 'host_bound', recovery, initialNode: prepared.nodeId, request } };
-  const bytes = Buffer.from(JSON.stringify({ formatVersion: 1, operationId, request, sessionId: prepared.sessionId,
+  const bytes = Buffer.from(JSON.stringify({ formatVersion: request.daemonPolicy ? 2 : 1, operationId, request, sessionId: prepared.sessionId,
     runId: prepared.runId, nodeId: prepared.nodeId, workflowHash: prepared.workflowHash, recovery, mode: 'host_bound',
     plan: { events: [...events, initial], snapshotPins: prepared.appendPlan.snapshotPins } }));
   return decodeAdmissionReservation(bytes, { operationId, request }).kind === 'validated'

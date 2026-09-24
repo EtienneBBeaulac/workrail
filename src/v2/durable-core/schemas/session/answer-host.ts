@@ -1,11 +1,13 @@
 import { z } from 'zod';
+import { DaemonExecutionPolicySchema } from './daemon-policy.js';
 const id = z.string().min(1);
 /** Immutable admission input, retained with enrollment rather than mutable context. */
 export const AnswerHostRequestSchema = z.object({
     workflowId: z.string().regex(/^[a-zA-Z0-9_-]+$/),
     goal: z.string(),
     workspacePath: z.string().min(1),
-}).strict().readonly();
+    daemonPolicy: DaemonExecutionPolicySchema.optional(),
+}).strict().refine(request => !request.daemonPolicy || request.workspacePath === request.daemonPolicy.workspace.workspacePath).readonly();
 const epoch = z.string().regex(/^[1-9][0-9]*$/);
 const raw = z.object({ providerResponseId: z.string().optional(), responseText: z.string(),
     calls: z.array(z.object({ id: z.string(), name: z.string(), argumentsJson: z.string() }).strict().readonly()).readonly() }).strict().readonly();

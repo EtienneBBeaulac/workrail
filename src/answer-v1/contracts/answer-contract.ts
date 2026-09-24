@@ -60,6 +60,7 @@ type WithoutReply<T> = T extends { readonly kind: 'question' } ? Omit<T, 'reply'
 type NoWorkerAuthority = Readonly<{ reply?: never; recovery?: never; attempt?: never }>;
 export type InspectionView = WithoutReply<WorkView> & NoWorkerAuthority;
 export type OpenRefusedReason =
+  | 'unsupported_execution_policy'
   | 'storage_unavailable'
   | 'initialization_failed';
 
