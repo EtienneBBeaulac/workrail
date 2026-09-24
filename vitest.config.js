@@ -4,9 +4,9 @@
 
 import { defineConfig } from 'vitest/config';
 
-// Real Git fixtures spawn multiple subprocesses per assertion. Serialize these after
-// functional tests so unrelated fixture I/O does not consume their unchanged deadlines.
-const gitIntegration = ['tests/integration/git-*.test.ts', 'tests/integration/external-workflow*.test.ts', 'tests/e2e/external-workflows-*.test.ts'];
+// Real Git and CLI fixtures include subprocess startup in their assertions. Run them
+// after functional tests so fixture contention does not consume unchanged deadlines.
+const subprocessFixtures = ['tests/integration/mcp-http-transport.test.ts', 'tests/unit/cli-validate.test.ts', 'tests/unit/v2/workspace-anchor-adapter.test.ts', 'tests/integration/git-*.test.ts', 'tests/integration/external-workflow*.test.ts', 'tests/e2e/external-workflows-*.test.ts'];
 
 const shared = {
   // Setup files
@@ -45,7 +45,7 @@ export default defineConfig({
           include: ['tests/**/*.test.ts'],
           // Exclude the knowledge-graph test -- it runs in the 'knowledge-graph' project
           // below with pool:forks to avoid DuckDB native binary + worker thread conflicts.
-          exclude: ['tests/unit/knowledge-graph.test.ts', 'tests/performance/**', ...gitIntegration],
+          exclude: ['tests/unit/knowledge-graph.test.ts', 'tests/performance/**', ...subprocessFixtures],
           pool: 'threads',
           poolOptions: {
             threads: {
@@ -73,7 +73,7 @@ export default defineConfig({
       },
       {
         test: {
-          name: 'git-integration', environment: 'node', include: gitIntegration,
+          name: 'git-integration', environment: 'node', include: subprocessFixtures,
           pool: 'threads', poolOptions: { threads: { minThreads: 1, maxThreads: 1 } },
           ...shared,
           sequence: { groupOrder: 1 },

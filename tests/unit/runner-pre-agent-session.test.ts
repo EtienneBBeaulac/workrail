@@ -42,7 +42,7 @@ vi.mock('../../src/v2/usecases/v2-token-ops.js', () => ({
 
 vi.mock('../../src/daemon/tools/_shared.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../src/daemon/tools/_shared.js')>();
-  return { ...original, persistTokens: mockPersistTokens };
+  return { ...original, persistTokens: mockPersistTokens, createTokenPersister: () => mockPersistTokens };
 });
 
 vi.mock('../../src/daemon/core/agent-client.js', () => ({

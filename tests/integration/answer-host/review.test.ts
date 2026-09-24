@@ -51,6 +51,7 @@ it('durably retains review fragments, explicit corrections, replay receipts and 
     const files = await readdir(config.storage.journalRootDir, { recursive: true });
     const texts = await Promise.all(files.filter(f => f.endsWith('.jsonl')).map(f => readFile(join(config.storage.journalRootDir, f), 'utf8')));
     const events = texts.flatMap(t => t.trim().split('\n').filter(Boolean).map(line => JSON.parse(line)));
+    expect(events.find(e => e.kind === 'answer_host_recorded' && e.data.kind === 'enrolled').data.requiredOutput).toBe('wr.contracts.review_verdict');
     const outputs = events.filter(e => e.kind === 'node_output_appended');
     expect(outputs.filter(e => e.data.payload.payloadKind === 'artifact_ref').map(e => e.data.payload.content)).toEqual([
       { kind: 'wr.review_verdict', verdict: 'minor', confidence: 'high', findings: [replacement], summary: 'Done.' },

@@ -125,6 +125,8 @@ export async function createAnswerRuntime(config: AnswerHostConfig, lifetime: Ab
             }
             if (!hasWorkflowDefinitionShape(raw) || raw.id !== input.workflowId || !raw.steps.every(s => isStandardStepDefinition(s) && !s.requireConfirmation && (!s.outputContract || s.outputContract.contractRef === 'wr.contracts.review_verdict') && !s.validationCriteria && !s.assessmentRefs && !s.runCondition))
                 return { kind: 'refused', reason: 'unsupported_workflow', detail: 'This build enrolls linear notes and review workflows without gates' };
+            const requiredOutput = raw.steps.some(s => isStandardStepDefinition(s) && s.outputContract?.contractRef === 'wr.contracts.review_verdict')
+                ? { requiredOutput: 'wr.contracts.review_verdict' as const } : {};
             const workflow = createWorkflow(raw, createUserDirectorySource(config.workflowStoragePath));
             const recovery = engine.idFactory.mintEventId() as RecoveryRef;
             let enrollment: HostEnrollment | undefined;
@@ -134,7 +136,7 @@ export async function createAnswerRuntime(config: AnswerHostConfig, lifetime: Ab
                             return errAsync({ code: 'SESSION_STORE_IO_ERROR' as const, message: 'Enrollment cancelled or incomplete' });
                         enrollment = { execution: lock.sessionId as string as ExecutionRef, recovery } as HostEnrollment;
                         const state = { enrollment, run };
-                        return engine.sessionStore.append(lock, { ...plan, events: [...plan.events, hostEvent(engine, state, { kind: 'enrolled', mode, recovery, initialNode: node.scope.nodeId, request: parsed.data }, plan.events.length), hostEvent(engine, state, { kind: 'owner_acquired', epoch: '1' }, plan.events.length + 1)] });
+                        return engine.sessionStore.append(lock, { ...plan, events: [...plan.events, hostEvent(engine, state, { kind: 'enrolled', mode, recovery, initialNode: node.scope.nodeId, request: parsed.data, ...requiredOutput }, plan.events.length), hostEvent(engine, state, { kind: 'owner_acquired', epoch: '1' }, plan.events.length + 1)] });
                     } } }, parsed.data, { triggerSource: 'daemon' });
             if (started.isErr() || !enrollment)
                 return enrollment ? { kind: 'unconfirmed', reason: 'commit_uncertain', pointer: hydrator.dehydrate(enrollment) } : { kind: 'refused', reason: started.isErr() && ['pinned_workflow_store_failed', 'snapshot_creation_failed', 'session_append_failed', 'keyring_load_failed'].includes(started.error.kind) ? 'storage_unavailable' : 'initialization_failed', detail: started.isErr() ? started.error.kind : 'Missing enrollment' };

@@ -79,56 +79,65 @@ export interface PersistTokensError {
  * a partial JSON file. The tmp-file + rename pattern ensures the sidecar is always
  * either the previous valid state or the new complete state -- never corrupted.
  */
-export async function persistTokens(
-  sessionId: string,
-  continueToken: string,
-  checkpointToken: string | null,
-  worktreePath?: string,
-  recoveryContext?: {
-    readonly workflowId: string;
-    readonly goal: string;
-    readonly workspacePath: string;
-    readonly branchStrategy?: import('../types.js').BranchStrategy;
-    readonly context?: Readonly<Record<string, unknown>>;
-  },
-  gateState?: {
-    readonly kind: 'gate_checkpoint';
-    readonly gateToken: string;
-    readonly stepId: string;
-  },
-  workrailSessionId?: SessionId | null,
-): Promise<Result<void, PersistTokensError>> {
-  try {
-    await fs.mkdir(DAEMON_SESSIONS_DIR, { recursive: true });
+export const persistTokens = createTokenPersister(DAEMON_SESSIONS_DIR);
 
-    const sessionPath = path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`);
-    const state = JSON.stringify(
-      {
-        continueToken,
-        checkpointToken,
-        ts: Date.now(),
-        ...(worktreePath !== undefined ? { worktreePath } : {}),
-        ...(recoveryContext !== undefined ? {
-          workflowId: recoveryContext.workflowId,
-          goal: recoveryContext.goal,
-          workspacePath: recoveryContext.workspacePath,
-          ...(recoveryContext.branchStrategy !== undefined ? { branchStrategy: recoveryContext.branchStrategy } : {}),
-          ...(recoveryContext.context !== undefined ? { context: recoveryContext.context } : {}),
-        } : {}),
-        ...(gateState !== undefined ? { gateState } : {}),
-        ...(workrailSessionId != null ? { workrailSessionId } : {}),
-      },
-      null,
-      2,
-    );
-    const tmp = `${sessionPath}.tmp`;
-    await fs.writeFile(tmp, state, 'utf8');
-    await fs.rename(tmp, sessionPath);
-    return ok(undefined);
-  } catch (e: unknown) {
-    const nodeErr = e as NodeJS.ErrnoException;
-    return err({ code: nodeErr.code ?? 'UNKNOWN', message: nodeErr.message ?? String(e) });
-  }
+/** All sidecars for a runner use its one resolved directory, including initial and tool writes. */
+export type TokenRecoveryContext = {
+      readonly workflowId: string;
+      readonly goal: string;
+      readonly workspacePath: string;
+      readonly branchStrategy?: import('../types.js').BranchStrategy;
+      readonly context?: Readonly<Record<string, unknown>>;
+    };
+
+export function createTokenPersister(sessionsDir: string, defaults: Readonly<{
+  worktreePath?: string; recoveryContext?: TokenRecoveryContext; workrailSessionId?: SessionId | null;
+}> = {}) {
+  return async function persistTokens(
+    sessionId: string,
+    continueToken: string,
+    checkpointToken: string | null,
+    worktreePath: string | undefined = defaults.worktreePath,
+    recoveryContext: TokenRecoveryContext | undefined = defaults.recoveryContext,
+    gateState?: {
+      readonly kind: 'gate_checkpoint';
+      readonly gateToken: string;
+      readonly stepId: string;
+    },
+    workrailSessionId: SessionId | null | undefined = defaults.workrailSessionId,
+  ): Promise<Result<void, PersistTokensError>> {
+    try {
+      await fs.mkdir(sessionsDir, { recursive: true });
+
+      const sessionPath = path.join(sessionsDir, `${sessionId}.json`);
+      const state = JSON.stringify(
+        {
+          continueToken,
+          checkpointToken,
+          ts: Date.now(),
+          ...(worktreePath !== undefined ? { worktreePath } : {}),
+          ...(recoveryContext !== undefined ? {
+            workflowId: recoveryContext.workflowId,
+            goal: recoveryContext.goal,
+            workspacePath: recoveryContext.workspacePath,
+            ...(recoveryContext.branchStrategy !== undefined ? { branchStrategy: recoveryContext.branchStrategy } : {}),
+            ...(recoveryContext.context !== undefined ? { context: recoveryContext.context } : {}),
+          } : {}),
+          ...(gateState !== undefined ? { gateState } : {}),
+          ...(workrailSessionId != null ? { workrailSessionId } : {}),
+        },
+        null,
+        2,
+      );
+      const tmp = `${sessionPath}.tmp`;
+      await fs.writeFile(tmp, state, 'utf8');
+      await fs.rename(tmp, sessionPath);
+      return ok(undefined);
+    } catch (e: unknown) {
+      const nodeErr = e as NodeJS.ErrnoException;
+      return err({ code: nodeErr.code ?? 'UNKNOWN', message: nodeErr.message ?? String(e) });
+    }
+  };
 }
 
 // ---------------------------------------------------------------------------

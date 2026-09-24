@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { asSessionId } from '../../../src/v2/durable-core/ids/index.js';
 import { createAnswerHost } from '../../../src/answer-v1/host.js';
-import { createConsoleReadRuntime } from '../../../src/answer-v1/console.js';
+import { createConsoleReadRuntime, createConsoleReadRuntimeFromEngine } from '../../../src/answer-v1/console.js';
 import { composeAnswerReader } from '../../../src/answer-v1/engine-composition.js';
 import type { SharedAuthorityConfig } from '../../../src/answer-v1/contracts/host-composition.js';
 
@@ -65,6 +65,20 @@ it('scoped console follows canonical completion after owner release without writ
     expect(Object.keys(engine.engine.sessionStore)).toEqual(['load']);
     expect(engine.engine).not.toHaveProperty('gate');
     expect(engine.engine).not.toHaveProperty('idFactory');
+    const roles: string[] = [];
+    const readOnly = createConsoleReadRuntimeFromEngine({ ...engine.engine, tokenCodecPorts: {
+      ...engine.engine.tokenCodecPorts, hmac: { hmacSha256(key, bytes) {
+        roles.push(JSON.parse(Buffer.from(bytes).toString('utf8'))[3]);
+        return engine.engine.tokenCodecPorts.hmac.hmacSha256(key, bytes);
+      } },
+    } }, signal());
+    const scoped = await readOnly.bindHost(enrolled.enrollment, signal());
+    if (scoped.kind !== 'bound') throw new Error(scoped.kind);
+    expect(await scoped.reader.getAnswer()).toMatchObject({ kind: 'loaded', view: { kind: 'question' } });
+    expect(roles).toContain('read');
+    expect(roles).not.toContain('reply');
+    await readOnly.close(signal());
+
   }
   try {
     const first = await enrolled.runner.runTurn(signal());

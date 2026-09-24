@@ -25,6 +25,7 @@ export function makeContinueWorkflowTool(
   workrailSessionId?: SessionId | null,
   onGateParked: (gateToken: string, stepId: string, gateKind: import('../../v2/durable-core/constants.js').GateKind) => void = () => { /* no-op for callers that predate gate support */ },
   gateRecoveryContext?: { readonly workflowId: string; readonly goal: string; readonly workspacePath: string; readonly branchStrategy?: import('../types.js').BranchStrategy; readonly context?: Readonly<Record<string, unknown>> },
+  persist: typeof persistTokens = persistTokens,
 ): AgentTool {
   return {
     name: 'continue_workflow',
@@ -82,7 +83,7 @@ export function makeContinueWorkflowTool(
         // if the daemon crashes between now and agent loop exit, startup recovery
         // can detect the gate from the sidecar rather than relying on in-memory state.
         const gateState = { kind: 'gate_checkpoint' as const, gateToken: out.gateToken, stepId: out.stepId };
-        const persistResult = await persistTokens(sessionId, '', null, undefined, gateRecoveryContext, gateState, workrailSessionId);
+        const persistResult = await persist(sessionId, '', null, undefined, gateRecoveryContext, gateState, workrailSessionId);
         if (persistResult.kind === 'err') {
           console.warn(`[WorkflowRunner] persistTokens failed (continue_workflow gate_checkpoint): ${persistResult.error.code} -- ${persistResult.error.message}`);
         }
@@ -103,7 +104,7 @@ export function makeContinueWorkflowTool(
       const checkpointToken = out.checkpointToken ?? null;
       const persistToken = (out.kind === 'blocked' ? out.nextCall?.params.continueToken : undefined) ?? continueToken;
       if (persistToken) {
-        const persistResult = await persistTokens(sessionId, persistToken, checkpointToken);
+        const persistResult = await persist(sessionId, persistToken, checkpointToken);
         // WHY log-and-continue (not throw): a persist failure degrades crash recovery but
         // the session is still live and the LLM has the token in memory. Killing the session
         // here loses in-progress work. Invariant 4.3: onAdvance/onTokenUpdate must still fire.
@@ -241,6 +242,7 @@ export function makeCompleteStepTool(
   workrailSessionId?: SessionId | null,
   onGateParked: (gateToken: string, stepId: string, gateKind: import('../../v2/durable-core/constants.js').GateKind) => void = () => { /* no-op for callers that predate gate support */ },
   gateRecoveryContext?: { readonly workflowId: string; readonly goal: string; readonly workspacePath: string; readonly branchStrategy?: import('../types.js').BranchStrategy; readonly context?: Readonly<Record<string, unknown>> },
+  persist: typeof persistTokens = persistTokens,
 ): AgentTool {
   return {
     name: 'complete_step',
@@ -315,7 +317,7 @@ export function makeCompleteStepTool(
       // WHY NOT call onAdvance: the step did NOT advance to the next workflow step.
       if (out.kind === 'gate_checkpoint') {
         const gateState = { kind: 'gate_checkpoint' as const, gateToken: out.gateToken, stepId: out.stepId };
-        const persistResult = await persistTokens(sessionId, '', null, undefined, gateRecoveryContext, gateState, workrailSessionId);
+        const persistResult = await persist(sessionId, '', null, undefined, gateRecoveryContext, gateState, workrailSessionId);
         if (persistResult.kind === 'err') {
           console.warn(`[WorkflowRunner] persistTokens failed (complete_step gate_checkpoint): ${persistResult.error.code} -- ${persistResult.error.message}`);
         }
@@ -337,7 +339,7 @@ export function makeCompleteStepTool(
       // advances to this retry token -- the original session token is consumed.
       const persistToken = (out.kind === 'blocked' ? out.nextCall?.params.continueToken : undefined) ?? newContinueToken;
       if (persistToken) {
-        const persistResult = await persistTokens(sessionId, persistToken, checkpointToken);
+        const persistResult = await persist(sessionId, persistToken, checkpointToken);
         // WHY log-and-continue (not throw): a persist failure degrades crash recovery but
         // the session is still live. Invariant 4.3: onAdvance/onTokenUpdate must still fire.
         if (persistResult.kind === 'err') {

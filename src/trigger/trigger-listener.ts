@@ -87,6 +87,9 @@ export interface TriggerListenerHandle {
 }
 
 export interface StartTriggerListenerOptions {
+  /** Recovery is an I/O boundary; tests must not scan the operator's live sessions. */
+  readonly runStartupRecoveryFn?: typeof runStartupRecovery;
+
   /** Absolute path to the workspace that contains triggers.yml */
   readonly workspacePath: string;
   /** Anthropic API key for runWorkflow(). Required when feature is enabled. */
@@ -492,7 +495,7 @@ export async function startTriggerListener(
   // call executeContinueWorkflow with intent: 'rehydrate' for sessions with progress).
   // WHY pass runWorkflowFn: crash-recovered sessions resume via runWorkflow; passing the
   // enricher-wrapped fn ensures recovered root sessions also receive context enrichment.
-  await runStartupRecovery(undefined, undefined, ctx, undefined, undefined, runWorkflowFn, apiKey, triggerIndex, undefined, router.gateResumeCallback).catch((err: unknown) => {
+  await (options.runStartupRecoveryFn ?? runStartupRecovery)(undefined, undefined, ctx, undefined, undefined, runWorkflowFn, apiKey, triggerIndex, undefined, router.gateResumeCallback).catch((err: unknown) => {
     console.warn(
       '[TriggerListener] Startup recovery encountered an unexpected error:',
       err instanceof Error ? err.message : String(err),

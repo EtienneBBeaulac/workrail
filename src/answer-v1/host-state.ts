@@ -87,7 +87,7 @@ export function inspection(view: WorkView): InspectionView {
     const { reply: _reply, ...readonly } = view;
     return readonly;
 }
-export async function workView(engine: AnswerReadEngine, state: HostState, node = state.node): Promise<WorkView | {
+export async function inspectionView(engine: AnswerReadEngine, state: HostState, node = state.node): Promise<InspectionView | {
     kind: 'unavailable';
     detail: string;
 }> {
@@ -121,9 +121,16 @@ export async function workView(engine: AnswerReadEngine, state: HostState, node 
     if (history.kind === 'corrupt') return { kind: 'unavailable', detail: 'Invalid review history' };
     const lastResult = [...state.records].reverse().find(r => r.kind === 'rejected' || r.kind === 'committed' || r.kind === 'review_committed' || r.kind === 'review_partial' || r.kind === 'review_correction');
     const issues = lastResult?.kind === 'rejected' ? lastResult.issues ?? [{ kind: 'field' as const, field: 'notes' as const, reason: lastResult.reason }] : review ? reviewQuestions(history.state) : [];
+    return { kind: 'question', read, instruction: rendered.value.prompt, issues, retained };
+}
+
+/** Only a worker projection derives a reply capability. */
+export async function workView(engine: AnswerReadEngine, state: HostState, node = state.node): Promise<WorkView | { kind: 'unavailable'; detail: string }> {
+    const view = await inspectionView(engine, state, node);
+    if (view.kind !== 'question') return view;
     // Preserve the notes-only token derivation for existing pending deliveries.
     // Commits already change node identity; only unresolved-answer outcomes revise it.
     const revisionRecord = [...state.records].reverse().find(r => r.kind === 'rejected' || r.kind === 'review_partial' || r.kind === 'review_correction');
     const revision = revisionRecord?.receipt ?? '';
-    return { kind: 'question', read, reply: capability(engine, state, 'reply', node + ':' + revision) as ReplyRef, instruction: rendered.value.prompt, issues, retained };
+    return { ...view, reply: capability(engine, state, 'reply', node + ':' + revision) as ReplyRef };
 }

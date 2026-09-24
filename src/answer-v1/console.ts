@@ -4,8 +4,8 @@ import type { HostEnrollment, ExecutionRef } from './contracts/invocation-contra
 import type { ReadRef, RecoveryRef } from './contracts/answer-contract.js';
 import type { ConsoleReadConfig, CreateConsoleReadRuntimeResult, ConsoleReadRuntime } from './contracts/console-composition.js';
 import type { ConsoleHostScopedAnswerReader } from './contracts/console-contract.js';
-import { composeAnswerReader, type AnswerReadEngine } from './reader-composition.js';
-import { capability, readHostState, workView, inspection } from './host-state.js';
+import { composeAnswerReader, composeAnswerReaderFromDataDir, type AnswerReadEngine } from './reader-composition.js';
+import { capability, readHostState, inspectionView } from './host-state.js';
 import { createInspector } from './inspector.js';
 
 /** Dedicated projections never initialize the runtime, acquire an owner or mint a reply
@@ -32,16 +32,16 @@ export function createConsoleReadRuntimeFromEngine(engine: AnswerReadEngine, lif
         if (!available(signal)) return { kind: 'unavailable', sessionId, reason: 'storage_unavailable' };
         const loaded = await readHostState(engine, enrollment);
         if (loaded.kind !== 'loaded') return { kind: 'unavailable', sessionId, reason: loaded.reason };
-        const view = await workView(engine, loaded.state);
+        const view = await inspectionView(engine, loaded.state);
         if (!available(signal) || view.kind === 'unavailable') return { kind: 'unavailable', sessionId, reason: 'storage_unavailable' };
-        return { kind: 'loaded', sessionId, view: inspection(view) };
+        return { kind: 'loaded', sessionId, view };
       },
       async getReceipt(receipt, cursor, signal) {
         if (!available(signal)) return { kind: 'unavailable', sessionId, receipt, reason: 'storage_unavailable' };
         const loaded = await readHostState(engine, enrollment);
         if (loaded.kind !== 'loaded') return { kind: 'unavailable', sessionId, receipt, reason: loaded.reason };
         const read = capability(engine, loaded.state, 'read') as ReadRef;
-        const page = await createInspector(engine, enrollment).inspectReceipt(read, receipt, signal ?? lifetime, cursor);
+        const page = await createInspector(engine, enrollment).inspectReceipt(read, receipt, signal ? AbortSignal.any([signal, lifetime]) : lifetime, cursor);
         if (!available(signal)) return { kind: 'unavailable', sessionId, receipt, reason: 'storage_unavailable' };
         if (page.kind === 'refused') return (page.reason === 'storage_unavailable' || page.reason === 'corrupt')
           ? { kind: 'unavailable', sessionId, receipt, reason: page.reason }
@@ -89,5 +89,32 @@ export function createConsoleReadRuntimeFromEngine(engine: AnswerReadEngine, lif
       return { kind: 'bound', reader: boundReader(enrollment) };
     },
     async close() { closed = true; return { kind: 'closed' }; },
+  };
+}
+
+/** Resolve existing authority per request so a console started before its first
+ * session becomes useful without restarting or creating keys on the read path. */
+export function createStandaloneAnswerReader(
+  dataDir: import('../v2/ports/data-dir.port.js').DataDirPortV2,
+  lifetime: AbortSignal,
+): import('./contracts/console-contract.js').ConsoleSessionAnswerReader {
+  const load = async (signal?: AbortSignal) => {
+    if (lifetime.aborted || signal?.aborted) return undefined;
+    const composed = await composeAnswerReaderFromDataDir(dataDir);
+    if (composed.kind !== 'ready' || lifetime.aborted || signal?.aborted) return undefined;
+    return createConsoleReadRuntimeFromEngine(composed.engine, lifetime).unboundReader;
+  };
+  return {
+    scope: 'unbound',
+    async getAnswer(sessionId, signal) {
+      const reader = await load(signal);
+      return reader ? reader.getAnswer(sessionId, signal)
+        : { kind: 'unavailable', sessionId, reason: 'storage_unavailable' };
+    },
+    async getReceipt(sessionId, receipt, cursor, signal) {
+      const reader = await load(signal);
+      return reader ? reader.getReceipt(sessionId, receipt, cursor, signal)
+        : { kind: 'unavailable', sessionId, receipt, reason: 'storage_unavailable' };
+    },
   };
 }

@@ -87,6 +87,7 @@ vi.mock('../../src/daemon/tools/_shared.js', async (importOriginal) => {
   return {
     ...original,
     persistTokens: mockPersistTokens,
+    createTokenPersister: () => mockPersistTokens,
   };
 });
 

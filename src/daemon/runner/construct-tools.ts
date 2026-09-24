@@ -63,6 +63,7 @@ export function constructTools(
   // tests call them directly with Maps. toMap() returns the same Map instance the
   // tracker uses internally, so read-before-write checks remain valid.
   const readFileStateMap = fileTracker.toMap();
+  const persist = scope.persistTokens;
 
   return [
     makeCompleteStepTool(
@@ -78,8 +79,9 @@ export function constructTools(
       workrailSid,
       onGateParked,
       { workflowId: scopeWorkflowId, goal: triggerGoal, workspacePath: triggerWorkspacePath, branchStrategy: triggerBranchStrategy, context: triggerContext },
+      persist,
     ),
-    makeContinueWorkflowTool(sid, ctx, onAdvance, onComplete, schemas, executeContinueWorkflow, emitter, workrailSid, onGateParked, { workflowId: scopeWorkflowId, goal: triggerGoal, workspacePath: triggerWorkspacePath, branchStrategy: triggerBranchStrategy, context: triggerContext }),
+    makeContinueWorkflowTool(sid, ctx, onAdvance, onComplete, schemas, executeContinueWorkflow, emitter, workrailSid, onGateParked, { workflowId: scopeWorkflowId, goal: triggerGoal, workspacePath: triggerWorkspacePath, branchStrategy: triggerBranchStrategy, context: triggerContext }, persist),
     // WHY sessionWorkspacePath: when branchStrategy === 'worktree', all agent file operations
     // must target the isolated worktree, not the main checkout.
     ...constructWorkspaceTools({ workspacePath: sessionWorkspacePath, readFileState: readFileStateMap,

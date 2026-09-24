@@ -20,7 +20,11 @@ export type AnswerReadEngine = Readonly<{
 }>;
 
 export async function composeAnswerReader(config: SharedAuthorityConfig) {
-    const dataDir = answerDataDir(config);
+    return composeAnswerReaderFromDataDir(answerDataDir(config));
+}
+
+/** Reuse the console's resolved paths, including its existing key location. */
+export async function composeAnswerReaderFromDataDir(dataDir: import('../v2/ports/data-dir.port.js').DataDirPortV2) {
     const fs = new NodeFileSystemV2();
     const keyring = await new LocalKeyringV2(dataDir, fs, new NodeBase64UrlV2(), new NodeRandomEntropyV2()).loadExisting();
     if (keyring.isErr()) return { kind: 'unavailable' as const, detail: keyring.error.message };

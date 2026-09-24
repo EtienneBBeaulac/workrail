@@ -1,7 +1,7 @@
 import type { HostInspectorPort, EvidenceChunk, EvidenceCursor, ReceiptRef } from './contracts/answer-contract.js';
 import type { HostEnrollment } from './contracts/invocation-contract.js';
 import type { AnswerReadEngine } from './engine-composition.js';
-import { capability, inspection, readHostState, workView } from './host-state.js';
+import { capability, readHostState, inspectionView } from './host-state.js';
 /** Read authority is validated against the task fixed by host composition. */
 export function createInspector(engine: AnswerReadEngine, enrollment: HostEnrollment): HostInspectorPort {
     return {
@@ -12,8 +12,8 @@ export function createInspector(engine: AnswerReadEngine, enrollment: HostEnroll
             const loaded = await readHostState(engine, enrollment);
             if (loaded.kind !== 'loaded' || read !== capability(engine, loaded.state, 'read'))
                 return { kind: 'unavailable', reason: 'invalid_scope' };
-            const view = await workView(engine, loaded.state);
-            return view.kind === 'unavailable' ? { kind: 'unavailable', reason: view.detail } : inspection(view);
+            const view = await inspectionView(engine, loaded.state);
+            return view.kind === 'unavailable' ? { kind: 'unavailable', reason: view.detail } : view;
         },
         async inspectReceipt(read, receipt, signal, cursor) {
             if (signal.aborted)

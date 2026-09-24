@@ -19,7 +19,7 @@ import { parseContinueTokenOrFail } from '../../v2/usecases/v2-token-ops.js';
 import type { DaemonEventEmitter, RunId } from '../daemon-events.js';
 import { createSessionState, updateToken, setSessionId } from '../state/index.js';
 import { buildAgentClient } from '../core/index.js';
-import { persistTokens } from '../tools/_shared.js';
+import { createTokenPersister } from '../tools/_shared.js';
 import { ActiveSessionSet } from '../active-sessions.js';
 import type { WorkflowTrigger, SessionSource, ReadFileState } from '../types.js';
 import { prepareSessionWorkspace, rollbackPreparedWorkspace, type WorkspacePreparationEffects } from './workspace-preparation.js';
@@ -60,6 +60,7 @@ export async function buildPreAgentSession(
   activeSessionSet: ActiveSessionSet | undefined,
   source?: SessionSource,
 ): Promise<PreAgentSessionResult> {
+  const persistTokens = createTokenPersister(sessionsDir);
   // ---- Model setup ----
   let agentClient: Anthropic | AnthropicBedrock;
   let modelId: string;
@@ -247,6 +248,12 @@ export async function buildPreAgentSession(
   return {
     kind: 'ready',
     session: {
+      persistTokens: createTokenPersister(sessionsDir, {
+        worktreePath: sessionWorktreePath, workrailSessionId: state.workrailSessionId,
+        recoveryContext: { workflowId: trigger.workflowId, goal: trigger.goal, workspacePath: trigger.workspacePath,
+          context: trigger.context, branchStrategy: workspace.kind === 'created' && workspace.plan.checkout.kind === 'detached'
+            ? 'read-only' : trigger.branchStrategy },
+      }),
       sessionId,
       workrailSessionId: state.workrailSessionId,
       continueToken,

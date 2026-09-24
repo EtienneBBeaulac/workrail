@@ -27,7 +27,9 @@ export const AnswerHostRecordSchema = z.discriminatedUnion('kind', [
     WorkspaceEffectIntentSchema, WorkspaceEffectCompletedSchema, WorkspaceEffectUnconfirmedSchema,
     z.object({ kind: z.literal('enrolled'), mode: z.enum(['host_bound','unbound']), recovery: id, initialNode: id,
         // Absent only in older journals; never invent a request from current workflow files.
-        request: AnswerHostRequestSchema.optional() }).strict(),
+        request: AnswerHostRequestSchema.optional(),
+        // Strict older readers reject this capability before loading or acquiring ownership.
+        requiredOutput: z.literal('wr.contracts.review_verdict').optional() }).strict(),
     z.object({ kind: z.literal('owner_acquired'), epoch }).strict(),
     z.object({ kind: z.literal('owner_released'), epoch }).strict(),
     z.object({ kind: z.literal('delivered'), delivery: id, node: id, reply: id, epoch }).strict(),

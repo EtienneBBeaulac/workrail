@@ -37,6 +37,7 @@ function makeSessionCtx(overrides: Partial<SessionContext> = {}): SessionContext
 
 function makeScope(emitter?: SessionScope['emitter']): SessionScope {
   return {
+    persistTokens: async () => ({ kind: 'ok', value: undefined }),
     fileTracker: {} as never,
     onAdvance: vi.fn(),
     onComplete: vi.fn(),

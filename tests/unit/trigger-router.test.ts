@@ -553,6 +553,7 @@ describe('TriggerRouter.route', () => {
 describe('startTriggerListener feature flag', () => {
   it('returns null when WORKRAIL_TRIGGERS_ENABLED is not set', async () => {
     const result = await startTriggerListener(FAKE_CTX, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: '/tmp',
       apiKey: 'key',
       env: {}, // no WORKRAIL_TRIGGERS_ENABLED
@@ -562,6 +563,7 @@ describe('startTriggerListener feature flag', () => {
 
   it('returns null when WORKRAIL_TRIGGERS_ENABLED is "false"', async () => {
     const result = await startTriggerListener(FAKE_CTX, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: '/tmp',
       apiKey: 'key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'false' },
@@ -571,6 +573,7 @@ describe('startTriggerListener feature flag', () => {
 
   it('returns feature_disabled when flag is missing (null is returned, not err)', async () => {
     const result = await startTriggerListener(FAKE_CTX, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: '/tmp',
       apiKey: 'key',
       env: {},
@@ -580,6 +583,7 @@ describe('startTriggerListener feature flag', () => {
 
   it('returns missing_api_key error when API key is absent and flag is enabled', async () => {
     const result = await startTriggerListener(FAKE_CTX, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: '/nonexistent',
       // no apiKey
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
@@ -595,6 +599,7 @@ describe('startTriggerListener feature flag', () => {
   it('returns missing_v2_context error when ctx.v2 is absent and flag is enabled', async () => {
     // FAKE_CTX has no v2 -- valid apiKey gets past missing_api_key but hits the v2 guard.
     const result = await startTriggerListener(FAKE_CTX, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: '/nonexistent',
       apiKey: 'test-key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
@@ -610,6 +615,7 @@ describe('startTriggerListener feature flag', () => {
   it('starts with empty config when triggers.yml is missing', async () => {
     const { fn } = makeFakeRunWorkflow();
     const result = await startTriggerListener(FAKE_CTX_WITH_V2, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: tmpPath('nonexistent-workspace-xyz'),
       apiKey: 'test-key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
@@ -674,6 +680,7 @@ describe('startTriggerListener workflowId validation', () => {
     const getWorkflowByIdFn = vi.fn().mockResolvedValue(false);
 
     const result = await startTriggerListener(FAKE_CTX_WITH_V2, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: wsDir,
       apiKey: 'test-key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
@@ -707,6 +714,7 @@ describe('startTriggerListener workflowId validation', () => {
     const getWorkflowByIdFn = vi.fn().mockResolvedValue(true);
 
     const result = await startTriggerListener(FAKE_CTX_WITH_V2, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: wsDir,
       apiKey: 'test-key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
@@ -753,6 +761,7 @@ describe('startTriggerListener workflowId validation', () => {
     );
 
     const result = await startTriggerListener(FAKE_CTX_WITH_V2, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: wsDir,
       apiKey: 'test-key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
@@ -781,6 +790,7 @@ describe('startTriggerListener workflowId validation', () => {
 
     // No getWorkflowByIdFn -- validation should be skipped
     const result = await startTriggerListener(FAKE_CTX_WITH_V2, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: wsDir,
       apiKey: 'test-key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
@@ -812,6 +822,7 @@ describe('startTriggerListener workflowId validation', () => {
     const getWorkflowByIdFn = vi.fn().mockRejectedValue(new Error('Storage I/O error'));
 
     const result = await startTriggerListener(FAKE_CTX_WITH_V2, {
+      runStartupRecoveryFn: async () => {},
       workspacePath: wsDir,
       apiKey: 'test-key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
