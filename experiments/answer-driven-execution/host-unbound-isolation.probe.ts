@@ -1,3 +1,4 @@
+import { loadNotesBaseline } from './notes-baseline.js';
 /** Host unbound isolation acceptance probe for answer-driven execution.
  *
  * Covers:
@@ -195,7 +196,9 @@ async function hostUnboundFixture(run: (f: HostUnboundFixtureContext) => Promise
     let serverInstance: { connect: (transport: unknown) => Promise<void>; close: () => Promise<void> };
     try {
       const serverPath = resolve(process.cwd(), 'src/mcp/server.ts');
-      const serverMod = await import(/* @vite-ignore */ serverPath) as {
+      const baseline = profile === 'notes' ? loadNotesBaseline() : undefined;
+      baseline?.container.resetContainer();
+      const serverMod = (baseline?.server ?? await import(/* @vite-ignore */ serverPath)) as {
         composeServer: (opts?: AnswerMcpCompositionOptions) => Promise<{ server: typeof serverInstance }>;
       };
       serverInstance = (await serverMod.composeServer(options)).server;

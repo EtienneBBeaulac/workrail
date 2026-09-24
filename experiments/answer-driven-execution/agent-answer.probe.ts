@@ -1,10 +1,10 @@
 /// <reference types="node" />
-/** Candidate acceptance specifications over the real MCP server and filesystem.
- * No candidate implementation is supplied here. Until profile=answers exists,
- * candidate cases stop at profile admission and their behavioral assertions are
- * UNEXERCISED, not proven failures of partial-answer/recovery behavior.
+/** Candidate acceptance over the real MCP server and filesystem.
+ * Historical notes controls require an explicit compiled prototype baseline root.
+ * They are not assertions about a currently installed or released notes profile.
  */
 import 'reflect-metadata';
+import { loadNotesBaseline } from './notes-baseline.js';
 import { expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -227,15 +227,15 @@ async function fixture(run: (f: {
     process.env.WORKRAIL_ENABLE_V2_TOOLS = 'true';
     process.env.WORKRAIL_ENABLE_SESSION_TOOLS = 'false';
     const boot = async (profile: 'notes' | 'answers') => {
-      if (!resetContainerFn) {
-        const containerModule = (await import(containerModulePath)) as { resetContainer: () => void };
-        resetContainerFn = containerModule.resetContainer;
-      }
       await close();
+      const baseline = profile === 'notes' ? loadNotesBaseline() : undefined;
+      const containerModule = baseline?.container ?? await import(containerModulePath);
+      resetContainerFn = containerModule.resetContainer;
+      resetContainerFn?.();
       process.env.WORKRAIL_AGENT_PROFILE = profile;
       try {
-        const serverModule = (await import(serverModulePath)) as {
-          composeServer: (options?: import('./host-composition.js').AnswerMcpCompositionOptions) => Promise<ComposedServerLike>;
+        const serverModule = (baseline?.server ?? await import(serverModulePath)) as {
+          composeServer: (options?: import('../../src/answer-v1/contracts/host-composition.js').AnswerMcpCompositionOptions) => Promise<ComposedServerLike>;
         };
         server = (await serverModule.composeServer(profile === 'answers' ? { answerAuthority: {
           storage: { journalRootDir: join(root, 'answer-v1', 'sessions'), hostIndexRootDir: join(root, 'answer-v1', 'host-index') },

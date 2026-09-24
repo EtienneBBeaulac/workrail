@@ -1,3 +1,4 @@
+import { loadNotesBaseline } from './notes-baseline.js';
 /** Bounded F041 persisted-format acceptance probes for answer-driven execution.
  * Covers:
  * - Positive control (legacy): Notes MCP session recovered via LocalSessionEventLogStoreV2,
@@ -258,7 +259,9 @@ async function persistedReaderFixture(run: (f: PersistedReaderFixtureContext) =>
     let serverInstance: { connect: (transport: unknown) => Promise<void>; close: () => Promise<void> };
     try {
       const serverPath = resolve(process.cwd(), 'src/mcp/server.ts');
-      const serverMod = await import(/* @vite-ignore */ serverPath) as { composeServer: () => Promise<{ server: typeof serverInstance }> };
+      const baseline = loadNotesBaseline();
+      baseline.container.resetContainer();
+      const serverMod = baseline.server as { composeServer: () => Promise<{ server: typeof serverInstance }> };
       serverInstance = (await serverMod.composeServer()).server;
     } catch (error) {
       expect.fail(`runtime_unavailable: WORKRAIL_AGENT_PROFILE=${profile} (${String(error)})`);
