@@ -488,6 +488,12 @@ export class DaemonEventEmitter {
     this._tail = this._tail.then(() => this._append(event)).catch(() => {});
   }
 
+  /** Wait for attempts queued before this call, including swallowed I/O failures.
+   * This is not a persistence/fsync receipt and does not include later emits. */
+  settle(): Promise<void> {
+    return this._tail;
+  }
+
   private async _append(event: DaemonEvent): Promise<void> {
     const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
     const filePath = path.join(this._dir, `${date}.jsonl`);
