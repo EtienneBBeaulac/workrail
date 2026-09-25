@@ -493,12 +493,15 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 **Checks**
 - Reference an explicit context key from a prior step or the current submission; artifact fields are not automatically context keys.
 - Do not use worker-provided is_autonomous context as gate authority. A submitted approval claim is work, not permission to advance.
+- A trusted correction preserves the original evidence, creates a new gate occurrence and requires fresh approval; it does not execute the successor.
+- A durable supervisor stop blocks late approvals, new corrections and fresh execution advances for that run, including after restart. Closing a host adapter alone does not stop its run.
 
 **Anti-patterns**
 - Assuming an approval-shaped artifact or a corrected submission bypasses the host confirmation gate
 
 **Source refs**
 - `src/mcp/handlers/v2-advance-core/index.ts` (runtime) — isGateRequired() runs after submission validation and before successful advancement. Host admission comes from immutable run provenance.
+- `docs/authoring-v2.md` (documentation) — Trusted correction and stop operations belong to the host boundary, not worker tools or new workflow authoring fields.
 
 
 ## Assessment gates
@@ -1014,18 +1017,3 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - `step.assessment-refs`: The step-level assessmentRefs array referencing declared assessment gate definitions.
 - `step.assessment-consequences`: The step-level assessmentConsequences array declaring blocking consequences when gate dimension levels are met.
 
-
-### Correcting or stopping work awaiting approval
-
-A trusted supervisor can correct a pending, uncertain or rejected gate submission.
-Correction preserves the original evidence and decisions, retains the corrected output
-on a new gate occurrence, and requires a fresh evaluation. Correction does not execute
-the next workflow step. Approved or completed work cannot accept a new correction.
-Output must satisfy the pinned step's contract before any correction is persisted.
-
-A supervisor can also stop one run durably. Stopping survives process restarts and
-refuses late approvals, corrections and fresh execution advances for that run. Other
-runs remain independent. Retrying a correction or stop after a lost acknowledgement
-returns the original receipt rather than applying the operation twice. Closing a host
-adapter alone does not stop its run. These are privileged host operations, not worker
-tools or new workflow authoring fields.
