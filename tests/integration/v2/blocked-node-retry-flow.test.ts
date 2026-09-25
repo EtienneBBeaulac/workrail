@@ -261,6 +261,15 @@ describe('Blocked node retry flow (end-to-end)', () => {
       // Terminal block: retryable=false, no retryContinueToken
       expect(blockRes.data.retryable).toBe(false);
       expect(blockRes.data.retryContinueToken).toBeUndefined();
+      expect(blockRes.data.nextCall).toBeNull();
+      const restored = await handleV2ContinueWorkflow(
+        { continueToken: blockRes.data.continueToken, intent: 'rehydrate' } as V2ContinueWorkflowInput,
+        ctx,
+      );
+      expect(restored.type).toBe('success');
+      if (restored.type !== 'success') throw new Error('Terminal rehydration failed');
+      expect(restored.data).toMatchObject({ kind: 'blocked', retryable: false, nextCall: null, blockers: blockRes.data.blockers });
+      expect(restored.data.retryContinueToken).toBeUndefined();
 
       // Verify blocked_attempt node was created (terminal blocks ARE nodes)
       const sessionStore = ctx.v2!.sessionEventLogStore as any;
