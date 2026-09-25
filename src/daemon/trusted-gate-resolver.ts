@@ -111,7 +111,8 @@ export const createTrustedGateResolver: CreateGateResolver = async ({ toolContex
         const receipt = String(v2.idFactory.mintEventId());
         const event = (resolution: ResolutionEvent['data'], eventIndex: number): ResolutionEvent => ({
           v: 1, eventId: receipt, sessionId: subject.sessionId, eventIndex, timestampMs: Date.now(),
-          kind: 'gate_resolution_recorded', dedupeKey: 'gate_resolution:' + receipt,
+          kind: 'gate_resolution_recorded', dedupeKey: 'gate_resolution:' + String(v2.sha256.sha256(
+            Buffer.from(JSON.stringify([subjectText(subject), decisionText(decision)])))),
           scope: { runId: subject.runId, nodeId: subject.gateNodeId },
           data: resolution,
         });
