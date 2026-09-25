@@ -423,10 +423,14 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - The loop has a max iteration bound.
 - The decision step explains why another pass is or is not needed.
 - The loop does not rely on vibes-only continuation criteria.
+- A loop-control submission applies only to its engine-owned loop boundary. Stopping one loop does not skip an adjacent independent loop; initializer decisions still apply to the first loop reached.
 
 **Anti-patterns**
 - Retry until it feels done
 - Continue while confidence is low without defining how confidence is evaluated
+
+**Source refs**
+- `src/application/services/workflow-interpreter.ts` (runtime) — Consumes submitted loop decision artifacts when their execution loop exits.
 
 ### forced-self-audit-over-vibes
 - **Level**: recommended

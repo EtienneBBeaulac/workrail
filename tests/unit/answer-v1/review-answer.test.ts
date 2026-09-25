@@ -30,6 +30,30 @@ describe('review contributions', () => {
     expect(initial.state.accepted).not.toHaveProperty('summary');
   });
 
+  it('accepts a complete compatible replacement after an incomplete answer', () => {
+    const initial = first();
+    const full = fragment({ notes: 'Reviewed.', verdict: 'minor', confidence: 'high',
+      findings: [finding], summary: 'Review complete.' });
+    expect(contributeReview(initial.state, full).kind).toBe('complete');
+  });
+
+  it('completes with retained judgments after declining a conflicting fragment', () => {
+    const initial = first();
+    const conflict = contributeReview(initial.state, fragment({ verdict: 'clean' }));
+    expect(conflict.kind).toBe('correction_required');
+    const completed = contributeReview(conflict.state, fragment({ summary: 'Original finding stands.' }));
+    expect(completed.kind).toBe('complete');
+    if (completed.kind === 'complete') expect(completed.fields.verdict).toBe('minor');
+  });
+
+  it('does not infer missing judgments from an explicit empty findings list', () => {
+    const initial = contributeReview(emptyReview, fragment({ notes: 'Reviewed.', findings: [], summary: 'No findings.' }));
+    expect(initial.kind).toBe('partial');
+    if (initial.kind !== 'partial') return;
+    expect(initial.issues.map(issue => issue.kind === 'field' ? issue.field : '')).toEqual(['verdict', 'confidence']);
+    expect(contributeReview(initial.state, fragment({ verdict: 'clean', confidence: 'high' })).kind).toBe('complete');
+  });
+
   it('rejects replacement first, then accepts exact confirmation plus missing information after restart', () => {
     const initial = first();
     const replacement = { ...finding, summary: 'Corrected finding' };
