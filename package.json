@@ -90,7 +90,8 @@
     "codemod:v2-prune": "npx ts-node scripts/codemods/run.ts --mod v2-prune --tsconfig tsconfig.test.json --write",
     "codemod:guard": "npx ts-node scripts/codemods/run.ts --mod guard --tsconfig tsconfig.test.json",
     "codemod:test-platform-guard": "npx ts-node scripts/codemods/run.ts --mod test-platform-guard --tsconfig tsconfig.test.json",
-    "prepare": "bash scripts/setup-hooks.sh"
+    "prepare": "bash scripts/setup-hooks.sh",
+    "test:answer-discovery": "vitest run --config experiments/answer-driven-execution/vitest.config.js experiments/answer-driven-execution/console-host-isolation.probe.ts --retry=0 -t \"host discovery\""
   },
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "^0.32.0",

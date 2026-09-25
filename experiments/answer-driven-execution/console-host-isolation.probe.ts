@@ -11,6 +11,7 @@
  * Production module 'src/answer-v1/host.ts' is currently absent (fails with runtime_unavailable, not skip).
  */
 import 'reflect-metadata';
+import { createWorkRailEngine } from '../../src/engine/index.js';
 import { createHash } from 'node:crypto';
 import { rename, lstat } from 'node:fs/promises';
 import { relative, isAbsolute, sep } from 'node:path';
@@ -1483,16 +1484,8 @@ it.each([
 ])('host discovery fault isolation ($mode): $label', ({ mode }) => consoleHostFixture(async f => {
   const signal = new AbortController().signal;
 
-  // 1. Create real legacy notes-profile session
-  const dirsBeforeLegacy = await f.listSessionDirs();
-  const legacyMcp = await f.bootMcp('notes');
-  const legacyStarted = z.object({ kind: z.literal('work'), assignment: z.string() }).passthrough().parse(
-    await legacyMcp.call('start_work', { workflowId: 'two-step-test', workspacePath: f.root, goal: `Legacy notes baseline (${mode})` }),
-  );
-  const legacySessionId = await f.discoverNewSessionId(dirsBeforeLegacy);
-  z.object({ kind: z.literal('work'), assignment: z.string() }).passthrough().parse(
-    await legacyMcp.call('submit_work', { assignment: legacyStarted.assignment, result: { notes: `Legacy observation (${mode})` } }),
-  );
+  // Ordinary engine sessions have no answer-host enrollment.
+  const legacySessionId = await seedLegacySession(f, mode);
 
   // 2. Create genuine unbound answers-profile session
   const answersMcp = await f.bootMcp('answers', { answerAuthority: f.sharedAuthorityConfig });
@@ -1788,16 +1781,19 @@ async function discoveryPathPresent(path: string): Promise<boolean> {
 }
 
 async function seedLegacySession(f: ConsoleHostFixtureContext, label: string): Promise<SessionId> {
-  const dirsBeforeLegacy = await f.listSessionDirs();
-  const legacyMcp = await f.bootMcp('notes');
-  const legacyStarted = z.object({ kind: z.literal('work'), assignment: z.string() }).passthrough().parse(
-    await legacyMcp.call('start_work', { workflowId: 'two-step-test', workspacePath: f.root, goal: `Legacy notes baseline (${label})` }),
-  );
-  const legacySessionId = await f.discoverNewSessionId(dirsBeforeLegacy);
-  z.object({ kind: z.literal('work'), assignment: z.string() }).passthrough().parse(
-    await legacyMcp.call('submit_work', { assignment: legacyStarted.assignment, result: { notes: `Legacy observation (${label})` } }),
-  );
-  return legacySessionId;
+  const before = await f.listSessionDirs();
+  const created = await createWorkRailEngine({ dataDir: f.root });
+  expect(created.ok).toBe(true);
+  if (!created.ok) throw new Error('Could not create legacy fixture engine');
+  try {
+    const started = await created.value.startWorkflow('two-step-test', `Legacy observation (${label})`);
+    expect(started.ok).toBe(true);
+    if (!started.ok || started.value.kind !== 'ok') throw new Error('Could not start legacy fixture');
+    const answered = await created.value.continueWorkflow(started.value.stateToken, started.value.ackToken,
+      { notesMarkdown: `Legacy observation (${label})` });
+    expect(answered.ok).toBe(true);
+    return await f.discoverNewSessionId(before);
+  } finally { await created.value.close(); }
 }
 
 it('host discovery lifecycle: pre-aborted create, pre-aborted scan, discovery, idempotent close, refused post-close, and fresh scanner continuity', async () => {
