@@ -11,7 +11,7 @@ export type IncompatibleAnswerSession = NoAuthority & Readonly<{
 }>;
 export type RollbackReadIssue = NoAuthority & (
   | Readonly<{ kind: 'session'; sessionId: SessionId; reason: DiscoveryUnavailableReason; detail: string }>
-  | Readonly<{ kind: 'root'; reason: DiscoveryUnavailableReason | 'missing_authority' | 'scan_refused' | 'cleanup_incomplete'; detail: string }>
+  | Readonly<{ kind: 'root'; reason: DiscoveryUnavailableReason | 'missing_authority' | 'scan_refused' | 'cleanup_incomplete' | 'scan_cancelled'; detail: string }>
 );
 type InspectionContext = NoAuthority & Readonly<{
   baseline: KnownLegacyBaseline;

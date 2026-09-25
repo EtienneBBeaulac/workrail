@@ -11,12 +11,11 @@ export async function inspectLegacyRollback(
   const observed: IncompatibleAnswerSession[] = [];
   const issues: RollbackReadIssue[] = [];
   let count = 0;
-  let cancelled = false;
   let scanner: HostSessionScanner | undefined;
   try {
     const created = await createHostDiscovery(config.discovery, signal);
     switch (created.kind) {
-      case 'cancelled': cancelled = true; break;
+      case 'cancelled': issues.push({ kind: 'root', reason: 'scan_cancelled', detail: 'Inspection cancelled before enumeration completed' }); break;
       case 'refused': issues.push({ kind: 'root', reason: created.reason, detail: created.detail }); break;
       case 'created': {
         scanner = created.scanner;
@@ -25,7 +24,7 @@ export async function inspectLegacyRollback(
         while (!finished) {
           const result = await scanner.scan(cursor, signal);
           switch (result.kind) {
-            case 'cancelled': cancelled = true; finished = true; break;
+            case 'cancelled': issues.push({ kind: 'root', reason: 'scan_cancelled', detail: 'Inspection cancelled before enumeration completed' }); finished = true; break;
             case 'refused': issues.push({ kind: 'root', reason: 'scan_refused', detail: result.detail }); finished = true; break;
             case 'unavailable': issues.push({ kind: 'root', reason: result.reason, detail: result.detail }); finished = true; break;
             case 'page':
@@ -60,7 +59,6 @@ export async function inspectLegacyRollback(
   }
   const [issue, ...otherIssues] = issues;
   if (issue) return { ...context, kind: 'inconclusive', issues: [issue, ...otherIssues], observedIncompatibleSessions: observed };
-  if (cancelled || signal.aborted) return { ...context, kind: 'cancelled' };
   const [first, ...rest] = observed;
   if (first) return { ...context, kind: 'refused', reason: 'incompatible_answer_sessions_present', affectedSessions: [first, ...rest], remediation: 'use_supporting_version_or_separate_verified_backup' };
   return { ...context, kind: 'no_answer_sessions_observed', scannedSessionCount: count };

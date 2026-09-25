@@ -34,7 +34,14 @@ head = git('rev-parse', 'HEAD')
 if git('status', '--porcelain', '--', 'src', 'workflows', 'package.json', 'package-lock.json'):
     raise SystemExit('Commit engine/workflow/dependency edits first: this probe tests clean source archives')
 lock = git('rev-parse', 'HEAD:package-lock.json')
-if lock != git('rev-parse', BASELINE + ':package-lock.json'):
+def dependency_lock(revision):
+    value = json.loads(git('show', revision + ':package-lock.json'))
+    # Release metadata does not change installed dependencies. Everything else must match.
+    value.pop('version', None)
+    value['packages'][''].pop('version', None)
+    return value
+
+if dependency_lock('HEAD') != dependency_lock(BASELINE):
     raise SystemExit('Dependency lock changed: prepare revision-specific dependencies before running')
 fixture = ROOT / 'experiments/answer-driven-execution/cross-version.fixture.ts'
 writerRevision = BASELINE if args.direction == 'upgrade' else head
