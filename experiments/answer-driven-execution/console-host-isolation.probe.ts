@@ -1607,31 +1607,26 @@ it.each([
       if (!emptyLowLevel.isOk()) throw new Error('Expected low-level missing-manifest empty truth');
       expect(emptyLowLevel.value).toEqual({ manifest: [], events: [] });
     } else if (mode === 'storage_unavailable') {
-      const backupDir = join(f.root, `private-backup-obstruct-${faultSessionId}`);
-      expect(await pathExists(backupDir), 'Backup directory must not exist prior to rename').toBe(false);
-      const OBSTRUCTION_PAYLOAD = 'workrail_fixture_storage_unavailable_obstruction_payload';
+      // Obstruct the committed file itself: an ancestor file can report ENOENT
+      // on Windows and would exercise absence rather than a storage read failure.
+      const { targetSegPath } = await locateCommittedSessionSegment(f.dataDir, f.root, faultSessionId);
+      const backupSegment = join(f.root, `private-backup-obstruct-${faultSessionId}`);
+      expect(await pathExists(backupSegment)).toBe(false);
       restoreFault = async () => {
-        if (!(await pathExists(backupDir))) return;
-        if (await pathExists(faultTargetDir)) {
-          const fileStat = await stat(faultTargetDir);
-          if (!fileStat.isFile()) {
-            throw new Error(`Expected regular file obstruction at ${faultTargetDir}, refusing to remove`);
+        if (!(await pathExists(backupSegment))) return;
+        if (await pathExists(targetSegPath)) {
+          if (!(await stat(targetSegPath)).isDirectory() || (await readdir(targetSegPath)).length !== 0) {
+            throw new Error('Refuse to remove unexpected segment obstruction');
           }
-          const existing = await readFile(faultTargetDir, 'utf8');
-          if (existing !== OBSTRUCTION_PAYLOAD) {
-            throw new Error(`Unexpected content at obstruction path ${faultTargetDir}, refusing to remove`);
-          }
-          await rm(faultTargetDir, { force: true });
+          await rm(targetSegPath, { recursive: true });
         }
-        if (await pathExists(backupDir)) {
-          await rename(backupDir, faultTargetDir);
-        }
+        await rename(backupSegment, targetSegPath);
       };
-      await rename(faultTargetDir, backupDir);
-      await writeFile(faultTargetDir, OBSTRUCTION_PAYLOAD, { encoding: 'utf8', flag: 'wx' });
+      await rename(targetSegPath, backupSegment);
+      await mkdir(targetSegPath);
       const obstructed = await f.ctx.v2.sessionStore.load(faultSessionId);
       expect(obstructed.isErr()).toBe(true);
-      if (!obstructed.isErr()) throw new Error('Expected non-directory storage error');
+      if (!obstructed.isErr()) throw new Error('Expected unreadable committed segment');
       expect(obstructed.error.code).toBe('SESSION_STORE_IO_ERROR');
     } else if (mode === 'corrupt') {
       const { manifestPath, manifestRaw, targetSegPath } = await locateCommittedSessionSegment(
