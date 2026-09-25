@@ -7,6 +7,7 @@ import { detectBindingDrift, type BindingDriftWarning } from '../../../v2/durabl
 // getProjectBindings is intentionally NOT used here.
 import { loadProjectBindings } from '../../../application/services/compiler/binding-registry.js';
 import { resolveBindingBaseDir } from '../v2-workspace-resolution.js';
+import { loadValidationResultV1 } from '../../../v2/durable-core/domain/validation-loader.js';
 import { deriveIsComplete, derivePendingStep } from '../../../v2/durable-core/projections/snapshot-state.js';
 import { getCachedWorkflow } from './workflow-object-cache.js';
 import type { DomainEventV1 } from '../../../v2/durable-core/schemas/session/index.js';
@@ -129,6 +130,18 @@ export function handleRehydrateIntent(args: {
       const engineState = snapshot.enginePayload.engineState;
       const pending = derivePendingStep(engineState);
       const isComplete = deriveIsComplete(engineState);
+      // Rehydration reports persisted state; it must not erase a saved blocker.
+      const blocked = engineState.kind === 'blocked' ? engineState.blocked : undefined;
+      const outcome = blocked ? {
+        kind: 'blocked' as const,
+        blockers: blocked.blockers,
+        retryable: blocked.kind === 'retryable_block',
+        validation: loadValidationResultV1(truth.events, String(blocked.validationRef)).unwrapOr(null) ?? undefined,
+        ...(blocked.reason.kind === 'assessment_followup_required' ? { assessmentFollowup: {
+          title: `Assessment follow-up matched ${blocked.reason.assessmentId}.${blocked.reason.dimensionId} == ${blocked.reason.level}`,
+          guidance: blocked.reason.guidance,
+        } } : {}),
+      } : { kind: 'ok' as const };
 
       // Load the pinned workflow snapshot for all rehydrate paths.
       // Required for: binding drift detection (both complete and pending paths)
@@ -164,7 +177,7 @@ export function handleRehydrateIntent(args: {
 
             const parsed = assertOutput(
               {
-                kind: 'ok' as const,
+                ...outcome,
                 isComplete,
                 pending: null,
                 preferences,
@@ -183,7 +196,8 @@ export function handleRehydrateIntent(args: {
             sessionId: String(sessionId),
             runId: String(runId),
             nodeId: String(nodeId),
-            attemptId: String(attemptId),
+            attemptId: blocked?.kind === 'retryable_block' ? blocked.retryAttemptId : String(attemptId),
+            ...(blocked?.kind === 'retryable_block' ? { aliasSlot: 'retry' as const } : {}),
             workflowHashRef: String(workflowHashRef),
           };
 
@@ -222,14 +236,15 @@ export function handleRehydrateIntent(args: {
 
               const parsed = assertOutput(
                 {
-                  kind: 'ok' as const,
+                  ...outcome,
+                  ...(blocked?.kind === 'retryable_block' ? { retryContinueToken: continueTokenValue } : {}),
                   continueToken: continueTokenValue,
                   checkpointToken: checkpointTokenValue,
                   isComplete,
                   pending: toPendingStep(meta),
                   preferences,
                   nextIntent,
-                  nextCall: buildNextCall({ continueToken: continueTokenValue, isComplete, pending: meta }),
+                  nextCall: blocked?.kind === 'terminal_block' ? null : buildNextCall({ continueToken: continueTokenValue, isComplete, pending: meta }),
                   ...(driftWarnings.length > 0 ? { warnings: [...driftWarnings] } : {}),
                 },
                 assertContinueTokenPresence,

@@ -18,6 +18,12 @@ const recorded = z.object({ kind: z.literal('recorded'), receipt: z.string(), vi
 // substitutes only model judgment; file/command effects, MCP and HTTP remain real.
 it.each(['acknowledged_notes', 'lost_ack_review'] as const)('completes %s through tools, process death, replay and HTTP receipts', async scenario => {
   const review = scenario === 'lost_ack_review';
+  const phase = async <T>(label: string, action: () => Promise<T>): Promise<T> => {
+    const start = performance.now();
+    console.info(`[operational:${scenario}] start ${label}`);
+    try { return await action(); }
+    finally { console.info(`[operational:${scenario}] end ${label} ${Math.round(performance.now() - start)}ms`); }
+  };
   const root = await mkdtemp(join(tmpdir(), 'answer-operational-'));
   const data = join(root, 'data'), workspace = join(root, 'workspace'), workflows = join(root, 'workflows');
   const clients: Array<{ client: Client; transport: StdioClientTransport; closed: Promise<void> }> = [];
@@ -47,13 +53,13 @@ it.each(['acknowledged_notes', 'lost_ack_review'] as const)('completes %s throug
           WORKRAIL_DATA_DIR: data, WORKRAIL_ENABLE_SESSION_TOOLS: 'false', WORKRAIL_TRANSPORT: 'stdio' }, stderr: 'pipe' });
       clients.push({ client, transport, closed });
       transport.stderr?.resume();
-      await client.connect(transport, { timeout: 5000 });
+      await phase('connect', () => client.connect(transport, { timeout: 5000 }));
       transport.stderr?.resume();
-      expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['answer_work', 'inspect_work', 'open_work', 'recover_work']);
+      expect((await phase('listTools', () => client.listTools())).tools.map(t => t.name).sort()).toEqual(['answer_work', 'inspect_work', 'open_work', 'recover_work']);
       return { client, transport, closed };
     };
     const call = async (client: Client, name: string, args: Record<string, unknown>) => {
-      const result = await client.callTool({ name, arguments: args }, undefined, { timeout: 5000 });
+      const result = await phase(name, () => client.callTool({ name, arguments: args }, undefined, { timeout: 5000 }));
       expect(result.isError).not.toBe(true);
       return JSON.parse(envelope.parse(result).content[0]!.text) as unknown;
     };
@@ -95,7 +101,7 @@ it.each(['acknowledged_notes', 'lost_ack_review'] as const)('completes %s throug
       const pid = first.transport.pid;
       if (!pid) throw new Error('Missing server PID');
       process.kill(pid, 'SIGKILL');
-      await first.closed;
+      await phase('killed process closed', () => first.closed);
     }
     const sessions = (await readdir(join(data, 'sessions'), { withFileTypes: true })).filter(entry => entry.isDirectory());
     expect(sessions).toHaveLength(1);
@@ -148,10 +154,10 @@ it.each(['acknowledged_notes', 'lost_ack_review'] as const)('completes %s throug
   } finally {
     for (const { client, transport, closed } of clients) {
       const running = transport.pid !== null;
-      await client.close();
-      if (running) await closed;
+      await phase('client cleanup', () => client.close());
+      if (running) await phase('closed notification', () => closed);
     }
-    await stopViewer?.();
+    await phase('viewer cleanup', async () => { await stopViewer?.(); });
     await rm(root, { recursive: true, force: true });
   }
 });
