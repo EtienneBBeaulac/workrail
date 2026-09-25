@@ -11,6 +11,7 @@
  * Production module 'src/answer-v1/host.ts' is currently absent (fails with runtime_unavailable, not skip).
  */
 import 'reflect-metadata';
+import { createWorkRailEngine } from '../../src/engine/index.js';
 import { createHash } from 'node:crypto';
 import { rename, lstat } from 'node:fs/promises';
 import { relative, isAbsolute, sep } from 'node:path';
@@ -1483,16 +1484,8 @@ it.each([
 ])('host discovery fault isolation ($mode): $label', ({ mode }) => consoleHostFixture(async f => {
   const signal = new AbortController().signal;
 
-  // 1. Create real legacy notes-profile session
-  const dirsBeforeLegacy = await f.listSessionDirs();
-  const legacyMcp = await f.bootMcp('notes');
-  const legacyStarted = z.object({ kind: z.literal('work'), assignment: z.string() }).passthrough().parse(
-    await legacyMcp.call('start_work', { workflowId: 'two-step-test', workspacePath: f.root, goal: `Legacy notes baseline (${mode})` }),
-  );
-  const legacySessionId = await f.discoverNewSessionId(dirsBeforeLegacy);
-  z.object({ kind: z.literal('work'), assignment: z.string() }).passthrough().parse(
-    await legacyMcp.call('submit_work', { assignment: legacyStarted.assignment, result: { notes: `Legacy observation (${mode})` } }),
-  );
+  // Ordinary engine sessions have no answer-host enrollment.
+  const legacySessionId = await seedLegacySession(f, mode);
 
   // 2. Create genuine unbound answers-profile session
   const answersMcp = await f.bootMcp('answers', { answerAuthority: f.sharedAuthorityConfig });
@@ -1614,31 +1607,26 @@ it.each([
       if (!emptyLowLevel.isOk()) throw new Error('Expected low-level missing-manifest empty truth');
       expect(emptyLowLevel.value).toEqual({ manifest: [], events: [] });
     } else if (mode === 'storage_unavailable') {
-      const backupDir = join(f.root, `private-backup-obstruct-${faultSessionId}`);
-      expect(await pathExists(backupDir), 'Backup directory must not exist prior to rename').toBe(false);
-      const OBSTRUCTION_PAYLOAD = 'workrail_fixture_storage_unavailable_obstruction_payload';
+      // Obstruct the committed file itself: an ancestor file can report ENOENT
+      // on Windows and would exercise absence rather than a storage read failure.
+      const { targetSegPath } = await locateCommittedSessionSegment(f.dataDir, f.root, faultSessionId);
+      const backupSegment = join(f.root, `private-backup-obstruct-${faultSessionId}`);
+      expect(await pathExists(backupSegment)).toBe(false);
       restoreFault = async () => {
-        if (!(await pathExists(backupDir))) return;
-        if (await pathExists(faultTargetDir)) {
-          const fileStat = await stat(faultTargetDir);
-          if (!fileStat.isFile()) {
-            throw new Error(`Expected regular file obstruction at ${faultTargetDir}, refusing to remove`);
+        if (!(await pathExists(backupSegment))) return;
+        if (await pathExists(targetSegPath)) {
+          if (!(await stat(targetSegPath)).isDirectory() || (await readdir(targetSegPath)).length !== 0) {
+            throw new Error('Refuse to remove unexpected segment obstruction');
           }
-          const existing = await readFile(faultTargetDir, 'utf8');
-          if (existing !== OBSTRUCTION_PAYLOAD) {
-            throw new Error(`Unexpected content at obstruction path ${faultTargetDir}, refusing to remove`);
-          }
-          await rm(faultTargetDir, { force: true });
+          await rm(targetSegPath, { recursive: true });
         }
-        if (await pathExists(backupDir)) {
-          await rename(backupDir, faultTargetDir);
-        }
+        await rename(backupSegment, targetSegPath);
       };
-      await rename(faultTargetDir, backupDir);
-      await writeFile(faultTargetDir, OBSTRUCTION_PAYLOAD, { encoding: 'utf8', flag: 'wx' });
+      await rename(targetSegPath, backupSegment);
+      await mkdir(targetSegPath);
       const obstructed = await f.ctx.v2.sessionStore.load(faultSessionId);
       expect(obstructed.isErr()).toBe(true);
-      if (!obstructed.isErr()) throw new Error('Expected non-directory storage error');
+      if (!obstructed.isErr()) throw new Error('Expected unreadable committed segment');
       expect(obstructed.error.code).toBe('SESSION_STORE_IO_ERROR');
     } else if (mode === 'corrupt') {
       const { manifestPath, manifestRaw, targetSegPath } = await locateCommittedSessionSegment(
@@ -1788,16 +1776,19 @@ async function discoveryPathPresent(path: string): Promise<boolean> {
 }
 
 async function seedLegacySession(f: ConsoleHostFixtureContext, label: string): Promise<SessionId> {
-  const dirsBeforeLegacy = await f.listSessionDirs();
-  const legacyMcp = await f.bootMcp('notes');
-  const legacyStarted = z.object({ kind: z.literal('work'), assignment: z.string() }).passthrough().parse(
-    await legacyMcp.call('start_work', { workflowId: 'two-step-test', workspacePath: f.root, goal: `Legacy notes baseline (${label})` }),
-  );
-  const legacySessionId = await f.discoverNewSessionId(dirsBeforeLegacy);
-  z.object({ kind: z.literal('work'), assignment: z.string() }).passthrough().parse(
-    await legacyMcp.call('submit_work', { assignment: legacyStarted.assignment, result: { notes: `Legacy observation (${label})` } }),
-  );
-  return legacySessionId;
+  const before = await f.listSessionDirs();
+  const created = await createWorkRailEngine({ dataDir: f.root });
+  expect(created.ok).toBe(true);
+  if (!created.ok) throw new Error('Could not create legacy fixture engine');
+  try {
+    const started = await created.value.startWorkflow('two-step-test', `Legacy observation (${label})`);
+    expect(started.ok).toBe(true);
+    if (!started.ok || started.value.kind !== 'ok') throw new Error('Could not start legacy fixture');
+    const answered = await created.value.continueWorkflow(started.value.stateToken, started.value.ackToken,
+      { notesMarkdown: `Legacy observation (${label})` });
+    expect(answered.ok).toBe(true);
+    return await f.discoverNewSessionId(before);
+  } finally { await created.value.close(); }
 }
 
 it('host discovery lifecycle: pre-aborted create, pre-aborted scan, discovery, idempotent close, refused post-close, and fresh scanner continuity', async () => {

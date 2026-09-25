@@ -424,6 +424,9 @@ jobs:
       - name: Answer workflow operational E2E (no retries)
         run: npm run test:answer-e2e
 
+      - name: Answer host discovery acceptance (no retries)
+        run: npm run test:answer-discovery
+
       - name: Upload coverage reports
         if: matrix.node-version == 20
         uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
