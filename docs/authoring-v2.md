@@ -757,3 +757,10 @@ runs remain independent. Retrying a correction or stop after a lost acknowledgem
 returns the original receipt rather than applying the operation twice. Closing a host
 adapter alone does not stop its run. These are privileged host operations, not worker
 tools or new workflow authoring fields.
+
+### Loop decision scope
+
+A loop-control answer belongs to the loop boundary selected by the engine. Its optional
+`loopId` is tracing metadata, not a way to choose another loop. Once that loop exits,
+the same answer cannot decide an adjacent independent loop. An initializer may still
+supply the first loop's decision before any body step runs.

@@ -85,6 +85,7 @@ export class WorkflowInterpreter {
     const runningRes = this.ensureRunning(state);
     if (runningRes.isErr()) return err(runningRes.error);
     let running = runningRes.value;
+    let decisionArtifacts = artifacts;
 
     // Trace accumulator: collects entries as the interpreter evaluates conditions
     const trace: DecisionTraceEntry[] = [];
@@ -105,10 +106,18 @@ export class WorkflowInterpreter {
     for (let guard = 0; guard < 10_000; guard++) {
       // If inside a loop, drive it first.
       if (running.loopStack.length > 0) {
-        const inLoop = this.nextInCurrentLoop(compiled, running, context, artifacts, trace);
+        const decisionLoop = running.loopStack[running.loopStack.length - 1]!;
+        const inLoop = this.nextInCurrentLoop(compiled, running, context, decisionArtifacts, trace);
         if (inLoop.isErr()) return err(inLoop.error);
         const result = inLoop.value;
         running = result.state;
+        // One submission belongs to one engine-owned loop boundary. A stop may
+        // select an adjacent loop in this same call; it cannot decide that loop too.
+        // Moving to a new iteration also consumes the prior occurrence's decision.
+        // An initializer still reaches the first loop before this scope is consumed.
+        if (!running.loopStack.some(frame => frame.loopId === decisionLoop.loopId && frame.iteration === decisionLoop.iteration)) {
+          decisionArtifacts = [];
+        }
         if (result.next) {
           trace.push(traceSelectedNextStep(result.next.stepInstanceId.stepId, result.next.step.title));
           return ok({ state: running, next: result.next, isComplete: false, trace });
