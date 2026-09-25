@@ -1016,11 +1016,18 @@
               "kind": "runtime",
               "path": "src/mcp/handlers/v2-advance-core/index.ts",
               "note": "isGateRequired() runs after submission validation and before successful advancement. Host admission comes from immutable run provenance."
+            },
+            {
+              "kind": "documentation",
+              "path": "docs/authoring-v2.md",
+              "note": "Trusted correction and stop operations belong to the host boundary, not worker tools or new workflow authoring fields."
             }
           ],
           "checks": [
             "Reference an explicit context key from a prior step or the current submission; artifact fields are not automatically context keys.",
-            "Do not use worker-provided is_autonomous context as gate authority. A submitted approval claim is work, not permission to advance."
+            "Do not use worker-provided is_autonomous context as gate authority. A submitted approval claim is work, not permission to advance.",
+            "A trusted correction preserves the original evidence, creates a new gate occurrence and requires fresh approval; it does not execute the successor.",
+            "A durable supervisor stop blocks late approvals, new corrections and fresh execution advances for that run, including after restart. Closing a host adapter alone does not stop its run."
           ],
           "antiPatterns": [
             "Assuming an approval-shaped artifact or a corrected submission bypasses the host confirmation gate"
@@ -1477,10 +1484,14 @@
           "id": "metrics-context-accumulation",
           "status": "active",
           "level": "recommended",
-          "scope": ["step.context-capture"],
+          "scope": [
+            "step.context-capture"
+          ],
           "rule": "When a step captures metrics_commit_shas, send the FULL accumulated SHA list every time -- not just the SHAs from the current step. context_set uses shallow merge: each key is replaced, not merged. Sending a partial list silently loses earlier SHAs.",
           "why": "mergeContext uses shallow merge: metrics_commit_shas: ['abc'] at step 5 followed by ['def'] at step 9 permanently loses 'abc'. Flat keys require accumulation discipline to produce correct analytics attribution.",
-          "enforcement": ["advisory"],
+          "enforcement": [
+            "advisory"
+          ],
           "checks": [
             "Any step that adds new commits must first read the current metrics_commit_shas from context, append the new SHAs, and send the complete accumulated list.",
             "metrics_outcome must be set only at final handoff steps, not at intermediate commit steps.",
@@ -1498,10 +1509,15 @@
           "id": "metrics-profile-declaration",
           "status": "active",
           "level": "recommended",
-          "scope": ["workflow.definition", "step.context-capture"],
+          "scope": [
+            "workflow.definition",
+            "step.context-capture"
+          ],
           "rule": "Declare metricsProfile at workflow level to enable engine-injected metrics instrumentation footers. Use 'coding' for implementation workflows, 'review' for code review workflows, 'research' for investigation workflows, 'design' for design/planning artifacts, 'ticket' for work-item creation. Omit or use 'none' for meta-workflows and utilities.",
           "why": "Without metricsProfile, captureConfidence is always 'none' and run_completed events carry no usable attribution data. The engine cannot auto-derive the profile from tags -- authors must set it explicitly.",
-          "enforcement": ["advisory"],
+          "enforcement": [
+            "advisory"
+          ],
           "checks": [
             "Select 'coding' when the workflow produces git commits (implementation, refactoring, bug-fix, migration, documentation updates).",
             "Select 'review' when the workflow produces a review decision on a PR or MR.",

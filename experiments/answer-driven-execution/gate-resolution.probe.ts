@@ -1,2 +1,2 @@
-// Canonical CI suite also serves the registered requirement probe.
+/** Formal acceptance entrypoint; canonical suite runs in CI. */
 import '../../tests/integration/trusted-gate-resolution.test.js';

@@ -21,6 +21,7 @@ import { type ToolFailure, internalSuggestion } from './v2-execution-helpers.js'
  * Every variant is handled exhaustively in the advance core.
  */
 export type InternalError =
+  | { readonly kind: 'run_stopped'; readonly subject: Readonly<{ sessionId: string; runId: string }>; readonly receipt: string; readonly reason: 'cancelled'; readonly detail: string }
   | {readonly kind:'answer_owner_required'}
   | { readonly kind: 'invariant_violation'; readonly message: string }
   | { readonly kind: 'advance_apply_failed'; readonly message: string }
@@ -169,6 +170,8 @@ export function pinnedWorkflowStoreErrorToToolError(_e: PinnedWorkflowStoreError
 /** Map InternalError to ToolFailure. Exhaustive switch. */
 export function mapInternalErrorToToolError(e: InternalError): ToolFailure {
   switch (e.kind) {
+    case 'run_stopped':
+      return errNotRetryable('PRECONDITION_FAILED', 'This run has been stopped.', e) as ToolFailure;
     case 'answer_owner_required':
       return errNotRetryable('PRECONDITION_FAILED','This execution requires its answer owner. Continue through the answer host or worker.') as ToolFailure;
     case 'missing_node_or_run':

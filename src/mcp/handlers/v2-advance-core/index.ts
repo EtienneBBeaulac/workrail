@@ -1,3 +1,4 @@
+import { projectRunLifecycle } from '../../../v2/durable-core/projections/run-lifecycle.js';
 import { foldAnswerOwnership } from '../../../v2/durable-core/projections/answer-ownership.js';
 /**
  * v2 Advance Core - Public API
@@ -164,6 +165,9 @@ export function executeAdvanceCore(args: {
   readonly lockedIndex: SessionIndex;
 }): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
   const { mode, truth, sessionId, runId, attemptId, workflowHash, inputContext, inputOutput, lock, pinnedWorkflow, ports } = args;
+  const runState = projectRunLifecycle(truth.events, runId);
+  if (runState.kind === 'stopped') return errAsync({ kind: 'run_stopped' as const,
+    subject: { sessionId, runId }, ...runState.event.data });
   // Answer-enrolled runs can only advance through their fenced coordinator.
   // Enforce this under the shared session lock, including legacy/token callers.
   const answerRecords = truth.events.filter(e => e.kind === 'answer_host_recorded' && e.scope.runId === runId);
