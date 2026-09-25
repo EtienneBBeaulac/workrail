@@ -65,7 +65,7 @@ export async function createHostDiscovery(config: HostDiscoveryConfig, signal: A
                     return { kind: 'refused', reason: 'invalid_cursor', detail: 'Cursor belongs to another scanner' };
                 if (!ids) {
                     try {
-                        const enumerated = (await readdir(config.storage.journalRootDir, { withFileTypes: true })).filter(e => /^sess_[a-z0-9]+$/.test(e.name)).map(e => e.name).sort();
+                        const enumerated = (await readdir(config.storage.journalRootDir, { withFileTypes: true })).filter(e => /^sess_[a-zA-Z0-9_]+$/.test(e.name)).map(e => e.name).sort();
                         ids ??= enumerated;
                     }
                     catch (error) {

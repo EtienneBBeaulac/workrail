@@ -61,6 +61,21 @@ it('transfers pending and blocked sessions between actual source revisions', asy
         expect(resumed.pending?.stepId).toBe('second');
         expect(resumed.pending?.prompt).toContain('Pinned second prompt.');
         expect(resumed.isComplete).toBe(false);
+        if (saved.kind === 'blocked') {
+          expect(resumed.kind).toBe('blocked');
+          if (resumed.kind !== 'blocked') throw new Error('Saved blocker lost');
+          expect(resumed.blockers).toEqual(saved.blockers);
+          expect(resumed.retryable).toBe(true);
+          expect(resumed.retryAckToken).not.toBeNull();
+          expect(resumed.checkpointToken).not.toBeNull();
+          if (!resumed.checkpointToken) throw new Error('No checkpoint token');
+          const checkpoint = await engine.checkpointWorkflow(resumed.checkpointToken);
+          expect(checkpoint.ok, JSON.stringify(checkpoint)).toBe(true);
+          if (!checkpoint.ok) throw new Error('Checkpoint failed');
+          const restored = unwrap(await engine.continueWorkflow(checkpoint.value.stateToken, null));
+          expect(restored.kind).toBe('blocked');
+          if (restored.kind === 'blocked') expect(restored.blockers).toEqual(saved.blockers);
+        }
         const complete = unwrap(await engine.continueWorkflow(resumed.stateToken,
           resumed.kind === 'blocked' ? resumed.retryAckToken : resumed.ackToken,
           { notesMarkdown: 'New reader completed notes.', artifacts: [artifact] }));

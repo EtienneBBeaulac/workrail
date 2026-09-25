@@ -162,7 +162,7 @@ export function buildAdvancedReplayResponse(args: {
             pending: toPendingStep(blockedMeta),
             preferences,
             nextIntent,
-            nextCall: buildNextCall({ continueToken: pending ? nextTokens.continueToken : undefined, isComplete, pending: blockedMeta, retryContinueToken }),
+            nextCall: retryable ? buildNextCall({ continueToken: pending ? nextTokens.continueToken : undefined, isComplete, pending: blockedMeta, retryContinueToken }) : null,
             blockers,
             retryable,
             retryContinueToken,
