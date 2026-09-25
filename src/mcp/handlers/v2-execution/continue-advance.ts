@@ -1,3 +1,4 @@
+import { projectRunLifecycle } from '../../../v2/durable-core/projections/run-lifecycle.js';
 import type { V2ContinueWorkflowInput } from '../../v2/tools.js';
 import { V2ContinueWorkflowOutputSchema } from '../../output-schemas.js';
 import { getCachedWorkflow } from './workflow-object-cache.js';
@@ -197,6 +198,10 @@ export function handleAdvanceIntent(args: {
             const existingLocked = lockedIndex.advanceRecordedByDedupeKey.get(dedupeKey);
             if (existingLocked) return okAsync({ kind: 'replay' as const, truth: truthLocked, recordedEvent: existingLocked, precomputedIndex: lockedIndex });
 
+            const runState = projectRunLifecycle(truthLocked.events, runId);
+            if (runState.kind === 'stopped') return neErrorAsync({ kind: 'run_stopped' as const,
+              subject: { sessionId, runId }, ...runState.event.data });
+
             // --- EAT Resumption Capability Recheck (Slice 4) ---
             let truthToUse = truthLocked;
             let indexToUse = lockedIndex;
@@ -362,6 +367,7 @@ export function handleAdvanceIntent(args: {
         )
         .mapErr((cause) => {
           if (isInternalError(cause)) {
+            if (cause.kind === 'run_stopped') return cause;
             // Missing context is a recoverable agent-facing error, not an internal failure.
             // Surface it as precondition_failed so the agent gets an actionable message.
             if (cause.kind === 'advance_next_missing_context') {

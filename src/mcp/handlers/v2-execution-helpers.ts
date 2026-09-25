@@ -74,6 +74,7 @@ export type StartWorkflowError =
  * Every variant must be handled in mapContinueWorkflowErrorToToolError.
  */
 export type ContinueWorkflowError =
+  | Extract<import('./v2-error-mapping.js').InternalError, { kind: 'run_stopped' }>
   | { readonly kind: 'precondition_failed'; readonly message: string; readonly suggestion?: string }
   | { readonly kind: 'token_unknown_node'; readonly message: string; readonly suggestion?: string }
   | { readonly kind: 'invariant_violation'; readonly message: string; readonly suggestion?: string }
@@ -178,6 +179,8 @@ export function mapStartWorkflowErrorToToolError(e: StartWorkflowError): ToolFai
  */
 export function mapContinueWorkflowErrorToToolError(e: ContinueWorkflowError): ToolFailure {
   switch (e.kind) {
+    case 'run_stopped':
+      return errNotRetryable('PRECONDITION_FAILED', 'This run has been stopped.', e) as ToolFailure;
     case 'precondition_failed':
       return errNotRetryable('PRECONDITION_FAILED', e.message, e.suggestion ? { suggestion: e.suggestion } : undefined);
 

@@ -114,6 +114,8 @@ function mapStartError(e: StartWorkflowError): EngineError {
 
 function mapContinueError(e: ContinueWorkflowError): EngineError {
   switch (e.kind) {
+    case 'run_stopped':
+      return { kind: 'precondition_failed', message: 'This run has been stopped.' };
     case 'precondition_failed':
       return { kind: 'precondition_failed', message: e.message };
     case 'token_unknown_node':

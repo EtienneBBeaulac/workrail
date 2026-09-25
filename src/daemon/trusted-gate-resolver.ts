@@ -1,10 +1,10 @@
+import { projectRunLifecycle } from '../v2/durable-core/projections/run-lifecycle.js';
+import { createGateReader } from './trusted-gate-state.js';
 /** Privileged host composition. This factory is never registered as a worker tool. */
 import { z } from 'zod';
 import { ResultAsync, okAsync, errAsync } from 'neverthrow';
 import type { CreateGateResolver, GateSubject, GateAuthorityRef, WorkRevisionRef, GateReceiptRef, GateResolutionResult, GateResolutionDecision } from '../v2/ports/trusted-gate-resolver.port.js';
 import type { DomainEventV1 } from '../v2/durable-core/schemas/session/index.js';
-import type { LoadedSessionTruthV2 } from '../v2/ports/session-event-log-store.port.js';
-import type { ExecutionSnapshotFileV1 } from '../v2/durable-core/schemas/execution-snapshot/index.js';
 import { asSessionId, asRunId, asNodeId } from '../v2/durable-core/ids/index.js';
 import { asSortedEventLog } from '../v2/durable-core/sorted-event-log.js';
 import { buildSessionIndex } from '../v2/durable-core/session-index.js';
@@ -14,11 +14,8 @@ import { getCachedWorkflow } from '../v2/usecases/workflow-object-cache.js';
 import { derivePendingStep } from '../v2/durable-core/projections/snapshot-state.js';
 import { validateAdvanceInputs } from '../mcp/handlers/v2-advance-core/input-validation.js';
 import { buildSuccessOutcome } from '../mcp/handlers/v2-advance-core/outcome-success.js';
-import type { V2ContinueWorkflowInput } from '../mcp/v2/tools.js';
 import { NullGitSnapshotV2 } from '../v2/ports/git-snapshot.port.js';
 import { toCanonicalBytes } from '../v2/durable-core/canonical/jcs.js';
-import type { JsonValue } from '../v2/durable-core/canonical/json-types.js';
-import type { OutputToAppend } from '../v2/durable-core/domain/outputs.js';
 import type { WorkflowDefinition } from '../types/workflow-definition.js';
 
 type ResolutionEvent = Extract<DomainEventV1, { kind: 'gate_resolution_recorded' }>;
@@ -27,15 +24,7 @@ const SubjectSchema = z.object({ sessionId: z.string().min(1), runId: z.string()
 const refusal = (reason: Extract<GateResolutionResult, { kind: 'refused' }>['reason'], detail: string): GateResolutionResult => ({ kind: 'refused', reason, detail });
 const subjectText = (s: GateSubject) => JSON.stringify([s.sessionId, s.runId, s.stepId, s.gateNodeId, s.workRevision]);
 const decisionText = (d: GateResolutionDecision) => JSON.stringify([d.kind, d.rationale, d.kind === 'approved' ? d.evidenceRef ?? null : null]);
-interface Pending {
-  readonly subject: GateSubject;
-  readonly truth: LoadedSessionTruthV2;
-  readonly snapshot: ExecutionSnapshotFileV1;
-  readonly run: Extract<DomainEventV1, { kind: 'run_started' }>;
-  readonly retainedOutputs: readonly OutputToAppend[];
-  readonly sourceNodeId: GateSubject['gateNodeId'];
-  readonly output: NonNullable<V2ContinueWorkflowInput['output']>;
-}
+
 
 export const createTrustedGateResolver: CreateGateResolver = async ({ toolContext }, lifetime) => {
   const v2 = toolContext.v2;
@@ -63,36 +52,7 @@ export const createTrustedGateResolver: CreateGateResolver = async ({ toolContex
         gateNodeId: asNodeId(subject.data.gateNodeId), workRevision: subject.data.workRevision as WorkRevisionRef };
     } catch { return null; }
   };
-  const readPending = async (sessionId: GateSubject['sessionId'], runId: GateSubject['runId'], nodeId: GateSubject['gateNodeId']): Promise<{ readonly kind: 'found'; readonly value: Pending } | { readonly kind: 'absent' } | { readonly kind: 'missing_work' } | { readonly kind: 'unavailable'; readonly detail: string }> => {
-    const loaded = await v2.sessionStore.load(sessionId);
-    if (loaded.isErr()) return { kind: 'unavailable', detail: loaded.error.message };
-    const truth = loaded.value;
-    const run = truth.events.find((e): e is Pending['run'] => e.kind === 'run_started' && e.scope.runId === runId);
-    const node = truth.events.find(e => e.kind === 'node_created' && e.scope.runId === runId && e.scope.nodeId === nodeId);
-    if (!run || node?.kind !== 'node_created' || node.data.nodeKind !== 'gate_checkpoint') return { kind: 'absent' };
-    const snapshot = await v2.snapshotStore.getExecutionSnapshotV1(node.data.snapshotRef);
-    if (snapshot.isErr()) return { kind: 'unavailable', detail: snapshot.error.message };
-    if (!snapshot.value?.enginePayload.gateCheckpoint) return { kind: 'absent' };
-    const incoming = truth.events.find(e => e.kind === 'edge_created' && e.scope.runId === runId && e.data.toNodeId === nodeId);
-    if (incoming?.kind !== 'edge_created') return { kind: 'absent' };
-    const advance = truth.events.find(e => e.eventId === incoming.data.cause.eventId);
-    if (advance?.kind !== 'advance_recorded') return { kind: 'absent' };
-    const outputs = truth.events.filter((e): e is Extract<DomainEventV1, {kind: 'node_output_appended'}> =>
-      e.kind === 'node_output_appended' && e.scope.runId === runId && e.scope.nodeId === incoming.data.fromNodeId &&
-      (e.data.outputId === `out_recap_${advance.data.attemptId}` || e.data.outputId.startsWith(`out_artifact_${advance.data.attemptId}_`)))
-      .sort((a, b) => a.data.outputId.localeCompare(b.data.outputId, 'en', { numeric: true }));
-    // New snapshots prove an accepted submission even when notes are optional.
-    // Legacy snapshots without that evidence must not silently approve lost work.
-    if (!outputs.length && snapshot.value.enginePayload.gateCheckpoint.acceptedContext === undefined) return { kind: 'missing_work' };
-    if (outputs.some(e => e.data.payload.payloadKind === 'artifact_ref' && e.data.payload.content === undefined)) return { kind: 'missing_work' };
-    const notes = outputs.flatMap(e => e.kind === 'node_output_appended' && e.data.payload.payloadKind === 'notes' ? [e.data.payload.notesMarkdown] : []);
-    const artifacts = outputs.flatMap(e => e.kind === 'node_output_appended' && e.data.payload.payloadKind === 'artifact_ref' && e.data.payload.content !== undefined ? [e.data.payload.content] : []);
-    const workBytes = toCanonicalBytes([node.data.snapshotRef, outputs] as unknown as JsonValue);
-    if (workBytes.isErr()) return { kind: 'unavailable', detail: workBytes.error.message };
-    const workRevision = String(v2.sha256.sha256(workBytes.value)) as WorkRevisionRef;
-    return { kind: 'found', value: { subject: { sessionId, runId, gateNodeId: nodeId, stepId: snapshot.value.enginePayload.gateCheckpoint.stepId, workRevision },
-      truth, snapshot: snapshot.value, run, retainedOutputs: outputs.map(e => e.data), sourceNodeId: asNodeId(incoming.data.fromNodeId), output: { ...(notes.length ? { notesMarkdown: notes.join('\n\n') } : {}), artifacts } } };
-  };
+  const readPending = createGateReader(v2);
   const resultFromEvent = (event: ResolutionEvent, subject: GateSubject, replay: boolean): GateResolutionResult => {
     const receipt = event.data.receipt as GateReceiptRef;
     if (event.data.decision.kind === 'approved' && event.data.continuation.kind === 'available') {
@@ -111,6 +71,8 @@ export const createTrustedGateResolver: CreateGateResolver = async ({ toolContex
       if (read.kind === 'missing_work') return { kind: 'refused', reason: 'missing_work', detail: 'Gate work is unavailable' };
       if (read.kind === 'absent') return { kind: 'refused', reason: 'not_pending', detail: 'No retained gate work at this occurrence' };
       const p = read.value;
+      if (projectRunLifecycle(p.truth.events, p.subject.runId).kind === 'stopped') return { kind: 'refused', reason: 'session_cancelled', detail: 'Run stopped' };
+      if (projectRunLifecycle(p.truth.events, p.subject.runId).kind === 'completed') return { kind: 'refused', reason: 'not_pending', detail: 'Run completed' };
       const hashRef = deriveWorkflowHashRef(p.run.data.workflowHash);
       if (hashRef.isErr() || hashRef.value !== parsed.value.workflowHashRef) return { kind: 'refused', reason: 'invalid_token', detail: 'Token names a different workflow' };
       if (p.truth.events.some(e => e.kind === 'gate_resolution_recorded' && e.scope.runId === p.subject.runId && e.scope.nodeId === p.subject.gateNodeId && e.data.decision.kind !== 'uncertain')) {
@@ -126,16 +88,20 @@ export const createTrustedGateResolver: CreateGateResolver = async ({ toolContex
       if (subjectText(issued) !== subjectText(subject)) return refusal(
         issued.sessionId === subject.sessionId && issued.runId === subject.runId && issued.gateNodeId === subject.gateNodeId && issued.stepId === subject.stepId ? 'stale_revision' : 'subject_mismatch', 'Authority names a different subject');
       if (unavailable(signal)) return refusal('session_cancelled', 'Resolver closed or cancelled');
+      let commitAttempted = false;
       const operation = v2.gate.withHealthySessionLock(subject.sessionId, lock => ResultAsync.fromPromise((async (): Promise<GateResolutionResult> => {
         const read = await readPending(subject.sessionId, subject.runId, subject.gateNodeId);
         if (read.kind === 'unavailable') return refusal('storage_unavailable', read.detail);
         if (read.kind === 'missing_work') return refusal('stale_revision', 'Gate work is unavailable');
         if (read.kind === 'absent') return refusal('stale_revision', 'Gate unavailable');
         const p = read.value;
+      if (projectRunLifecycle(p.truth.events, p.subject.runId).kind === 'stopped') return { kind: 'refused', reason: 'session_cancelled', detail: 'Run stopped' };
         if (subjectText(p.subject) !== subjectText(subject)) return refusal('stale_revision', 'Retained gate changed or unavailable');
+        if (p.truth.events.some(e => e.kind === 'gate_correction_recorded' && e.scope.runId === subject.runId && e.scope.nodeId === subject.gateNodeId)) return refusal('stale_revision', 'Gate was corrected');
         const decisions = p.truth.events.filter((e): e is ResolutionEvent => e.kind === 'gate_resolution_recorded' && e.scope.runId === subject.runId && e.scope.nodeId === subject.gateNodeId);
         const same = decisions.find(e => decisionText(e.data.decision) === decisionText(decision));
         if (same && (same.data.decision.kind !== 'uncertain' || !decisions.some(e => e.data.decision.kind !== 'uncertain'))) return resultFromEvent(same, subject, true);
+        if (projectRunLifecycle(p.truth.events, subject.runId).kind === 'completed') return refusal('conflicting_decision', 'Run completed');
         if (decisions.some(e => e.data.decision.kind !== 'uncertain')) return refusal('conflicting_decision', 'Gate already has a terminal decision');
         if (p.truth.events.some(e => e.kind === 'edge_created' && e.scope.runId === subject.runId && e.data.fromNodeId === subject.gateNodeId)) return refusal('conflicting_decision', 'Gate has already advanced');
         if (unavailable(signal)) return refusal('session_cancelled', 'Resolution cancelled');
@@ -151,6 +117,7 @@ export const createTrustedGateResolver: CreateGateResolver = async ({ toolContex
         });
         if (decision.kind !== 'approved') {
           const recorded = event({ workRevision: subject.workRevision, receipt, decision, continuation: { kind: 'held' } }, index.nextEventIndex);
+          commitAttempted = true;
           const append = await v2.sessionStore.append(lock, { events: [recorded], snapshotPins: [] }, p.truth);
           return append.isErr() ? { kind: 'unconfirmed', reason: 'commit_uncertain' } : resultFromEvent(recorded, subject, false);
         }
@@ -165,7 +132,6 @@ export const createTrustedGateResolver: CreateGateResolver = async ({ toolContex
         const hashRef = deriveWorkflowHashRef(p.run.data.workflowHash);
         if (hashRef.isErr()) return refusal('storage_unavailable', hashRef.error.message);
         const attemptId = v2.idFactory.mintAttemptId();
-        let commitAttempted = false;
         // Compose the existing advancement with its durable receipt in one append.
         const appendStore = {
           append: (_lock: typeof lock, plan: Parameters<typeof v2.sessionStore.append>[1]) => {
@@ -203,7 +169,7 @@ export const createTrustedGateResolver: CreateGateResolver = async ({ toolContex
         const after = await v2.sessionStore.load(subject.sessionId);
         const recorded = after.isOk() ? after.value.events.find((e): e is ResolutionEvent => e.kind === 'gate_resolution_recorded' && e.data.receipt === receipt) : undefined;
         return recorded ? resultFromEvent(recorded, subject, false) : { kind: 'unconfirmed', reason: 'commit_uncertain' };
-      })(), () => refusal('storage_unavailable', 'Resolver I/O failed')).orElse(error => okAsync(error))).match(value => value,
+      })(), (): GateResolutionResult => commitAttempted ? { kind: 'unconfirmed', reason: 'commit_uncertain' } : refusal('storage_unavailable', 'Resolver I/O failed')).orElse(error => okAsync(error))).match(value => value,
         error => refusal(error.code === 'SESSION_LOCKED' || error.code === 'SESSION_LOCK_REENTRANT' ? 'session_busy' : 'storage_unavailable', error.message));
       active.add(operation);
       try { return await operation; } finally { active.delete(operation); }

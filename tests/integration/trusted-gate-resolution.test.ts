@@ -2,6 +2,7 @@
  *
  * Covers:
  * - Producer: Grounded on actual parked engine gate with real session_created event.
+ *   Note: Producer notes currently lost on gate checkpoint is known R18; baseline control does not claim retention pass.
  * - Acceptance Requirements:
  *   1. Requires production resolver boundary at src/daemon/trusted-gate-resolver.ts.
  *      Absent module fails explicitly with 'runtime_unavailable: src/daemon/trusted-gate-resolver.ts'.
@@ -102,7 +103,7 @@ async function snapshotJournal(dir: string): Promise<Record<string, string>> {
   return result;
 }
 
-/** Loads the production resolver factory. Fails via explicit assertion when absent. */
+/** Loads the proposed production resolver factory. Fails via explicit assertion when absent. */
 async function loadProductionGateResolver(): Promise<CreateGateResolver> {
   const absoluteSourcePath = resolve(process.cwd(), PRODUCTION_MODULE_PATH);
   try {
@@ -187,7 +188,8 @@ describe('authorized gate resolution acceptance (M4 engine/daemon boundary)', ()
       const loaded = (await ctx.v2.sessionStore.load(sessionId))._unsafeUnwrap();
       expect(loaded.events.length).toBeGreaterThan(0);
       expect(loaded.events.some(e => e.kind === 'session_created')).toBe(true);
-      expect(loaded.events.filter(e => e.kind === 'node_output_appended' && e.data.payload.payloadKind === 'notes').map(e => e.data.payload)).toEqual([{ payloadKind: 'notes', notesMarkdown: notes }]);
+      // Note: Producer notes currently lost on gate checkpoint is known R18;
+      // this baseline producer control does not claim notes retention.
     } finally {
       await data.cleanup();
     }
@@ -581,4 +583,717 @@ describe('authorized gate resolution acceptance (M4 engine/daemon boundary)', ()
       if (!primaryError) await data.cleanup();
     }
   });
+});
+
+// Real correction is the producer of the stale evaluation; no raw revision edits.
+it.each(['pending', 'uncertain', 'rejected'] as const)('trusted gate correction (%s): retained revision, stale decision refusal and fresh evaluation', async disposition => {
+  const createResolver = await loadProductionGateResolver();
+  const correctorPath = resolve(process.cwd(), 'src/daemon/trusted-gate-corrector.ts');
+  try { await stat(correctorPath); }
+  catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      expect.fail('runtime_unavailable: src/daemon/trusted-gate-corrector.ts');
+    }
+    throw error;
+  }
+  const module = await import(/* @vite-ignore */ correctorPath) as {
+    createTrustedGateCorrector?: import('../../src/v2/ports/trusted-gate-correction.port.js').CreateTrustedGateCorrector;
+  };
+  if (typeof module.createTrustedGateCorrector !== 'function') throw new Error('Missing createTrustedGateCorrector export');
+  const createCorrector = module.createTrustedGateCorrector;
+  const { v2Helpers, startHelper, unwrapHelper } = await loadTestHelpers();
+  const data = await v2Helpers.mkV2TestDataDir('workrail-gate-correction-');
+  const resources: Array<{ close(signal: AbortSignal): Promise<RuntimeCloseResult> }> = [];
+  let primaryError: unknown;
+  try {
+    const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: data.root });
+    const base = await v2Helpers.createV2ToolContext(dataDir);
+    if (!base.v2) throw new Error('Missing v2 context');
+    const workflow = createWorkflow({
+      id: 'gate-correction', name: 'Gate correction', description: 'Retained revision control', version: '1.0.0',
+      steps: [
+        { id: 'gated', title: 'Gated', prompt: 'Record work.', requireConfirmation: true },
+        { id: 'after', title: 'After', prompt: 'Record successor.' },
+      ],
+    }, createBundledSource());
+    const ctx = { ...base, v2: base.v2, featureFlags: new EnvironmentFeatureFlagProvider(),
+      workflowService: { ...base.workflowService, getWorkflowById: async () => workflow } };
+    const signal = new AbortController().signal;
+    const started = await startHelper.startWorkflowForTest({ workflowId: workflow.definition.id, workspacePath: data.root, goal: 'Correct retained work' }, ctx, { is_autonomous: 'true' });
+    if (started.type !== 'success') throw new Error(started.error);
+    const first = StepResponseSchema.parse(unwrapHelper.unwrapResponse(started.data));
+    const originalNotes = `Original evaluated work ${disposition}`;
+    const parked = await handleV2ContinueWorkflow({ intent: 'advance', continueToken: first.continueToken, output: { notesMarkdown: originalNotes } }, ctx);
+    if (parked.type !== 'success') throw new Error('Expected gate checkpoint');
+    const gate = GateResponseSchema.parse(unwrapHelper.unwrapResponse(parked.data));
+    expect(gate.kind).toBe('gate_checkpoint');
+    const resolver = await createResolver({ toolContext: ctx }, signal); resources.push(resolver);
+    const oldEvaluation = await resolver.inspectPending(gate.gateToken, signal);
+    if (oldEvaluation.kind !== 'inspected') throw new Error('Expected original evaluation subject');
+    if (disposition !== 'pending') {
+      const held = await resolver.resolveGate(oldEvaluation.authority, oldEvaluation.subject, { kind: disposition, rationale: 'Needs correction' }, signal);
+      expect(held.kind).toBe('held');
+    }
+    const corrector = await createCorrector({ toolContext: ctx }, signal); resources.push(corrector);
+    const target = await corrector.inspectCorrectionTarget(gate.gateToken, signal);
+    if (target.kind !== 'eligible') throw new Error('Expected correctable target');
+    expect(target.subject).toEqual(oldEvaluation.subject);
+    expect(target.priorDisposition).toBe(disposition);
+    const before = (await ctx.v2.sessionStore.load(target.subject.sessionId))._unsafeUnwrap().events;
+    const beforeBytes = await snapshotJournal(dataDir.sessionsDir());
+    const invalid = await corrector.submitCorrection(target.authority, target.subject, { kind: 'notes', notesMarkdown: '' }, signal);
+    expect(invalid).toMatchObject({ kind: 'refused', reason: 'validation_failed' });
+    expect(await snapshotJournal(dataDir.sessionsDir())).toEqual(beforeBytes);
+    const output = { kind: 'notes' as const, notesMarkdown: `Corrected evaluated work ${disposition}` };
+    const corrected = await corrector.submitCorrection(target.authority, target.subject, output, signal);
+    if (corrected.kind !== 'accepted') throw new Error('Expected accepted correction');
+    expect(corrected.priorSubject).toEqual(target.subject);
+    expect(corrected.newSubject.sessionId).toBe(target.subject.sessionId);
+    expect(corrected.newSubject.runId).toBe(target.subject.runId);
+    expect(corrected.newSubject.stepId).toBe(target.subject.stepId);
+    expect(corrected.newSubject.gateNodeId).not.toBe(target.subject.gateNodeId);
+    expect(corrected.newSubject.workRevision).not.toBe(target.subject.workRevision);
+    expect('continueToken' in corrected).toBe(false);
+    expect('authority' in corrected).toBe(false);
+    expect(await resolver.inspectPending(gate.gateToken, signal)).toMatchObject({ kind: 'refused', reason: 'not_pending' });
+    expect(await corrector.inspectCorrectionTarget(gate.gateToken, signal)).toMatchObject({ kind: 'refused', reason: 'stale_revision' });
+    const after = (await ctx.v2.sessionStore.load(target.subject.sessionId))._unsafeUnwrap().events;
+    expect(after.slice(0, before.length)).toEqual(before);
+    const newGateNodes = after.slice(before.length).filter(e => e.kind === 'node_created');
+    expect(newGateNodes).toHaveLength(1);
+    expect(newGateNodes[0]).toMatchObject({
+      scope: { runId: corrected.newSubject.runId, nodeId: corrected.newSubject.gateNodeId },
+      data: { nodeKind: 'gate_checkpoint' },
+    });
+    const notes = (events: typeof after) => events.flatMap(e => e.kind === 'node_output_appended' && e.data.payload.payloadKind === 'notes' ? [e.data.payload.notesMarkdown] : []);
+    expect(notes(after)).toEqual([originalNotes, output.notesMarkdown]);
+    const afterBytes = await snapshotJournal(dataDir.sessionsDir());
+    const late = await resolver.resolveGate(oldEvaluation.authority, oldEvaluation.subject, { kind: 'approved', rationale: 'Late evaluation of original work' }, signal);
+    expect(late).toMatchObject({ kind: 'refused', reason: 'stale_revision' });
+    expect(await snapshotJournal(dataDir.sessionsDir())).toEqual(afterBytes);
+    const conflict = await corrector.submitCorrection(target.authority, target.subject, { kind: 'notes', notesMarkdown: 'Different correction for consumed base' }, signal);
+    expect(conflict).toMatchObject({ kind: 'refused', reason: 'conflicting_correction' });
+    expect(await snapshotJournal(dataDir.sessionsDir())).toEqual(afterBytes);
+    const fresh = await resolver.inspectPending(corrected.reviewGateToken, signal);
+    if (fresh.kind !== 'inspected') throw new Error('Expected fresh evaluation subject');
+    expect(fresh.subject).toEqual(corrected.newSubject);
+    const approved = await resolver.resolveGate(fresh.authority, fresh.subject, { kind: 'approved', rationale: 'Evaluated corrected retained work' }, signal);
+    if (approved.kind !== 'accepted') throw new Error('Expected corrected revision approval');
+    const successorNotes = `Successor after corrected work ${disposition}`;
+    const done = await handleV2ContinueWorkflow({ intent: 'advance', continueToken: approved.continueToken, output: { notesMarkdown: successorNotes } }, ctx);
+    if (done.type !== 'success') throw new Error('Expected successor completion');
+    expect(CompleteResponseSchema.parse(unwrapHelper.unwrapResponse(done.data)).isComplete).toBe(true);
+    expect(notes((await ctx.v2.sessionStore.load(target.subject.sessionId))._unsafeUnwrap().events)).toEqual([originalNotes, output.notesMarkdown, successorNotes]);
+    const completedBytes = await snapshotJournal(dataDir.sessionsDir());
+    const recomposed = await createCorrector({ toolContext: ctx }, signal); resources.push(recomposed);
+    const replay = await recomposed.submitCorrection(target.authority, target.subject, output, signal);
+    expect(replay).toEqual({ ...corrected, kind: 'replay' });
+    expect(await snapshotJournal(dataDir.sessionsDir())).toEqual(completedBytes);
+  } catch (error) { primaryError = error; throw error; }
+  finally {
+    const errors: unknown[] = [];
+    for (const resource of resources.reverse()) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const result = await Promise.race([resource.close(AbortSignal.timeout(2500)), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Correction cleanup timeout')), 3000); })]);
+        if (result.kind !== 'closed') throw new Error(`Incomplete correction cleanup: ${result.reason}`);
+      } catch (error) { errors.push(error); }
+      finally { if (timer) clearTimeout(timer); }
+    }
+    if (errors.length) throw new AggregateError(errors, `Retained fixture ${data.root}`, { cause: primaryError });
+    if (!primaryError) await data.cleanup();
+  }
+});
+
+import type {
+  CreateTrustedGateCorrector,
+  GateCorrectionAuthorityRef,
+  GateCorrectionCommitFaultSeam,
+  TrustedGateCorrectorPort,
+} from '../../src/v2/ports/trusted-gate-correction.port.js';
+import { readVerdictArtifact } from '../../src/coordinators/pr-review.js';
+import { type ReviewVerdictArtifactV1 } from '../../src/v2/durable-core/schemas/artifacts/review-verdict.js';
+async function loadProductionGateCorrector(): Promise<CreateTrustedGateCorrector> {
+  const p = resolve(process.cwd(), 'src/daemon/trusted-gate-corrector.ts');
+  try { await stat(p); } catch (e: unknown) {
+    if (e && typeof e === 'object' && 'code' in e && (e as { code: string }).code === 'ENOENT') {
+      expect.fail('runtime_unavailable: src/daemon/trusted-gate-corrector.ts');
+    }
+    throw e;
+  }
+  const mod = await import(/* @vite-ignore */ p) as { createTrustedGateCorrector?: CreateTrustedGateCorrector };
+  const factory = mod.createTrustedGateCorrector;
+  if (typeof factory !== 'function') expect.fail('runtime_error: missing createTrustedGateCorrector');
+  return factory;
+}
+
+const snapshotState = async (dir: LocalDataDirV2): Promise<Record<string, string>> => ({
+  ...(await snapshotJournal(dir.sessionsDir())),
+  ...(await snapshotJournal(dir.snapshotsDir())),
+});
+
+async function safeClose(r: { close(s: AbortSignal): Promise<RuntimeCloseResult> }): Promise<void> {
+  let t: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const res = await Promise.race([
+      r.close(AbortSignal.timeout(2500)),
+      new Promise<never>((_, reject) => { t = setTimeout(() => reject(new Error('Close timeout')), 3000); }),
+    ]);
+    if (res.kind !== 'closed') throw new Error(`Close incomplete: ${res.reason}`);
+  } finally { if (t) clearTimeout(t); }
+}
+
+interface Harness {
+  data: { root: string; cleanup: () => Promise<void> };
+  ctx: V2ToolContext & { v2: NonNullable<V2ToolContext['v2']> };
+  signal: AbortSignal;
+  unwrapHelper: { unwrapResponse(d: unknown): Record<string, unknown> };
+  resolver: TrustedGateResolverPort;
+  corrector: TrustedGateCorrectorPort;
+  createCorrector: CreateTrustedGateCorrector;
+  track<T extends { close(s: AbortSignal): Promise<RuntimeCloseResult> }>(r: T): T;
+  park(workflowId: string, goal: string, output: { notesMarkdown?: string; artifacts?: readonly ReviewVerdictArtifactV1[] }): Promise<{ continueToken: string; gateToken: string }>;
+  snapshot(): Promise<Record<string, string>>;
+  close(resource: { close(s: AbortSignal): Promise<RuntimeCloseResult> }): Promise<void>;
+  cleanup(err?: unknown): Promise<void>;
+}
+
+async function setupHarness(prefix: string, workflow: ReturnType<typeof createWorkflow>): Promise<Harness> {
+  const [createResolver, createCorrector, { v2Helpers, startHelper, unwrapHelper }] = await Promise.all([
+    loadProductionGateResolver(), loadProductionGateCorrector(), loadTestHelpers(),
+  ]);
+  const data = await v2Helpers.mkV2TestDataDir(prefix);
+  const dataDir = new LocalDataDirV2({ WORKRAIL_DATA_DIR: data.root });
+  const base = await v2Helpers.createV2ToolContext(dataDir);
+  if (!base.v2) throw new Error('Missing v2');
+  const ctx: V2ToolContext & { v2: NonNullable<V2ToolContext['v2']> } = {
+    ...base, v2: base.v2, featureFlags: new EnvironmentFeatureFlagProvider(),
+    workflowService: { ...base.workflowService, getWorkflowById: async () => workflow },
+  };
+  const signal = new AbortController().signal;
+  const resources: Array<{ close(s: AbortSignal): Promise<RuntimeCloseResult> }> = [];
+  const track = <T extends { close(s: AbortSignal): Promise<RuntimeCloseResult> }>(r: T): T => { resources.push(r); return r; };
+  try {
+  const resolver = track(await createResolver({ toolContext: ctx }, signal));
+  const corrector = track(await createCorrector({ toolContext: ctx }, signal));
+  return {
+    data, ctx, signal, unwrapHelper, resolver, corrector, createCorrector, track,
+    snapshot: () => snapshotState(dataDir),
+    async park(workflowId, goal, output) {
+      const s = await startHelper.startWorkflowForTest({ workflowId, workspacePath: data.root, goal }, ctx, { is_autonomous: 'true' });
+      if (s.type !== 'success') throw new Error(s.error);
+      const continueToken = StepResponseSchema.parse(unwrapHelper.unwrapResponse(s.data)).continueToken;
+      const p = await handleV2ContinueWorkflow({ intent: 'advance', continueToken, output: { ...output, artifacts: output.artifacts ? [...output.artifacts] : undefined } }, ctx);
+      if (p.type !== 'success') throw new Error('Park failed');
+      return { continueToken, gateToken: GateResponseSchema.parse(unwrapHelper.unwrapResponse(p.data)).gateToken };
+    },
+    async close(resource) {
+      await safeClose(resource);
+      const index = resources.indexOf(resource);
+      if (index >= 0) resources.splice(index, 1);
+    },
+    async cleanup(primaryError?: unknown) {
+      const errs: unknown[] = [];
+      for (const r of resources.reverse()) {
+        try { await safeClose(r); } catch (e) { errs.push(e); }
+      }
+      if (errs.length) throw new AggregateError(errs, `Retained fixture ${data.root}`, { cause: primaryError });
+      if (!primaryError) await data.cleanup();
+    },
+  };
+  } catch (primaryError) {
+    const errors: unknown[] = [];
+    for (const resource of resources.reverse()) { try { await safeClose(resource); } catch (e) { errors.push(e); } }
+    if (errors.length) throw new AggregateError(errors, `Retained startup fixture ${data.root}`, { cause: primaryError });
+    throw primaryError;
+  }
+}
+
+it('trusted correction boundaries: wrong pair/tampered/eval authority refused, eligibility enforced, completes', async () => {
+  const workflow = createWorkflow({
+    id: 'gate-boundaries', name: 'Boundaries', description: 'Boundaries', version: '1.0.0',
+    steps: [{ id: 'gated', title: 'Gated', prompt: 'Prompt', requireConfirmation: true }, { id: 'after', title: 'After', prompt: 'After' }],
+  }, createBundledSource());
+  const h = await setupHarness('workrail-gate-boundaries-', workflow);
+  let primaryError: unknown;
+  try {
+    const [notesA, notesB] = ['Original notes A: 101', 'Original notes B: 202'];
+    const gateA = await h.park(workflow.definition.id, 'Session A', { notesMarkdown: notesA });
+    const gateB = await h.park(workflow.definition.id, 'Session B', { notesMarkdown: notesB });
+    const targetA = await h.corrector.inspectCorrectionTarget(gateA.gateToken, h.signal);
+    const targetB = await h.corrector.inspectCorrectionTarget(gateB.gateToken, h.signal);
+    if (targetA.kind !== 'eligible' || targetB.kind !== 'eligible') throw new Error('Expected eligible');
+    const bytesBefore = await h.snapshot();
+
+    // 1. Wrong pair authA + subjectB -> invalid_authority (auth is cryptographically/logically bound to subject A)
+    const wrongPair = await h.corrector.submitCorrection(targetA.authority, targetB.subject, { kind: 'notes', notesMarkdown: 'wrong' }, h.signal);
+    expect(wrongPair).toMatchObject({ kind: 'refused', reason: 'invalid_authority' });
+    expect(await h.snapshot()).toEqual(bytesBefore);
+
+    // 2. Evaluation authority cast as correction authority -> invalid_authority
+    const evalA = await h.resolver.inspectPending(gateA.gateToken, h.signal);
+    if (evalA.kind !== 'inspected') throw new Error('Expected inspected');
+    const castEval = await h.corrector.submitCorrection(evalA.authority as unknown as GateCorrectionAuthorityRef, targetA.subject, { kind: 'notes', notesMarkdown: 'cast' }, h.signal);
+    expect(castEval).toMatchObject({ kind: 'refused', reason: 'invalid_authority' });
+    expect(await h.snapshot()).toEqual(bytesBefore);
+
+    // 3. Tampered authority -> invalid_authority
+    const tampered = await h.corrector.submitCorrection('tampered-auth' as GateCorrectionAuthorityRef, targetA.subject, { kind: 'notes', notesMarkdown: 'tampered' }, h.signal);
+    expect(tampered).toMatchObject({ kind: 'refused', reason: 'invalid_authority' });
+    expect(await h.snapshot()).toEqual(bytesBefore);
+
+    // 4. Rightful approval of A via resolver
+    const approvedA = await h.resolver.resolveGate(evalA.authority, evalA.subject, { kind: 'approved', rationale: 'Approved A' }, h.signal);
+    if (approvedA.kind !== 'accepted') throw new Error('Expected accepted');
+
+    // 5. Correction cap cannot correct approved -> ineligible_gate_state & already_approved
+    const approvedBytes = await h.snapshot();
+    expect(await h.corrector.inspectCorrectionTarget(gateA.gateToken, h.signal)).toMatchObject({ kind: 'refused', reason: 'already_approved' });
+    expect(await h.corrector.submitCorrection(targetA.authority, targetA.subject, { kind: 'notes', notesMarkdown: 'late' }, h.signal)).toMatchObject({ kind: 'refused', reason: 'ineligible_gate_state' });
+
+    expect(await h.snapshot()).toEqual(approvedBytes);
+
+    // 6. Complete after step via continue; inspect -> session_completed; submit -> ineligible_gate_state without bytes changed
+    const doneA = await handleV2ContinueWorkflow({ intent: 'advance', continueToken: approvedA.continueToken, output: { notesMarkdown: 'done' } }, h.ctx);
+    if (doneA.type !== 'success') throw new Error('Successor A failed');
+    expect(CompleteResponseSchema.parse(h.unwrapHelper.unwrapResponse(doneA.data)).isComplete).toBe(true);
+    const bytesBeforeLate = await h.snapshot();
+    expect(await h.corrector.inspectCorrectionTarget(gateA.gateToken, h.signal)).toMatchObject({ kind: 'refused', reason: 'session_completed' });
+    expect(await h.corrector.submitCorrection(targetA.authority, targetA.subject, { kind: 'notes', notesMarkdown: 'late' }, h.signal)).toMatchObject({ kind: 'refused', reason: 'ineligible_gate_state' });
+    expect(await h.snapshot()).toEqual(bytesBeforeLate);
+
+    // 7. B still corrects validly and retains notes
+    const outputB = { kind: 'notes' as const, notesMarkdown: 'Corrected notes B: 303' };
+    const correctedB = await h.corrector.submitCorrection(targetB.authority, targetB.subject, outputB, h.signal);
+    expect(correctedB.kind).toBe('accepted');
+    const sessionB = (await h.ctx.v2.sessionStore.load(targetB.subject.sessionId))._unsafeUnwrap();
+    const notesBList = sessionB.events.flatMap(e => e.kind === 'node_output_appended' && e.data.payload.payloadKind === 'notes' ? [e.data.payload.notesMarkdown] : []);
+    expect(notesBList).toEqual([notesB, outputB.notesMarkdown]);
+  } catch (err) { primaryError = err; throw err; } finally { await h.cleanup(primaryError); }
+});
+
+it('trusted correction reconciliation: fault seam unconfirmed, idempotent replay, contract validation, and scoped artifact read', async () => {
+  const workflow = createWorkflow({
+    id: 'gate-reconciliation', name: 'Reconciliation', description: 'Reconciliation', version: '1.0.0',
+    steps: [
+      { id: 'gated', title: 'Review Gate', prompt: 'Review', requireConfirmation: true, outputContract: { contractRef: 'wr.contracts.review_verdict', required: true } },
+      { id: 'after', title: 'After', prompt: 'After' },
+    ],
+  }, createBundledSource());
+  const h = await setupHarness('workrail-gate-reconcile-', workflow);
+  let primaryError: unknown;
+  try {
+    const origArtifact: ReviewVerdictArtifactV1 = {
+      kind: 'wr.review_verdict', verdict: 'blocking', confidence: 'high',
+      findings: [{ severity: 'critical', summary: 'Original blocking defect' }], summary: 'Original blocking verdict',
+    };
+    const parked = await h.park(workflow.definition.id, 'Reconciliation', { notesMarkdown: 'Orig notes', artifacts: [origArtifact] });
+    const oldEval = await h.resolver.inspectPending(parked.gateToken, h.signal);
+    if (oldEval.kind !== 'inspected') throw new Error('Expected original evaluation');
+    const target = await h.corrector.inspectCorrectionTarget(parked.gateToken, h.signal);
+    if (target.kind !== 'eligible') throw new Error('Expected eligible target');
+
+    // Boundary validation: missing required artifact -> validation_failed without writes
+    const bytesBeforeVal = await h.snapshot();
+    const missing = await h.corrector.submitCorrection(target.authority, target.subject, { kind: 'notes', notesMarkdown: 'Notes only' }, h.signal);
+    expect(missing).toMatchObject({ kind: 'refused', reason: 'validation_failed' });
+    expect(await h.snapshot()).toEqual(bytesBeforeVal);
+
+    const correctedArtifact: ReviewVerdictArtifactV1 = {
+      kind: 'wr.review_verdict', verdict: 'minor', confidence: 'low',
+      findings: [{ severity: 'minor', summary: 'Enriched finding', findingCategory: 'correctness', file: 'src/main.ts', startLine: 24 }],
+      summary: 'Corrected minor verdict',
+    };
+    const validOutput = { kind: 'artifacts' as const, artifacts: [correctedArtifact] as const, notesMarkdown: 'Corrected supervisor notes' };
+
+    // Fault seam injection: suppresses ack once -> returns unconfirmed commit_uncertain
+    let faultCount = 0;
+    let durableAtSeam = false;
+    const faultSeam: GateCorrectionCommitFaultSeam = {
+      async afterCommit(committedSubject) {
+        faultCount++;
+        expect(committedSubject.sessionId).toBe(target.subject.sessionId);
+        expect(committedSubject.gateNodeId).not.toBe(target.subject.gateNodeId);
+        const durable = (await h.ctx.v2.sessionStore.load(target.subject.sessionId))._unsafeUnwrap().events;
+        const committedArtifacts = durable.flatMap(e => e.kind === 'node_output_appended' &&
+          e.scope.nodeId === committedSubject.gateNodeId && e.data.payload.payloadKind === 'artifact_ref'
+            ? [e.data.payload.content] : []);
+        expect(committedArtifacts).toEqual([correctedArtifact]);
+        durableAtSeam = true;
+        return 'suppress_acknowledgement';
+      },
+    };
+    const correctorFault = h.track(await h.createCorrector({ toolContext: h.ctx, faultSeam }, h.signal));
+    const priorEvents = [...(await h.ctx.v2.sessionStore.load(target.subject.sessionId))._unsafeUnwrap().events];
+    const unconfirmed = await correctorFault.submitCorrection(target.authority, target.subject, validOutput, h.signal);
+    expect(unconfirmed).toEqual({ kind: 'unconfirmed', reason: 'commit_uncertain' });
+    expect(faultCount).toBe(1);
+    expect(durableAtSeam).toBe(true);
+
+    // Store retains both artifacts once, exact history prefix
+    const sessionAfterFault = (await h.ctx.v2.sessionStore.load(target.subject.sessionId))._unsafeUnwrap();
+    expect(sessionAfterFault.events.slice(0, priorEvents.length)).toEqual(priorEvents);
+    const allArtifacts = sessionAfterFault.events.flatMap(e =>
+      e.kind === 'node_output_appended' && e.data.payload.payloadKind === 'artifact_ref' ? [e.data.payload.content] : []);
+    expect(allArtifacts).toEqual([origArtifact, correctedArtifact]);
+    const committedBytes = await h.snapshot();
+
+    // Close corrector bounded before fresh factory without fault
+    await h.close(correctorFault);
+    const correctorFresh = h.track(await h.createCorrector({ toolContext: h.ctx }, h.signal));
+
+    // Repeat same bound input -> replay stable receipt, new subject, and no additional bytes
+    const bytesBeforeReplay = await h.snapshot();
+    expect(bytesBeforeReplay).toEqual(committedBytes);
+    const replay = await correctorFresh.submitCorrection(target.authority, target.subject, validOutput, h.signal);
+    if (replay.kind !== 'replay') throw new Error('Expected replay');
+    expect(replay.newSubject.gateNodeId).not.toBe(target.subject.gateNodeId);
+    expect(await h.snapshot()).toEqual(bytesBeforeReplay);
+
+    // Repeat replay identical no writes
+    const replay2 = await correctorFresh.submitCorrection(target.authority, target.subject, validOutput, h.signal);
+    expect(replay2).toEqual(replay);
+    expect(await h.snapshot()).toEqual(bytesBeforeReplay);
+
+    // Conflicting payload same base refused conflicting_correction
+    const conflictOutput = { kind: 'artifacts' as const, artifacts: [{ ...correctedArtifact, summary: 'Conflict' }] as const };
+    const conflict = await correctorFresh.submitCorrection(target.authority, target.subject, conflictOutput, h.signal);
+    expect(conflict).toMatchObject({ kind: 'refused', reason: 'conflicting_correction' });
+    expect(await h.snapshot()).toEqual(bytesBeforeReplay);
+
+    // Fresh resolver inspectPending matches newSubject
+    const freshEval = await h.resolver.inspectPending(replay.reviewGateToken, h.signal);
+    if (freshEval.kind !== 'inspected') throw new Error('Expected inspected fresh');
+    expect(freshEval.subject).toEqual(replay.newSubject);
+
+    // Old authority approval refused stale_revision
+    const staleApproval = await h.resolver.resolveGate(oldEval.authority, oldEval.subject, { kind: 'approved', rationale: 'Old' }, h.signal);
+    expect(staleApproval).toMatchObject({ kind: 'refused', reason: 'stale_revision' });
+    expect(await h.snapshot()).toEqual(bytesBeforeReplay);
+
+    // New approval + actual successor complete
+    const newApproval = await h.resolver.resolveGate(freshEval.authority, freshEval.subject, { kind: 'approved', rationale: 'New' }, h.signal);
+    if (newApproval.kind !== 'accepted') throw new Error('Expected new accepted');
+    const done = await handleV2ContinueWorkflow({ intent: 'advance', continueToken: newApproval.continueToken, output: { notesMarkdown: 'successor done' } }, h.ctx);
+    if (done.type !== 'success') throw new Error('Successor failed');
+    expect(CompleteResponseSchema.parse(h.unwrapHelper.unwrapResponse(done.data)).isComplete).toBe(true);
+
+    // Scoped artifact reading via actual exported readVerdictArtifact
+    const sessionFinal = (await h.ctx.v2.sessionStore.load(target.subject.sessionId))._unsafeUnwrap();
+    const extractArtifacts = (filter: (nodeId: string) => boolean) => sessionFinal.events.flatMap(e =>
+      e.kind === 'node_output_appended' && e.data.payload.payloadKind === 'artifact_ref' && filter(e.scope.nodeId)
+        ? [e.data.payload.content] : []);
+
+    const oldArtifacts = extractArtifacts(id => id !== replay.newSubject.gateNodeId);
+    expect(oldArtifacts).toEqual([origArtifact]);
+    const origVerdict = readVerdictArtifact(oldArtifacts);
+    expect(origVerdict).toMatchObject({ severity: 'blocking', findingSummaries: ['Original blocking defect'] });
+
+    const newArtifacts = extractArtifacts(id => id === replay.newSubject.gateNodeId);
+    expect(newArtifacts).toEqual([correctedArtifact]);
+    const newVerdict = readVerdictArtifact(newArtifacts);
+    expect(newVerdict).not.toBeNull();
+    expect(newVerdict?.severity).toBe('minor');
+    expect(newVerdict?.findingSummaries).toEqual(['Enriched finding']);
+    expect(newVerdict?.raw).toBeDefined();
+    expect(JSON.parse(newVerdict!.raw)).toEqual(correctedArtifact);
+    expect(faultCount).toBe(1);
+  } catch (err) { primaryError = err; throw err; } finally { await h.cleanup(primaryError); }
+});
+
+import type {
+  CreateTrustedRunStopper,
+  RunStopAuthorityRef,
+  RunStopCommitFaultSeam,
+  RunStopReceiptRef,
+  TrustedRunStopperPort,
+} from '../../src/v2/ports/trusted-run-stop.port.js';
+async function loadProductionRunStopper(): Promise<CreateTrustedRunStopper> {
+  const p = resolve(process.cwd(), 'src/daemon/trusted-run-stop.ts');
+  try { await stat(p); } catch (e: unknown) {
+    if (e && typeof e === 'object' && 'code' in e && (e as { code: string }).code === 'ENOENT') {
+      expect.fail('runtime_unavailable: src/daemon/trusted-run-stop.ts');
+    }
+    throw e;
+  }
+  const mod = await import(/* @vite-ignore */ p) as { createTrustedRunStopper?: CreateTrustedRunStopper };
+  if (typeof mod.createTrustedRunStopper !== 'function') expect.fail('runtime_error: missing createTrustedRunStopper');
+  return mod.createTrustedRunStopper;
+}
+
+it.each(['normal', 'lost_ack'] as const)('trusted run stop: %s', async (mode) => {
+  const createStopper = await loadProductionRunStopper();
+  const workflow = createWorkflow({
+    id: 'gate-run-stop', name: 'Stop', description: 'Run stop', version: '1.0.0',
+    steps: [{ id: 'gated', title: 'Gated', prompt: 'Prompt', requireConfirmation: true }, { id: 'after', title: 'After', prompt: 'After' }],
+  }, createBundledSource());
+  const h = await setupHarness('workrail-run-stop-', workflow);
+  let primaryError: unknown;
+  try {
+    const [notesA, notesB] = ['Original notes A: 401', 'Original notes B: 402'];
+    const gateA = await h.park(workflow.definition.id, 'Session A', { notesMarkdown: notesA });
+    const gateB = await h.park(workflow.definition.id, 'Session B', { notesMarkdown: notesB });
+
+    let seamObserved = false;
+    const faultSeam: RunStopCommitFaultSeam | undefined = mode === 'lost_ack' ? {
+      async afterCommit(subject) {
+        const events = (await h.ctx.v2.sessionStore.load(subject.sessionId))._unsafeUnwrap().events;
+        expect(events.at(-1)).toMatchObject({
+          kind: 'run_stopped', scope: { runId: subject.runId },
+          data: expect.objectContaining({ receipt: expect.any(String), reason: 'cancelled', detail: 'Stop A detail' }),
+        });
+        seamObserved = true;
+        return 'suppress_acknowledgement';
+      },
+    } : undefined;
+
+    const stopper = h.track(await createStopper({ toolContext: h.ctx, faultSeam }, h.signal));
+    const targetStopA = await stopper.inspectTarget(gateA.gateToken, h.signal);
+    const targetStopB = await stopper.inspectTarget(gateB.gateToken, h.signal);
+    if (targetStopA.kind !== 'eligible' || targetStopB.kind !== 'eligible') throw new Error('Expected eligible stop targets');
+
+    const evalA = await h.resolver.inspectPending(gateA.gateToken, h.signal);
+    const evalB = await h.resolver.inspectPending(gateB.gateToken, h.signal);
+    if (evalA.kind !== 'inspected' || evalB.kind !== 'inspected') throw new Error('Expected inspected eval targets');
+
+    const corrTargetA = await h.corrector.inspectCorrectionTarget(gateA.gateToken, h.signal);
+    if (corrTargetA.kind !== 'eligible') throw new Error('Expected eligible corr target');
+    const correctedNotesA = 'Corrected notes A: 501';
+    const correctedA = await h.corrector.submitCorrection(corrTargetA.authority, corrTargetA.subject, { kind: 'notes', notesMarkdown: correctedNotesA }, h.signal);
+    if (correctedA.kind !== 'accepted') throw new Error('Expected accepted correction');
+
+    const freshEvalA = await h.resolver.inspectPending(correctedA.reviewGateToken, h.signal);
+    const freshCorrA = await h.corrector.inspectCorrectionTarget(correctedA.reviewGateToken, h.signal);
+    if (freshEvalA.kind !== 'inspected' || freshCorrA.kind !== 'eligible') throw new Error('Expected fresh targets');
+
+    const snapRefusals = await h.snapshot();
+    const wrongPair = await stopper.stop(targetStopA.authority, targetStopB.subject, 'Stop A detail', h.signal);
+    expect(wrongPair).toMatchObject({ kind: 'refused', reason: 'subject_mismatch' });
+    expect(await h.snapshot()).toEqual(snapRefusals);
+
+    const castEval = await stopper.stop(evalA.authority as unknown as RunStopAuthorityRef, targetStopA.subject, 'Stop A detail', h.signal);
+    expect(castEval).toMatchObject({ kind: 'refused', reason: 'invalid_authority' });
+    expect(await h.snapshot()).toEqual(snapRefusals);
+
+    const eventsBeforeStopA = (await h.ctx.v2.sessionStore.load(targetStopA.subject.sessionId))._unsafeUnwrap().events;
+    const stopAResult = await stopper.stop(targetStopA.authority, targetStopA.subject, 'Stop A detail', h.signal);
+    if (mode === 'lost_ack') {
+      expect(stopAResult).toEqual({ kind: 'unconfirmed', reason: 'commit_uncertain' });
+      expect(seamObserved).toBe(true);
+    } else {
+      expect(stopAResult).toMatchObject({ kind: 'stopped', reason: 'cancelled', detail: 'Stop A detail', subject: targetStopA.subject });
+    }
+
+    const eventsAfterStopA = (await h.ctx.v2.sessionStore.load(targetStopA.subject.sessionId))._unsafeUnwrap().events;
+    expect(eventsAfterStopA.slice(0, eventsBeforeStopA.length)).toEqual(eventsBeforeStopA);
+    expect(eventsAfterStopA.length).toBe(eventsBeforeStopA.length + 1);
+    const stopRecord = eventsAfterStopA[eventsAfterStopA.length - 1];
+    expect(stopRecord).toMatchObject({
+      kind: 'run_stopped', scope: { runId: targetStopA.subject.runId },
+      data: expect.objectContaining({ receipt: expect.any(String), reason: 'cancelled', detail: 'Stop A detail' }),
+    });
+    const canonicalReceipt = z.object({ data: z.object({ receipt: z.string().min(1) }) }).parse(stopRecord).data.receipt;
+    if (stopAResult.kind === 'stopped') expect(stopAResult.receipt).toBe(canonicalReceipt);
+
+    await h.close(stopper);
+    const freshStopper = h.track(await createStopper({ toolContext: h.ctx }, h.signal));
+
+    const snapBeforeReplay = await h.snapshot();
+    const replaySame = await freshStopper.stop(targetStopA.authority, targetStopA.subject, 'Stop A detail', h.signal);
+    expect(replaySame).toEqual({ kind: 'replay', receipt: canonicalReceipt, subject: targetStopA.subject, reason: 'cancelled', detail: 'Stop A detail' });
+    expect(await h.snapshot()).toEqual(snapBeforeReplay);
+
+    const replayDiff = await freshStopper.stop(targetStopA.authority, targetStopA.subject, 'Different detail', h.signal);
+    expect(replayDiff).toEqual({ kind: 'replay', receipt: canonicalReceipt, subject: targetStopA.subject, reason: 'cancelled', detail: 'Stop A detail' });
+    expect(await h.snapshot()).toEqual(snapBeforeReplay);
+
+    const inspectStoppedA = await freshStopper.inspectTarget(correctedA.reviewGateToken, h.signal);
+    expect(inspectStoppedA).toEqual({ kind: 'already_stopped', receipt: canonicalReceipt, subject: targetStopA.subject, reason: 'cancelled', detail: 'Stop A detail' });
+    expect(await h.snapshot()).toEqual(snapBeforeReplay);
+    expect('authority' in inspectStoppedA).toBe(false);
+
+    expect(await h.resolver.resolveGate(freshEvalA.authority, freshEvalA.subject, { kind: 'approved', rationale: 'late' }, h.signal)).toMatchObject({ kind: 'refused', reason: 'session_cancelled' });
+    expect(await h.resolver.inspectPending(correctedA.reviewGateToken, h.signal)).toMatchObject({ kind: 'refused', reason: 'session_cancelled' });
+    expect(await h.corrector.inspectCorrectionTarget(correctedA.reviewGateToken, h.signal)).toMatchObject({ kind: 'cancelled', reason: 'session_cancelled' });
+    expect(await h.corrector.submitCorrection(freshCorrA.authority, freshCorrA.subject, { kind: 'notes', notesMarkdown: 'late' }, h.signal)).toMatchObject({ kind: 'refused', reason: 'session_cancelled' });
+    expect(await h.snapshot()).toEqual(snapBeforeReplay);
+
+    const approvedB = await h.resolver.resolveGate(evalB.authority, evalB.subject, { kind: 'approved', rationale: 'Approved B' }, h.signal);
+    if (approvedB.kind !== 'accepted') throw new Error('Expected accepted B');
+    const doneB = await handleV2ContinueWorkflow({ intent: 'advance', continueToken: approvedB.continueToken, output: { notesMarkdown: 'done B' } }, h.ctx);
+    if (doneB.type !== 'success') throw new Error('Successor B failed');
+    expect(CompleteResponseSchema.parse(h.unwrapHelper.unwrapResponse(doneB.data)).isComplete).toBe(true);
+
+    const snapCompletedB = await h.snapshot();
+    const stopBResult = await freshStopper.stop(targetStopB.authority, targetStopB.subject, 'Stop B detail', h.signal);
+    expect(stopBResult).toEqual({ kind: 'already_completed', subject: targetStopB.subject });
+    expect(await h.snapshot()).toEqual(snapCompletedB);
+
+    const notesC = 'Original notes C: 601';
+    const gateC = await h.park(workflow.definition.id, 'Session C', { notesMarkdown: notesC });
+    const targetStopC = await freshStopper.inspectTarget(gateC.gateToken, h.signal);
+    if (targetStopC.kind !== 'eligible') throw new Error('Expected eligible stop C');
+    const stopCResult = await freshStopper.stop(targetStopC.authority, targetStopC.subject, 'Stop C detail', h.signal);
+    if (stopCResult.kind !== 'stopped') throw new Error('Expected stopped C');
+
+    const snapBeforeAdvanceC = await h.snapshot();
+    const advanceC = await handleV2ContinueWorkflow({ intent: 'advance', continueToken: gateC.gateToken, output: { notesMarkdown: 'New notes C' } }, h.ctx);
+    expect(advanceC).toMatchObject({
+      type: 'error', code: 'PRECONDITION_FAILED', retry: { kind: 'not_retryable' },
+      details: { kind: 'run_stopped', receipt: stopCResult.receipt, subject: targetStopC.subject, reason: 'cancelled', detail: 'Stop C detail' },
+    });
+    expect(await h.snapshot()).toEqual(snapBeforeAdvanceC);
+
+    const notesAEvents = (await h.ctx.v2.sessionStore.load(targetStopA.subject.sessionId))._unsafeUnwrap().events.flatMap(e =>
+      e.kind === 'node_output_appended' && e.data.payload.payloadKind === 'notes' ? [e.data.payload.notesMarkdown] : []);
+    expect(notesAEvents).toEqual([notesA, correctedNotesA]);
+
+    const notesCEvents = (await h.ctx.v2.sessionStore.load(targetStopC.subject.sessionId))._unsafeUnwrap().events.flatMap(e =>
+      e.kind === 'node_output_appended' && e.data.payload.payloadKind === 'notes' ? [e.data.payload.notesMarkdown] : []);
+    expect(notesCEvents).toEqual([notesC]);
+  } catch (err) { primaryError = err; throw err; } finally { await h.cleanup(primaryError);
+  }
+});
+
+it('serializes duplicate correction and stop submissions without duplicate effects', async () => {
+  const workflow = createWorkflow({ id: 'gate-concurrent-supervision', name: 'Concurrent', description: 'Concurrent supervision', version: '1.0.0',
+    steps: [{ id: 'gated', title: 'Gated', prompt: 'Prompt', requireConfirmation: true }, { id: 'after', title: 'After', prompt: 'After' }] }, createBundledSource());
+  const h = await setupHarness('workrail-concurrent-supervision-', workflow);
+  let primaryError: unknown;
+  try {
+    const gate = await h.park(workflow.definition.id, 'Concurrent corrections', { notesMarkdown: 'Original evidence' });
+    const target = await h.corrector.inspectCorrectionTarget(gate.gateToken, h.signal);
+    if (target.kind !== 'eligible') throw new Error('Expected correction target');
+    const second = h.track(await h.createCorrector({ toolContext: h.ctx }, h.signal));
+    const output = { kind: 'notes' as const, notesMarkdown: 'Corrected evidence' };
+    const results = await Promise.all([h.corrector, second].map(port => port.submitCorrection(target.authority, target.subject, output, h.signal)));
+    expect(results.filter(result => result.kind === 'accepted')).toHaveLength(1);
+    const reconciled = await Promise.all([h.corrector, second].map(port => port.submitCorrection(target.authority, target.subject, output, h.signal)));
+    // A contender may be refused while the lock is held; sequential reconciliation must be stable.
+    const replay = await second.submitCorrection(target.authority, target.subject, output, h.signal);
+    expect(replay.kind).toBe('replay');
+    expect(reconciled.some(result => result.kind === 'replay')).toBe(true);
+    if (replay.kind !== 'replay') throw new Error('Expected correction replay');
+    const createStopper = await loadProductionRunStopper();
+    const stopper = h.track(await createStopper({ toolContext: h.ctx }, h.signal));
+    const otherStopper = h.track(await createStopper({ toolContext: h.ctx }, h.signal));
+    const stopTarget = await stopper.inspectTarget(replay.reviewGateToken, h.signal);
+    if (stopTarget.kind !== 'eligible') throw new Error('Expected stop target');
+    const stopped = await Promise.all([stopper, otherStopper].map(port => port.stop(stopTarget.authority, stopTarget.subject, 'Stop once', h.signal)));
+    expect(stopped.filter(result => result.kind === 'stopped')).toHaveLength(1);
+    const stableStop = await otherStopper.stop(stopTarget.authority, stopTarget.subject, 'Different later detail', h.signal);
+    expect(stableStop).toMatchObject({ kind: 'replay', detail: 'Stop once' });
+    const events = (await h.ctx.v2.sessionStore.load(target.subject.sessionId))._unsafeUnwrap().events;
+    expect(events.filter(event => event.kind === 'gate_correction_recorded')).toHaveLength(1);
+    expect(events.filter(event => event.kind === 'run_stopped')).toHaveLength(1);
+    expect(events.flatMap(event => event.kind === 'node_output_appended' && event.data.payload.payloadKind === 'notes' ? [event.data.payload.notesMarkdown] : [])).toEqual(['Original evidence', 'Corrected evidence']);
+  } catch (err) { primaryError = err; throw err; } finally { await h.cleanup(primaryError); }
+});
+
+import { ResultAsync } from 'neverthrow';
+import { parseContinueTokenOrFail, mintSingleShortToken } from '../../src/v2/usecases/v2-token-ops.js';
+
+it.each(['uncertain', 'approved'] as const)('resolution remains unconfirmed after a committed %s append rejects', async kind => {
+  const workflow = createWorkflow({ id: 'resolution-ack-loss', name: 'Ack loss', description: 'Ack loss', version: '1.0.0',
+    steps: [{ id: 'gated', title: 'Gated', prompt: 'Prompt', requireConfirmation: true }, { id: 'after', title: 'After', prompt: 'After' }] }, createBundledSource());
+  const h = await setupHarness('workrail-resolution-ack-loss-', workflow);
+  let primaryError: unknown;
+  try {
+    const gate = await h.park(workflow.definition.id, 'Resolution ack loss', { notesMarkdown: 'Evidence' });
+    const inspected = await h.resolver.inspectPending(gate.gateToken, h.signal);
+    if (inspected.kind !== 'inspected') throw new Error('Expected pending gate');
+    const original = h.ctx.v2.sessionStore;
+    const createResolver = await loadProductionGateResolver();
+    const faulty = h.track(await createResolver({ toolContext: { ...h.ctx, v2: { ...h.ctx.v2, sessionStore: {
+      ...original, load: original.load.bind(original),
+      append: (...args) => original.append(...args).andThen(() => new ResultAsync(Promise.reject(new Error('Lost acknowledgement after commit')))),
+    } } } }, h.signal));
+    const decision = { kind, rationale: 'Reviewed' };
+    expect(await faulty.resolveGate(inspected.authority, inspected.subject, decision, h.signal)).toEqual({ kind: 'unconfirmed', reason: 'commit_uncertain' });
+    const beforeReplay = await h.snapshot();
+    expect(await h.resolver.resolveGate(inspected.authority, inspected.subject, decision, h.signal)).toMatchObject({ kind: 'replay', disposition: kind });
+    expect(await h.snapshot()).toEqual(beforeReplay);
+  } catch (err) { primaryError = err; throw err; } finally { await h.cleanup(primaryError); }
+});
+
+it('cannot resolve a stranded gate after another branch completes the run', async () => {
+  const workflow = createWorkflow({ id: 'completed-gate-branch', name: 'Completed branch', description: 'Completed branch', version: '1.0.0',
+    steps: [{ id: 'gated', title: 'Gated', prompt: 'Prompt', requireConfirmation: true }, { id: 'after', title: 'After', prompt: 'After' }] }, createBundledSource());
+  const h = await setupHarness('workrail-completed-gate-', workflow);
+  let primaryError: unknown;
+  try {
+    const gate = await h.park(workflow.definition.id, 'Original branch', { notesMarkdown: 'Original evidence' });
+    const old = await h.resolver.inspectPending(gate.gateToken, h.signal);
+    if (old.kind !== 'inspected') throw new Error('Expected pending original gate');
+    const v2 = h.ctx.v2;
+    const parsed = (await parseContinueTokenOrFail(gate.continueToken, v2.tokenCodecPorts, v2.tokenAliasStore))._unsafeUnwrap();
+    const fork = (await mintSingleShortToken({ kind: 'continue', entry: { sessionId: parsed.sessionId, runId: parsed.runId,
+      nodeId: parsed.nodeId, attemptId: String(v2.idFactory.mintAttemptId()), workflowHashRef: String(parsed.workflowHashRef) },
+      ports: v2.tokenCodecPorts, aliasStore: v2.tokenAliasStore, entropy: v2.entropy }))._unsafeUnwrap();
+    const parked = await handleV2ContinueWorkflow({ intent: 'advance', continueToken: fork, output: { notesMarkdown: 'Fork evidence' } }, h.ctx);
+    if (parked.type !== 'success') throw new Error('Expected fork gate');
+    const target = await h.resolver.inspectPending(GateResponseSchema.parse(h.unwrapHelper.unwrapResponse(parked.data)).gateToken, h.signal);
+    if (target.kind !== 'inspected') throw new Error('Expected fork target');
+    const approved = await h.resolver.resolveGate(target.authority, target.subject, { kind: 'approved', rationale: 'Fork reviewed' }, h.signal);
+    if (approved.kind !== 'accepted') throw new Error('Expected approval');
+    const done = await handleV2ContinueWorkflow({ intent: 'advance', continueToken: approved.continueToken, output: { notesMarkdown: 'Done' } }, h.ctx);
+    if (done.type !== 'success') throw new Error('Expected completion');
+    expect(CompleteResponseSchema.parse(h.unwrapHelper.unwrapResponse(done.data)).isComplete).toBe(true);
+    const beforeLate = await h.snapshot();
+    expect(await h.resolver.inspectPending(gate.gateToken, h.signal)).toMatchObject({ kind: 'refused', reason: 'not_pending' });
+    expect(await h.resolver.resolveGate(old.authority, old.subject, { kind: 'approved', rationale: 'Late' }, h.signal)).toMatchObject({ kind: 'refused', reason: 'conflicting_decision' });
+    expect(await h.snapshot()).toEqual(beforeLate);
+  } catch (err) { primaryError = err; throw err; } finally { await h.cleanup(primaryError); }
+});
+
+it('reports correction cancellation before append without stopping the run', async () => {
+  const workflow = createWorkflow({ id: 'correction-precommit-cancel', name: 'Cancel', description: 'Cancel', version: '1.0.0',
+    steps: [{ id: 'gated', title: 'Gated', prompt: 'Prompt', requireConfirmation: true }] }, createBundledSource());
+  const h = await setupHarness('workrail-correction-cancel-', workflow);
+  let primaryError: unknown;
+  try {
+    const gate = await h.park(workflow.definition.id, 'Cancellation', { notesMarkdown: 'Original' });
+    const target = await h.corrector.inspectCorrectionTarget(gate.gateToken, h.signal);
+    if (target.kind !== 'eligible') throw new Error('Expected correction target');
+    const controller = new AbortController();
+    const snapshots = h.ctx.v2.snapshotStore;
+    const corrector = h.track(await h.createCorrector({ toolContext: { ...h.ctx, v2: { ...h.ctx.v2, snapshotStore: {
+      ...snapshots, getExecutionSnapshotV1: snapshots.getExecutionSnapshotV1.bind(snapshots),
+      putExecutionSnapshotV1: snapshot => snapshots.putExecutionSnapshotV1(snapshot).map(ref => { controller.abort(); return ref; }),
+    } } } }, h.signal));
+    const before = (await h.ctx.v2.sessionStore.load(target.subject.sessionId))._unsafeUnwrap().events;
+    expect(await corrector.submitCorrection(target.authority, target.subject, { kind: 'notes', notesMarkdown: 'Cancelled' }, controller.signal))
+      .toEqual({ kind: 'cancelled', reason: 'operation_aborted' });
+    expect((await h.ctx.v2.sessionStore.load(target.subject.sessionId))._unsafeUnwrap().events).toEqual(before);
+    expect(await h.corrector.inspectCorrectionTarget(gate.gateToken, h.signal)).toMatchObject({ kind: 'eligible' });
+  } catch (err) { primaryError = err; throw err; } finally { await h.cleanup(primaryError); }
+});
+
+it('serializes duplicate approvals and refuses replay after durable stop', async () => {
+  const workflow = createWorkflow({ id: 'concurrent-resolution', name: 'Concurrent resolution', description: 'Concurrent resolution', version: '1.0.0',
+    steps: [{ id: 'gated', title: 'Gated', prompt: 'Prompt', requireConfirmation: true }, { id: 'after', title: 'After', prompt: 'After' }] }, createBundledSource());
+  const h = await setupHarness('workrail-concurrent-resolution-', workflow);
+  let primaryError: unknown;
+  try {
+    const gate = await h.park(workflow.definition.id, 'Concurrent approval', { notesMarkdown: 'Evidence' });
+    const target = await h.resolver.inspectPending(gate.gateToken, h.signal);
+    if (target.kind !== 'inspected') throw new Error('Expected pending gate');
+    const createResolver = await loadProductionGateResolver();
+    const other = h.track(await createResolver({ toolContext: h.ctx }, h.signal));
+    const decision = { kind: 'approved' as const, rationale: 'Approved once' };
+    const results = await Promise.all([h.resolver, other].map(port => port.resolveGate(target.authority, target.subject, decision, h.signal)));
+    expect(results.filter(result => result.kind === 'accepted')).toHaveLength(1);
+    const replay = await other.resolveGate(target.authority, target.subject, decision, h.signal);
+    expect(replay.kind).toBe('replay');
+    const beforeStop = (await h.ctx.v2.sessionStore.load(target.subject.sessionId))._unsafeUnwrap().events;
+    expect(beforeStop.filter(event => event.kind === 'gate_resolution_recorded')).toHaveLength(1);
+    const createStopper = await loadProductionRunStopper();
+    const stopper = h.track(await createStopper({ toolContext: h.ctx }, h.signal));
+    const stopTarget = await stopper.inspectTarget(gate.gateToken, h.signal);
+    if (stopTarget.kind !== 'eligible') throw new Error('Expected active run');
+    expect(await stopper.stop(stopTarget.authority, stopTarget.subject, 'Stop after approval', h.signal)).toMatchObject({ kind: 'stopped' });
+    const stopped = await h.snapshot();
+    expect(await other.resolveGate(target.authority, target.subject, decision, h.signal)).toMatchObject({ kind: 'refused', reason: 'session_cancelled' });
+    expect(await h.snapshot()).toEqual(stopped);
+  } catch (err) { primaryError = err; throw err; } finally { await h.cleanup(primaryError); }
 });

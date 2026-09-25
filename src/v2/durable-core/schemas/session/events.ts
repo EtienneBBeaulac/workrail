@@ -200,6 +200,17 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
     ]),
   }),
   DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('gate_correction_recorded'),
+    scope: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }).strict(),
+    data: z.object({ receipt: z.string().min(1), outputDigest: z.string().min(1),
+      reviewGateToken: z.string().min(1), priorSubject: z.object({ sessionId: z.string().min(1), runId: z.string().min(1), gateNodeId: z.string().min(1), stepId: z.string().min(1), workRevision: z.string().min(1) }).strict(), newSubject: z.object({ sessionId: z.string().min(1), runId: z.string().min(1), gateNodeId: z.string().min(1), stepId: z.string().min(1), workRevision: z.string().min(1) }).strict() }).strict(),
+  }),
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('run_stopped'),
+    scope: z.object({ runId: z.string().min(1) }).strict(),
+    data: z.object({ receipt: z.string().min(1), reason: z.literal('cancelled'), detail: z.string() }).strict(),
+  }),
+  DomainEventEnvelopeV1Schema.extend({
     kind: z.literal('run_started'),
     scope: z.object({ runId: z.string().min(1) }),
     data: RunStartedDataV1Schema,
