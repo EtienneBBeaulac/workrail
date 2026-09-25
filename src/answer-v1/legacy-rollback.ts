@@ -5,6 +5,7 @@ import type { IncompatibleAnswerSession, LegacyRollbackInspectConfig, RollbackIn
 /** Observation only: no result authorizes launching an older reader. */
 export async function inspectLegacyRollback(
   config: LegacyRollbackInspectConfig, signal: AbortSignal,
+  discover: typeof createHostDiscovery = createHostDiscovery,
 ): Promise<RollbackInspectionResult> {
   const context = { baseline: config.targetBaseline, notice: 'observation_only_not_downgrade_authorization' as const };
   if (signal.aborted) return { ...context, kind: 'cancelled' };
@@ -13,7 +14,7 @@ export async function inspectLegacyRollback(
   let count = 0;
   let scanner: HostSessionScanner | undefined;
   try {
-    const created = await createHostDiscovery(config.discovery, signal);
+    const created = await discover(config.discovery, signal);
     switch (created.kind) {
       case 'cancelled': issues.push({ kind: 'root', reason: 'scan_cancelled', detail: 'Inspection cancelled before enumeration completed' }); break;
       case 'refused': issues.push({ kind: 'root', reason: created.reason, detail: created.detail }); break;
