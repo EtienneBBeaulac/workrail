@@ -1,3 +1,4 @@
+import { assertNever } from '../runtime/assert-never.js';
 import { createHostDiscovery } from './discovery.js';
 import type { HostDiscoveryCursor, HostSessionScanner } from './contracts/host-discovery-contract.js';
 import type { IncompatibleAnswerSession, LegacyRollbackInspectConfig, RollbackInspectionResult, RollbackReadIssue } from './contracts/legacy-rollback-contract.js';
@@ -35,15 +36,18 @@ export async function inspectLegacyRollback(
                   case 'legacy': break;
                   case 'host': case 'unbound': observed.push({ kind: entry.kind, sessionId: entry.sessionId }); break;
                   case 'unavailable': issues.push({ kind: 'session', sessionId: entry.sessionId, reason: entry.reason, detail: entry.detail }); break;
+                  default: assertNever(entry);
                 }
               }
               if (result.page.kind === 'end') finished = true;
               else cursor = result.page.nextCursor;
               break;
+            default: assertNever(result);
           }
         }
         break;
       }
+      default: assertNever(created);
     }
   } catch {
     issues.push({ kind: 'root', reason: 'storage_unavailable', detail: 'Inspection could not finish reading canonical storage' });
