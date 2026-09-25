@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, lstat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { z } from 'zod';
 import { answerDataDir } from './engine-composition.js';
@@ -32,7 +32,7 @@ export async function createHostDiscovery(config: HostDiscoveryConfig, signal: A
     async function entry(id: string): Promise<DiscoveredSessionEntry> {
         const sessionId = asSessionId(id);
         try {
-            if (!(await stat(join(config.storage.journalRootDir, id))).isDirectory())
+            if (!(await lstat(join(config.storage.journalRootDir, id))).isDirectory())
                 return { kind: 'unavailable', sessionId, reason: 'storage_unavailable', detail: 'Session path is not a directory' };
         }
         catch (error) {
@@ -50,6 +50,8 @@ export async function createHostDiscovery(config: HostDiscoveryConfig, signal: A
             return { kind: 'unbound', sessionId };
         if (enrollment?.kind === 'answer_host_recorded' && enrollment.data.kind === 'enrolled')
             return { kind: 'host', sessionId, pointer: { formatVersion: 1, executionId: id, recoveryLocator: enrollment.data.recovery } };
+        if (result.value.events.some(e => e.kind === 'answer_host_recorded'))
+            return { kind: 'unavailable', sessionId, reason: 'corrupt', detail: 'Answer history has no enrollment' };
         return { kind: 'legacy', sessionId };
     }
     return { kind: 'created', scanner: {
@@ -63,7 +65,7 @@ export async function createHostDiscovery(config: HostDiscoveryConfig, signal: A
                     return { kind: 'refused', reason: 'invalid_cursor', detail: 'Cursor belongs to another scanner' };
                 if (!ids) {
                     try {
-                        const enumerated = (await readdir(config.storage.journalRootDir, { withFileTypes: true })).filter(e => e.isDirectory() && /^sess_[a-z0-9]+$/.test(e.name)).map(e => e.name).sort();
+                        const enumerated = (await readdir(config.storage.journalRootDir, { withFileTypes: true })).filter(e => /^sess_[a-z0-9]+$/.test(e.name)).map(e => e.name).sort();
                         ids ??= enumerated;
                     }
                     catch (error) {

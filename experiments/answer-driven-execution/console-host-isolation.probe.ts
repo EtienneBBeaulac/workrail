@@ -2321,6 +2321,22 @@ function assertNoAuth(r: object): void {
 describe('legacy rollback inspection:', () => {
   const baseline: KnownLegacyBaseline = '396cdfa4e665afa993b50fcf0ec59ca53a2167db';
 
+  it('retains every unreadable session across page boundaries including non-directories', () =>
+    consoleHostFixture(async f => {
+      const inspect = await loadRollback();
+      await seedLegacySession(f, 'rollback-page-seed');
+      const unreadableIds = Array.from({ length: 65 }, (_, i) => `sess_rollback${String(i).padStart(3, '0')}`);
+      for (const id of unreadableIds) await writeFile(join(f.storageConfig.journalRootDir, id), 'retained unreadable session');
+      const before = await f.snapshotRoot();
+      const result = await inspect({ targetBaseline: baseline, discovery: f.sharedAuthorityConfig }, AbortSignal.timeout(15000));
+      expect(result.kind).toBe('inconclusive');
+      if (result.kind !== 'inconclusive') throw new Error('Expected incomplete compatibility evidence');
+      expect(result.issues.filter(issue => issue.kind === 'session').map(issue => issue.sessionId)).toEqual(unreadableIds);
+      expect(result.observedIncompatibleSessions).toEqual([]);
+      expect(await f.snapshotRoot()).toEqual(before);
+      assertNoAuth(result);
+    }));
+
   it('legacy-only: observation count 1, no authority, precancelled, unchanged snapshots', () =>
     consoleHostFixture(async f => {
       const inspectLegacyRollback = await loadRollback();
