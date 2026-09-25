@@ -2330,15 +2330,7 @@ describe('legacy rollback inspection:', () => {
         discovery: f.sharedAuthorityConfig,
       };
 
-      const dirs0 = await f.listSessionDirs();
-      const legacyMcp = await f.bootMcp('notes');
-      const startRes = z.object({ kind: z.literal('work'), assignment: z.string() }).passthrough().parse(
-        await legacyMcp.call('start_work', { workflowId: 'two-step-test', workspacePath: f.root, goal: 'Legacy notes baseline' }),
-      );
-      await f.discoverNewSessionId(dirs0);
-      z.object({ kind: z.literal('work'), assignment: z.string() }).passthrough().parse(
-        await legacyMcp.call('submit_work', { assignment: startRes.assignment, result: { notes: 'Legacy observation notes' } }),
-      );
+      await seedLegacySession(f, 'rollback-legacy');
 
       const beforeCancel = await f.snapshotRoot();
       const cancelRes = await inspectLegacyRollback(config, AbortSignal.abort());
@@ -2427,15 +2419,7 @@ describe('legacy rollback inspection:', () => {
       );
       expect(unboundStep1.disposition).toBe('accepted');
 
-      const dirsC = await f.listSessionDirs();
-      const legacyMcp = await f.bootMcp('notes');
-      const legacyStart = z.object({ kind: z.literal('work'), assignment: z.string() }).passthrough().parse(
-        await legacyMcp.call('start_work', { workflowId: 'two-step-test', workspacePath: f.root, goal: 'Legacy C' }),
-      );
-      await f.discoverNewSessionId(dirsC);
-      z.object({ kind: z.literal('work'), assignment: z.string() }).passthrough().parse(
-        await legacyMcp.call('submit_work', { assignment: legacyStart.assignment, result: { notes: 'Legacy Note C' } }),
-      );
+      await seedLegacySession(f, 'rollback-mixed');
 
       const snapJ0 = await f.snapshotRoot();
       const snapP0 = await f.snapshotPins();
