@@ -54,7 +54,7 @@ it('scoped console follows canonical completion after owner release without writ
   if (enrolled.kind !== 'enrolled') throw new Error(enrolled.kind);
   const created = await createConsoleReadRuntime(config, signal());
   if (created.kind !== 'created') throw new Error(created.kind);
-  expect(await created.runtime.unboundReader.getAnswer(asSessionId('sess_absent'))).toMatchObject({ kind: 'not_enrolled', reason: 'not_enrolled' });
+  expect(await created.runtime.unboundReader.getAnswer(asSessionId('sess_absent'))).toMatchObject({ kind: 'unavailable', reason: 'missing' });
   expect(await created.runtime.unboundReader.getAnswer(asSessionId('../invalid'))).toMatchObject({ kind: 'refused', reason: 'invalid_scope' });
   const binding = await created.runtime.bindHost(enrolled.enrollment, signal());
   if (binding.kind !== 'bound') throw new Error(binding.kind);

@@ -1,7 +1,15 @@
 import type { Application, Request, Response } from 'express';
 import { asSessionId } from '../v2/durable-core/ids/index.js';
 import type { ReceiptRef, EvidenceCursor } from './contracts/answer-contract.js';
-import type { ConsoleReaderBinding } from './contracts/console-contract.js';
+import type { ConsoleReaderBinding, ConsoleAnswerUnavailableReason } from './contracts/console-contract.js';
+
+const unavailableStatus: Readonly<Record<ConsoleAnswerUnavailableReason, 404 | 422 | 503>> = {
+  missing: 404,
+  corrupt: 422,
+  unsupported_version: 422,
+  storage_unavailable: 503,
+  profile_disabled: 503,
+};
 
 /** No binding means no answer authority. An URL selector can only narrow the injected
  * reader's scope; it cannot select a host session the reader was not bound to. */
@@ -38,8 +46,8 @@ export function mountAnswerConsoleRoutes(app: Application, reader?: ConsoleReade
           return;
         }
         case 'refused': res.status(403).json({ success: false, error: 'Answer scope refused', outcome }); return;
-        case 'not_enrolled': res.status(404).json({ success: false, error: 'Session not enrolled', outcome }); return;
-        case 'unavailable': res.status(503).json({ success: false, error: 'Answer unavailable', outcome }); return;
+        case 'not_enrolled': res.status(409).json({ success: false, error: 'Session not enrolled', outcome }); return;
+        case 'unavailable': res.status(unavailableStatus[outcome.reason]).json({ success: false, error: 'Answer unavailable', outcome }); return;
       }
     } catch {
       if (request.signal.aborted || res.destroyed || res.writableEnded || res.headersSent) return;
