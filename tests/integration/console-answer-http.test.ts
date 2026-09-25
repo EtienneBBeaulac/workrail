@@ -1166,13 +1166,15 @@ it.each(degradationCases)(
           await writeFile(manifestPath, pristineManifest);
         };
       } else if (c.kind === 'storage_unavailable') {
-        // Storage obstruction: portable obstruction hitting actual reader without chmod root assumptions
-        const backupDir = join(f.root, `backup-obstruct-${sessionId}`);
-        await rename(sessionDir, backupDir);
-        await writeFile(sessionDir, 'portable_filesystem_obstruction_payload', 'utf8');
+        // Keep the manifest readable and obstruct its committed segment. Replacing
+        // an ancestor directory with a file reports ENOENT on Windows, which tests
+        // missing storage instead of an unreadable committed journal.
+        const backupSegment = join(f.root, `backup-obstruct-${sessionId}`);
+        await rename(targetSegPath, backupSegment);
+        await mkdir(targetSegPath);
         cleanupMutation = async () => {
-          await rm(sessionDir, { force: true });
-          await rename(backupDir, sessionDir);
+          await rm(targetSegPath, { recursive: true, force: true });
+          await rename(backupSegment, targetSegPath);
         };
       }
 
