@@ -61,3 +61,20 @@ rm -rf ~/.workrail/data/sessions/
 
 - [Architecture](/docs/architecture) -- how sessions are persisted and how the console reads them
 - [Troubleshooting](/docs/troubleshooting) -- session resumption and common issues
+
+
+## Answer session read errors
+
+The answer and receipt endpoints preserve the failure reason in their typed response:
+
+| State | HTTP status |
+| --- | --- |
+| Selected journal is missing | 404 |
+| Existing legacy session is not enrolled for answers | 409 |
+| Journal is corrupt or has an unsupported stored version | 422 |
+| Storage is unavailable or the profile is disabled | 503 |
+| Reader lacks authority for the requested scope | 403 |
+
+Reading a missing journal does not create a new session. After storage is restored,
+the same reader can retrieve the original receipts. Console reads never grant reply
+or recovery authority.

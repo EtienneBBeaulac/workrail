@@ -58,7 +58,8 @@ export function createConsoleReadRuntimeFromEngine(engine: AnswerReadEngine, lif
       ? loaded.error.reason.code === 'unknown_schema_version' ? 'unsupported_version' as const : 'corrupt' as const
       : 'storage_unavailable' as const };
     const entries = loaded.value.events.filter(e => e.kind === 'answer_host_recorded' && e.data.kind === 'enrolled');
-    if (entries.length === 0) return { kind: 'not_enrolled' as const, reason: loaded.value.events.length ? 'legacy_workflow' as const : 'not_enrolled' as const };
+    if (loaded.value.events.length === 0) return { kind: 'unavailable' as const, reason: 'missing' as const };
+    if (entries.length === 0) return { kind: 'not_enrolled' as const, reason: 'legacy_workflow' as const };
     const entry = entries[0];
     if (entries.length !== 1 || entry?.kind !== 'answer_host_recorded' || entry.data.kind !== 'enrolled')
       return { kind: 'unavailable' as const, reason: 'corrupt' as const };
