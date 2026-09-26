@@ -56,7 +56,7 @@ import type {
 
 function expectPrompt(input: ModelPromptInput, view: Extract<WorkView, { kind: 'question' }>): void {
   expect(input).toEqual({
-    instruction: view.instruction,
+    instruction: view.instruction, answerFormat: view.answerFormat,
     issues: view.issues,
     retainedSummaries: view.retained,
   });

@@ -25,7 +25,7 @@ export async function composeAnswerProfile(config: SharedAuthorityConfig, ctx: T
         inspect_work: z.object({ read: z.string(), receipt: z.string().optional(), cursor: z.string().optional() }).strict(),
         recover_work: z.union([z.object({ recovery: z.string() }).strict(), z.object({ attempt: z.string() }).strict()]),
     };
-    const descriptions = { open_work: 'Start a workflow and receive the next question.', answer_work: 'Answer the current question using its reply reference.', inspect_work: 'Read current work or retained evidence without advancing it.', recover_work: 'Resume work from a recovery reference or reconcile an uncertain start.' };
+    const descriptions = { open_work: 'Start a workflow and receive the next question.', answer_work: "Answer the current question using its reply reference. Set answer to the value described by that question's answerFormat schema and example.", inspect_work: 'Read current work or retained evidence without advancing it.', recover_work: 'Resume work from a recovery reference or reconcile an uncertain start.' };
     function handler<S extends z.ZodTypeAny>(schema: S, run: (input: z.output<S>, signal: AbortSignal) => Promise<unknown>): AnswerHandler {
         return async (args, _ctx, requestSignal) => {
             const input = schema.safeParse(args);

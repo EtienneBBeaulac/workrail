@@ -1,3 +1,5 @@
+import { stepOutputObligation } from './output-obligation.js';
+import { answerFormat } from './answer-format.js';
 import { foldCleanupResource } from '../v2/durable-core/projections/cleanup-resource.js';
 import { foldAnswerOwnership, type AnswerOwnership } from '../v2/durable-core/projections/answer-ownership.js';
 import { reviewHistory } from './review-history.js';
@@ -120,12 +122,14 @@ export async function inspectionView(engine: AnswerReadEngine, state: HostState,
     if (rendered.isErr())
         return { kind: 'unavailable', detail: rendered.error.message };
     const step = pinned.value.definition.steps.find(s => s.id === pending.stepId);
-    const review = step && 'outputContract' in step && step.outputContract?.contractRef === 'wr.contracts.review_verdict';
+    const obligation = stepOutputObligation(step);
+    if (obligation === 'unavailable') return { kind: 'unavailable', detail: 'Unsupported output obligation' };
+    const review = obligation === 'review';
     const history = reviewHistory(state.records, node);
     if (history.kind === 'corrupt') return { kind: 'unavailable', detail: 'Invalid review history' };
     const lastResult = [...state.records].reverse().find(r => r.kind === 'rejected' || r.kind === 'committed' || r.kind === 'review_committed' || r.kind === 'review_partial' || r.kind === 'review_correction');
     const issues = lastResult?.kind === 'rejected' ? lastResult.issues ?? [{ kind: 'field' as const, field: 'notes' as const, reason: lastResult.reason }] : review ? reviewQuestions(history.state) : [];
-    return { kind: 'question', read, instruction: rendered.value.prompt, issues, retained };
+    return { kind: 'question', read, instruction: rendered.value.prompt, answerFormat: answerFormat(obligation), issues, retained };
 }
 
 /** Only a worker projection derives a reply capability. */

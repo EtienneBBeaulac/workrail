@@ -99,7 +99,8 @@ export function createExecutionRunner(engine: AnswerEngine, config: AnswerHostCo
                         return { kind: 'refused', reason: 'model_binding_refused', failure: bound.reason, detail: bound.reason };
                     }
                     if (!available(signal)) return { kind: 'cancelled' };
-                    completion = await bound.model.generate({ instruction: recovered.view.instruction, issues: recovered.view.issues, retainedSummaries: recovered.view.retained }, signal);
+                    completion = await bound.model.generate({ instruction: recovered.view.instruction,
+                        answerFormat: recovered.view.answerFormat, issues: recovered.view.issues, retainedSummaries: recovered.view.retained }, signal);
                 }
                 catch (error) {
                     return signal.aborted ? { kind: 'cancelled' } : { kind: 'refused', reason: 'model_unavailable', detail: String(error) };

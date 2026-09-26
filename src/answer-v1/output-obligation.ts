@@ -1,7 +1,7 @@
 import type { AnswerReadEngine } from './engine-composition.js';
 import type { HostState } from './host-state.js';
 import { derivePendingStep } from '../v2/durable-core/projections/snapshot-state.js';
-import { hasWorkflowDefinitionShape, isStandardStepDefinition } from '../types/workflow-definition.js';
+import { hasWorkflowDefinitionShape, isStandardStepDefinition, type WorkflowStepDefinition } from '../types/workflow-definition.js';
 
 /** The pinned current step owns decoding; submitted fields cannot switch contracts. */
 export async function outputObligation(engine: AnswerReadEngine, state: HostState): Promise<'notes' | 'review' | 'unavailable'> {
@@ -13,6 +13,10 @@ export async function outputObligation(engine: AnswerReadEngine, state: HostStat
     || !hasWorkflowDefinitionShape(pinned.value.definition)) return 'unavailable';
   const pending = derivePendingStep(snapshot.value.enginePayload.engineState);
   const step = pending && pinned.value.definition.steps.find(s => s.id === pending.stepId);
+  return stepOutputObligation(step);
+}
+
+export function stepOutputObligation(step: WorkflowStepDefinition | null | undefined): 'notes' | 'review' | 'unavailable' {
   if (!step || !isStandardStepDefinition(step)) return 'unavailable';
   return !step.outputContract ? 'notes'
     : step.outputContract.contractRef === 'wr.contracts.review_verdict' ? 'review' : 'unavailable';

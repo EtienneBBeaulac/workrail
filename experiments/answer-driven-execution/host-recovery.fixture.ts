@@ -1,3 +1,4 @@
+import { answerFormat } from '../../src/answer-v1/answer-format.js';
 /** Real multi-process acceptance fixture for answer-driven host recovery.
  * Covers:
  * - harness_control: Subprocess lifecycle, atomic barrier, SIGKILL interruption, and fresh reader rehydration.
@@ -578,8 +579,8 @@ it('exercises host process recovery with real child processes and durable barrie
 
       // Full model prompt history assertions
       expect(fakeModel.promptHistory).toEqual([
-        { instruction: 'Record first observation.', issues: [], retainedSummaries: [] },
-        { instruction: question2View.instruction, issues: question2View.issues, retainedSummaries: question2View.retained },
+        { instruction: 'Record first observation.', answerFormat: answerFormat('notes'), issues: [], retainedSummaries: [] },
+        { instruction: question2View.instruction, answerFormat: question2View.answerFormat, issues: question2View.issues, retainedSummaries: question2View.retained },
       ]);
       expect('reply' in fakeModel.promptHistory[0]!).toBe(false);
       expect('recovery' in fakeModel.promptHistory[0]!).toBe(false);
@@ -769,7 +770,7 @@ it('exercises host process recovery with real child processes and durable barrie
       expect(finalView.taskOutcome).toBe('unknown');
       expect(finalView.retained.map(item => item.receipt)).toEqual([step1Receipt, step2Receipt]);
       expect(fakeModel.promptHistory).toEqual([{
-        instruction: questionView.instruction,
+        instruction: questionView.instruction, answerFormat: questionView.answerFormat,
         issues: questionView.issues,
         retainedSummaries: questionView.retained,
       }]);
@@ -876,7 +877,7 @@ it('exercises host process recovery with real child processes and durable barrie
 
       // Full model prompt object equality including retained summaries/correction issues, no capability leakage
       expect(fakeModel.promptHistory).toEqual([{
-        instruction: 'Record second observation.',
+        instruction: 'Record second observation.', answerFormat: answerFormat('notes'),
         issues: [],
         retainedSummaries: [finalView.retained[0]],
       }]);
@@ -1366,7 +1367,7 @@ it('exercises host process recovery with real child processes and durable barrie
 
       // Full model prompt object equality including retained summaries/correction issues, no capability leakage
       expect(fakeModel.promptHistory).toEqual([{
-        instruction: question2View.instruction,
+        instruction: question2View.instruction, answerFormat: question2View.answerFormat,
         issues: question2View.issues,
         retainedSummaries: question2View.retained,
       }]);

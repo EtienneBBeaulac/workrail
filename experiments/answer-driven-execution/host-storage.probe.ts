@@ -175,7 +175,7 @@ it('positive control: pending recovery completes exact payloads; settled recover
 
   expect(fakeModel.callCount).toBe(1);
   expect(fakeModel.promptHistory[0]).toEqual({
-    instruction: initialView.instruction, issues: initialView.issues, retainedSummaries: initialView.retained,
+    instruction: initialView.instruction, answerFormat: initialView.answerFormat, issues: initialView.issues, retainedSummaries: initialView.retained,
   });
 
   // Pending recovery acquires a NEW owner and returns a fresh runner.
@@ -204,7 +204,7 @@ it('positive control: pending recovery completes exact payloads; settled recover
 
   expect(fakeModel.callCount).toBe(2);
   expect(fakeModel.promptHistory[1]).toEqual({
-    instruction: turn1.nextView.instruction, issues: turn1.nextView.issues, retainedSummaries: turn1.nextView.retained,
+    instruction: turn1.nextView.instruction, answerFormat: turn1.nextView.answerFormat, issues: turn1.nextView.issues, retainedSummaries: turn1.nextView.retained,
   });
 
   // Inspect exact returned accepted receipts/payloads via diagnostic inspector
