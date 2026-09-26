@@ -1,3 +1,4 @@
+import type { AnswerFormat } from '../answer-format.js';
 import type { WorkspaceFailure } from './workspace-effect-contract.js';
 import type { TrustedDeliveryModelFactory, ModelBindingRefusal } from './trusted-model-factory.js';
 import type { ModelCallFailure } from './model-call-contract.js';
@@ -85,6 +86,7 @@ export interface AuthoritativeEngineBoundary {
 
 export type ModelPromptInput = Readonly<{
   instruction: string;
+  answerFormat: AnswerFormat;
   issues: readonly QuestionIssue[];
   retainedSummaries: readonly EvidenceSummary[];
   reply?: never; recovery?: never; owner?: never; attempt?: never;

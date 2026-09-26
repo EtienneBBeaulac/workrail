@@ -45,7 +45,7 @@ import type {
 import type { WorkView } from '../../src/answer-v1/contracts/answer-contract.js';
 
 function expectPrompt(input: ModelPromptInput, view: Extract<WorkView, { kind: 'question' }>): void {
-  expect(input).toEqual({ instruction: view.instruction, issues: view.issues, retainedSummaries: view.retained });
+  expect(input).toEqual({ instruction: view.instruction, answerFormat: view.answerFormat, issues: view.issues, retainedSummaries: view.retained });
 }
 
 const PRODUCTION_MODULE_PATH = 'src/answer-v1/host.ts';
@@ -512,7 +512,7 @@ it('DI3 Case A: before_prepare_commit fail_io prevents dispatch, retains capture
   if (del2.kind !== 'delivered') return;
 
   const modelRes2 = await fakeModel.generate({
-    instruction: step2View.instruction,
+    instruction: step2View.instruction, answerFormat: step2View.answerFormat,
     issues: step2View.issues,
     retainedSummaries: step2View.retained,
   }, signal);
@@ -715,7 +715,7 @@ it('DI3 Case B: after_prepare_commit simulate_uncertain yields unconfirmed stage
   if (del2.kind !== 'delivered') return;
 
   const modelRes2 = await fakeModel.generate({
-    instruction: step2View.instruction,
+    instruction: step2View.instruction, answerFormat: step2View.answerFormat,
     issues: step2View.issues,
     retainedSummaries: step2View.retained,
   }, signal);
