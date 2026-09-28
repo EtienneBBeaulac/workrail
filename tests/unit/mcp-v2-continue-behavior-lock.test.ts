@@ -26,6 +26,8 @@ import type { ToolContext } from '../../src/mcp/types.js';
 
 import { handleV2ContinueWorkflow } from '../../src/mcp/handlers/v2-execution.js';
 import { unwrapResponse } from '../helpers/unwrap-response.js';
+import { V2StartWorkflowOutputSchema, V2ContinueWorkflowOutputSchema } from '../../src/mcp/output-schemas.js';
+import { ReviewVerdictArtifactV1Schema } from '../../src/v2/durable-core/schemas/artifacts/review-verdict.js';
 import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage.js';
 
 import { LocalDataDirV2 } from '../../src/v2/infra/local/data-dir/index.js';
@@ -110,6 +112,11 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
             { id: 'step3', title: 'Step 3', prompt: 'Do step 3' },
           ],
         } as any,
+        {
+          id: 'review-correction-wf', name: 'Review correction', description: 'Review contract regression', version: '1.0.0',
+          steps: [{ id: 'review', title: 'Review', prompt: 'Review supplied source',
+            outputContract: { contractRef: 'wr.contracts.review_verdict', required: true } }],
+        },
       ]),
       disableSessionTools: true,
     });
@@ -118,6 +125,52 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
   afterEach(async () => {
     teardownIntegrationTest();
     process.env.WORKRAIL_DATA_DIR = prevDataDir;
+  });
+
+  it.each(['missing', 'invalid'] as const)('review %s output returns durable correction, then accepts valid evidence', async (kind) => {
+    const v2 = await mkV2Deps();
+    const ctx: ToolContext = {
+      workflowService: resolveService(DI.Services.Workflow), featureFlags: resolveService(DI.Infra.FeatureFlags),
+      backgroundWork: new BackgroundWork(() => {}), sessionManager: null, httpServer: null, v2,
+    };
+    const start = await startWorkflowForTest({ workflowId: 'review-correction-wf', workspacePath: root, goal: 'Review regression' }, ctx);
+    expect(start.type).toBe('success');
+    if (start.type !== 'success') return;
+    const opened = V2StartWorkflowOutputSchema.parse(unwrapResponse(start.data));
+    const sessionId = asSessionId(resolveSessionId(opened.continueToken, v2.tokenAliasStore));
+    const artifact = { kind: 'wr.review_verdict', verdict: 'blocking', confidence: 'high',
+      findings: [{ severity: 'blocking', summary: 'Evidence-loss defect', evidence: { trigger: 'enriched finding' } }], summary: 'Evidence loss' };
+    const rejected = await handleV2ContinueWorkflow({ continueToken: opened.continueToken, intent: 'advance',
+      output: { notesMarkdown: 'Actual submitted review', artifacts: kind === 'missing' ? [] : [artifact] } }, ctx);
+    expect(rejected.type).toBe('success');
+    if (rejected.type !== 'success') return;
+    const blocked = V2ContinueWorkflowOutputSchema.parse(unwrapResponse(rejected.data));
+    expect(blocked.kind).toBe('blocked');
+    if (blocked.kind !== 'blocked') return;
+    expect(blocked.retryable).toBe(true);
+    expect(blocked.isComplete).toBe(false);
+    expect(blocked.blockers.blockers[0].code).toBe(kind === 'missing' ? 'MISSING_REQUIRED_OUTPUT' : 'INVALID_REQUIRED_OUTPUT');
+    expect(blocked.blockers.blockers[0].suggestedFix).toContain('findings[].severity');
+    const before = await v2.sessionStore.load(sessionId).match(x => x, e => { throw new Error(JSON.stringify(e)); });
+    expect(before.events.some(e => e.kind === 'run_completed')).toBe(false);
+    expect(blocked.retryContinueToken).toBeDefined();
+    if (!blocked.retryContinueToken) return;
+    const corrected = { ...artifact, findings: artifact.findings.map(f => ({ ...f, severity: 'major' })) };
+    const accepted = await handleV2ContinueWorkflow({ continueToken: blocked.retryContinueToken, intent: 'advance',
+      output: { notesMarkdown: 'Corrected severity; exact evidence preserved', artifacts: [corrected] } }, ctx);
+    expect(accepted.type).toBe('success');
+    if (accepted.type !== 'success') return;
+    expect(unwrapResponse(accepted.data).isComplete).toBe(true);
+    const after = await v2.sessionStore.load(sessionId).match(x => x, e => { throw new Error(JSON.stringify(e)); });
+    expect(after.events.filter(e => e.kind === 'run_completed')).toHaveLength(1);
+    const completedArtifacts = after.events.flatMap(e => {
+      if (e.kind !== 'node_output_appended' || e.data.payload.payloadKind !== 'artifact_ref') return [];
+      const parsed = ReviewVerdictArtifactV1Schema.safeParse(e.data.payload.content);
+      return parsed.success ? [parsed.data] : [];
+    });
+    expect(completedArtifacts).toEqual([corrected]);
+    expect(after.events.some(e => e.kind === 'node_output_appended' && e.data.payload.payloadKind === 'notes'
+      && e.data.payload.notesMarkdown === 'Corrected severity; exact evidence preserved')).toBe(true);
   });
 
   it('full happy path: start → advance 3 times → complete', async () => {

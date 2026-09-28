@@ -149,22 +149,23 @@ export function parseReviewVerdictArtifact(
 export function getBlockedMessage(options?: { readonly isAutonomous?: boolean }): readonly string[] {
   const isAutonomous = options?.isAutonomous ?? false;
   const paramPath = isAutonomous ? "complete_step's artifacts[] parameter" : "continue_workflow's output.artifacts parameter (or top-level artifacts)";
-  const exampleFormat = isAutonomous
-    ? `{ "artifacts": [{ "kind": "wr.review_verdict", "verdict": "minor", "confidence": "medium", "findings": [{ "severity": "minor", "summary": "Missing null check", "findingCategory": "correctness", "file": "src/foo.ts", "startLine": 42, "causalLink": "PR removed the guard", "remediation": "Restore null check" }], "summary": "Minor issues found" }] }`
-    : `{ "output": { "artifacts": [{ "kind": "wr.review_verdict", "verdict": "minor", "confidence": "medium", "findings": [{ "severity": "minor", "summary": "Missing null check", "findingCategory": "correctness", "file": "src/foo.ts", "startLine": 42, "causalLink": "PR removed the guard", "remediation": "Restore null check" }], "summary": "Minor issues found" }] } }`;
+  // Schema-owned enums keep the correction contract aligned with boundary validation.
+  // This scaffold is also persisted inside a 1024-byte suggestedFix budget.
+  const example = { kind: 'wr.review_verdict', verdict: 'blocking', confidence: 'high',
+    findings: [{ severity: 'major', summary: 'Broken invariant' }], summary: 'One major finding' };
+  const exampleFormat = JSON.stringify(isAutonomous ? { artifacts: [example] } : { output: { artifacts: [example] } });
   return [
     `Artifact contract: ${REVIEW_VERDICT_CONTRACT_REF}`,
-    `Provide a valid wr.review_verdict artifact in ${paramPath}.`,
-    `Required schema (verdict, confidence, findings, summary are mandatory):`,
-    `  verdict: "clean" | "minor" | "blocking"`,
-    `  confidence: "high" | "medium" | "low"`,
-    `  findings: array of { severity, summary, findingCategory? } plus any enrichment fields (empty array for clean verdicts)`,
-    `  summary: one-line overall verdict string`,
-    `Enrichment fields allowed on each finding (optional): file, startLine, endLine, causalLink, remediation`,
-    `Canonical format:`,
-    `\`\`\`json`,
+    `Provide wr.review_verdict in ${paramPath}.`,
+    `Required: verdict, confidence, findings, summary (nonempty string).`,
+    `verdict: ${ReviewVerdictArtifactV1Schema.shape.verdict.options.join(' | ')}`,
+    `confidence: ${ReviewVerdictArtifactV1Schema.shape.confidence.options.join(' | ')}`,
+    `findings: array of {severity, summary (nonempty string), findingCategory?}; [] for clean.`,
+    `findings[].severity: ${ReviewVerdictFindingSchema.shape.severity.options.join(' | ')}`,
+    `findings[].findingCategory: ${ReviewVerdictFindingSchema.shape.findingCategory.unwrap().options.join(' | ')} (optional)`,
+    `Finding enrichment is preserved, e.g. file, startLine, endLine, causalLink, remediation.`,
+    '```json',
     exampleFormat,
-    `\`\`\``,
-    `For a clean review with no findings use: "verdict": "clean", "findings": []`,
+    '```',
   ];
 }
