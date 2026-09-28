@@ -1,3 +1,4 @@
+import { answerFormat } from '../../../src/answer-v1/answer-format.js';
 import { createExecutionRunner } from '../../../src/answer-v1/execution-runner.js';
 import type { AnswerHostConfig } from '../../../src/answer-v1/contracts/host-composition.js';
 import { createFreshAdmissionAuthority } from '../../../src/answer-v1/host-admission.js';
@@ -411,7 +412,7 @@ it.skipIf(process.platform === 'win32').each(['answer', 'budget', 'unknown', 'st
         expect(await journal.locked(signal, false, (state, lock) => journal.append(state, lock,
           { kind: 'owner_acquired', epoch: '2' }, signal))).toBe(true);
       }
-      const prompt = { instruction: 'First', issues: [], retainedSummaries: [] };
+      const prompt = { instruction: 'First', issues: [], retainedSummaries: [], answerFormat: answerFormat('notes') };
       const result = await model.model.generate(prompt, signal);
       expect(reservationCounts).toEqual(scenario === 'stale' || scenario === 'replaced' ? [] : [1]);
       if (scenario === 'answer') expect(result).toMatchObject({ kind: 'completed', response: { calls: [{ name: 'answer_work' }] } });
@@ -837,7 +838,7 @@ it.skipIf(process.platform === 'win32').each(['success','duplicate','intent_ack'
           return {content:[{type:'text',text:'written'}],details:null};
         }}],modelId:'fake',systemPrompt:'fake'});
         if(created.kind!=='created')throw new Error(created.kind);
-        const result=await created.model.generate({instruction:'work',issues:[],retainedSummaries:[]},mode.startsWith('cancel_')?toolCancellation.signal:signal);
+        const result=await created.model.generate({instruction:'work',issues:[],retainedSummaries:[],answerFormat:answerFormat('notes')},mode.startsWith('cancel_')?toolCancellation.signal:signal);
         if(mode.startsWith('cancel_')) {
           if(mode!=='cancel_after_reservation')
             expect(await readFile(join(root,'effect-marker'),'utf8')).toBe('written before cancellation');
@@ -866,7 +867,7 @@ it.skipIf(process.platform === 'win32').each(['success','duplicate','intent_ack'
         }
         if(mode!=='success') {
           // A fresh signal must not erase the delivery's prior failure, including cancellation.
-          const again=await created.model.generate({instruction:'retry',issues:[],retainedSummaries:[]},signal);
+          const again=await created.model.generate({instruction:'retry',issues:[],retainedSummaries:[],answerFormat:answerFormat('notes')},signal);
           expect(again.kind).toBe('workspace_failed');
           expect(requests).toBe(1);
           expect(invocations).toBe(mode==='duplicate'||mode==='intent_ack'||mode==='cancel_after_reservation'||mode==='typed_unknown'||mode==='typed_refused'?0:1);
@@ -1098,6 +1099,9 @@ it.skipIf(process.env.WORKRAIL_TEST_LINUX_SCRATCH !== '1').each([
         return mode==='lost_reply'?{kind:'unknown' as const}:result;
       }};
       const model=createLinuxScratchAnswerModel(journal,delivery.delivery,owner,wrapped,{modelId:'fake',systemPrompt:'fixture',provider:{async invoke(params){
+        const turn = JSON.parse(params.messages[0]!.content as string);
+        expect(turn.answerFormat).toEqual(answerFormat('notes'));
+        expect(turn.instruction).toContain('isolated Linux scratch copy');
         if(calls===1&&mode==='success'){
           const last=params.messages.at(-1);
           expect(Array.isArray(last?.content)&&last.content.some(b=>b.type==='tool_result'&&b.is_error===true)).toBe(true);
@@ -1108,11 +1112,11 @@ it.skipIf(process.env.WORKRAIL_TEST_LINUX_SCRATCH !== '1').each([
           content:calls===1?commands.map((c,i)=>({type:'tool_use' as const,id:`tool-${i}`,name:c.name,input:c.input})):[{type:'tool_use' as const,id:'answer',name:'answer_work',input:{answer:{notes:'scratch work done'}}}]}};
       }}});
       if(model.kind!=='created')throw new Error(model.kind);
-      const result=await model.model.generate({instruction:'Exercise tools',issues:[],retainedSummaries:[]},call.signal);
+      const result=await model.model.generate({instruction:'Exercise tools',issues:[],retainedSummaries:[],answerFormat:answerFormat('notes')},call.signal);
       expect(result.kind).toBe(mode==='success'?'completed':'workspace_failed');
       expect(calls).toBe(mode==='success'?2:1);expect(toolCalls).toBe(mode==='success'?7:mode==='symlink'?2:1);
       if(mode!=='success'){
-        expect((await model.model.generate({instruction:'retry',issues:[],retainedSummaries:[]},signal)).kind).toBe('workspace_failed');
+        expect((await model.model.generate({instruction:'retry',issues:[],retainedSummaries:[],answerFormat:answerFormat('notes')},signal)).kind).toBe('workspace_failed');
         expect(calls).toBe(1);expect(toolCalls).toBe(mode==='symlink'?2:1);
       }
       const retained=await readHostState(engine,hydrated.enrollment);if(retained.kind!=='loaded')throw new Error(retained.kind);

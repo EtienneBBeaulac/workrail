@@ -351,8 +351,8 @@ it('case 1: genuine host enrollment refuses unbound MCP answer_work without stor
     if (turn1.nextView.kind !== 'question') expect.fail('Expected successor question');
     expect(turn1.nextView.instruction).toBe('Record second observation.');
     expect(fakeModel.promptHistory).toEqual([
-      { instruction: initialView.instruction, issues: initialView.issues, retainedSummaries: initialView.retained },
-      { instruction: turn1.nextView.instruction, issues: turn1.nextView.issues, retainedSummaries: turn1.nextView.retained },
+      { instruction: initialView.instruction, answerFormat: initialView.answerFormat, issues: initialView.issues, retainedSummaries: initialView.retained },
+      { instruction: turn1.nextView.instruction, answerFormat: turn1.nextView.answerFormat, issues: turn1.nextView.issues, retainedSummaries: turn1.nextView.retained },
     ]);
 
     // Inspect via task-bound diagnostic inspector after completion only
@@ -483,8 +483,8 @@ it('case 2: owner-free pending session refuses unbound MCP answer_work, stale ru
     if (recTurn1.nextView.kind !== 'question') expect.fail('Expected recovered successor question');
     expect(recTurn1.nextView.instruction).toBe('Record second observation.');
     expect(fakeModel.promptHistory).toEqual([
-      { instruction: initialView.instruction, issues: initialView.issues, retainedSummaries: initialView.retained },
-      { instruction: recTurn1.nextView.instruction, issues: recTurn1.nextView.issues, retainedSummaries: recTurn1.nextView.retained },
+      { instruction: initialView.instruction, answerFormat: initialView.answerFormat, issues: initialView.issues, retainedSummaries: initialView.retained },
+      { instruction: recTurn1.nextView.instruction, answerFormat: recTurn1.nextView.answerFormat, issues: recTurn1.nextView.issues, retainedSummaries: recTurn1.nextView.retained },
     ]);
     expect(recovered.owner.execution).toBe(owner.execution);
     // Inspect via task-bound diagnostic inspector

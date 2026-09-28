@@ -1,3 +1,4 @@
+import { NotesAnswerSchema } from './answer-format.js';
 import { outputObligation } from './output-obligation.js';
 import { contributeReview, parseReviewFragment } from './review-answer.js';
 import { reviewHistory, reviewFieldsJson, completeReviewFromJson } from './review-history.js';
@@ -17,7 +18,7 @@ import type { InvocationJournal, HostEnrollment, OwnerFence, DeliveryRef, Captur
 import type { ReplyRef, ReceiptRef } from './contracts/answer-contract.js';
 import { CapturePolicy, decodeResponse, decideCapture } from './response-capture.js';
 const policy = CapturePolicy.parse({ maxBytes: 1024 * 1024 });
-const NotesAnswer = z.object({ answer: z.object({ notes: z.string().min(1) }).strict() }).strict();
+const NotesAnswer = z.object({ answer: NotesAnswerSchema }).strict();
 /** Any uncaptured model work requires explicit reconciliation, even if a newer
  * delivery exists. A completed effect does not make the missing answer replayable. */
 function hasUncapturedModelWork(records: readonly AnswerHostRecord[]): boolean {
@@ -210,7 +211,7 @@ export class SessionJournal implements InvocationJournal {
                 const envelope = z.object({ answer: AnswerJsonSchema }).safeParse(input);
                 const canonical = envelope.success ? toCanonicalBytes(envelope.data.answer) : undefined;
                 const evidence = canonical?.isOk() ? { encoding: 'canonical_json' as const, rawAnswer: Buffer.from(canonical.value).toString('utf8') } : { encoding: 'raw_utf8' as const, rawAnswer: call?.argumentsJson ?? captured.payload.responseText };
-                const record: AnswerHostRecord = { kind: 'rejected', delivery: response.delivery, response: response.response, receipt, ...(review?.kind === 'invalid' ? { issues: review.issues.filter((i): i is Extract<typeof i, { kind: 'field' }> => i.kind === 'field') } : {}), reason: obligation === 'review' ? review?.kind === 'invalid' ? review.issues.map(i => i.kind === 'field' ? i.field + ': ' + i.reason : i.rationale).join('; ') : 'Provide review answer fields only.' : 'Provide answer_work with a nonempty notes answer.', ...evidence };
+                const record: AnswerHostRecord = { kind: 'rejected', delivery: response.delivery, response: response.response, receipt, ...(review?.kind === 'invalid' ? { issues: review.issues.filter((i): i is Extract<typeof i, { kind: 'field' }> => i.kind === 'field') } : {}), reason: obligation === 'review' ? review?.kind === 'invalid' ? review.issues.map(i => i.kind === 'field' ? i.field + ': ' + i.reason : i.rationale).join('; ') : 'Provide review answer fields only.' : !answer.success ? answer.error.issues.map(issue => `${issue.path.join('.') || 'answer'}: ${issue.message}`).join('; ') : 'Provide answer_work with a nonempty notes answer.', ...evidence };
                 if (!await this.append(state, lock, record, signal))
                     return { kind: 'unconfirmed', reason: 'commit_uncertain' };
                 const next = await readHostState(this.engine, this.enrollment);

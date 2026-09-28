@@ -1,3 +1,4 @@
+import type { AnswerFormat } from '../answer-format.js';
 import type { JsonValue } from '../../v2/durable-core/canonical/json-types.js';
 /** Agent-facing values and capabilities shared by host and worker boundaries. */
 declare const replyBrand: unique symbol;
@@ -45,7 +46,7 @@ export type QuestionIssue =
   | Readonly<{ kind: 'gate'; rationale: string }>;
 export type EvidenceSummary = Readonly<{ receipt: ReceiptRef; description: string }>;
 export type WorkView =
-  | Readonly<{ kind: 'question'; read: ReadRef; reply: ReplyRef; instruction: string;
+  | Readonly<{ kind: 'question'; read: ReadRef; reply: ReplyRef; instruction: string; answerFormat: AnswerFormat;
       retained: readonly EvidenceSummary[]; issues: readonly QuestionIssue[] }>
   | Readonly<{ kind: 'waiting'; read: ReadRef; reason: 'approval' | 'external_evidence';
       retained: readonly EvidenceSummary[] }>

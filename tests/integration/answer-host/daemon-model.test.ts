@@ -1,3 +1,4 @@
+import { answerFormat } from '../../../src/answer-v1/answer-format.js';
 import 'reflect-metadata';
 import type Anthropic from '@anthropic-ai/sdk';
 import { it, expect } from 'vitest';
@@ -14,7 +15,7 @@ const message = (content: Anthropic.ContentBlock[]): Anthropic.Message => ({
   stop_reason: content.some(b => b.type === 'tool_use') ? 'tool_use' : 'end_turn', content,
   usage: { input_tokens: 1, output_tokens: 1 },
 });
-const prompt = { instruction: 'First task', issues: [], retainedSummaries: [] };
+const prompt = { instruction: 'First task', issues: [], retainedSummaries: [], answerFormat: answerFormat('notes') };
 const signal = () => AbortSignal.timeout(15000);
 const options = (client: AgentClientInterface, workspaceTools: readonly AgentTool[] = []) => ({
   client, workspaceTools, modelId: 'fake', systemPrompt: 'Use workspace tools then answer_work.',
@@ -97,6 +98,8 @@ it('uses real host capture and recovery so a batch advances once and restart nee
     if (recovered.kind !== 'ready') throw new Error(JSON.stringify(recovered));
     expect(await recovered.runner.runTurn(signal())).toMatchObject({ kind: 'advanced', nextView: { kind: 'question', instruction: 'SUCCESSOR_ONLY' } });
     expect(requests).toBe(1);
+    expect(seen[0]).toContain('answerFormat');
+    expect(seen[0]).toContain('nonempty notes string');
     expect(seen[0]).not.toContain('SUCCESSOR_ONLY');
     expect(seen[0]).not.toContain('continueToken');
     expect(await recovered.runner.runTurn(signal())).toMatchObject({ kind: 'advanced', nextView: { kind: 'finished' } });
@@ -241,4 +244,20 @@ it('offers partial review fields to the model and resumes the missing field thro
       expect(calls).toBe(2);
     } finally { await restarted.scheduler.close(signal()); }
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it.each(['notes', 'review'] as const)('carries %s guidance while allowing invalid answers to reach capture', async kind => {
+  const format = answerFormat(kind);
+  const created = createDaemonAnswerModel(options({ messages: { async create(params) {
+    const content = params.messages[0]!.content;
+    expect(typeof content).toBe('string');
+    expect(JSON.parse(content as string).answerFormat).toEqual(format);
+    const schema = params.tools?.find(tool => tool.name === 'answer_work')?.input_schema;
+    expect(schema).toMatchObject({ properties: { answer: {} } });
+    return message([{ type: 'tool_use', id: 'invalid', name: 'answer_work', input: { answer: { notes: ['wrong shape'] } } }]);
+  } } }));
+  if (created.kind !== 'created') throw new Error(created.kind);
+  expect(await created.model.generate({ ...prompt, answerFormat: format }, signal())).toMatchObject({
+    kind: 'completed', response: { calls: [{ argumentsJson: JSON.stringify({ answer: { notes: ['wrong shape'] } }) }] },
+  });
 });

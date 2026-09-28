@@ -1,8 +1,7 @@
-import { z } from 'zod';
+import { ReviewFragmentSchema, reviewFields, minimumReviewFields } from './answer-format.js';
 import { AnswerJsonSchema } from './answer-json.js';
 import { toCanonicalBytes } from '../v2/durable-core/canonical/jcs.js';
 import type { JsonValue } from '../v2/durable-core/canonical/json-types.js';
-import { ReviewVerdictFindingSchema } from '../v2/durable-core/schemas/artifacts/review-verdict.js';
 import type { ValidatedFinding, QuestionIssue } from './contracts/answer-contract.js';
 
 /** Routing has a closed domain shape; original JSON remains evidence, never authority.
@@ -23,14 +22,7 @@ export type ReviewState = Readonly<{
   correction: ReviewFragment | null;
 }>;
 export const emptyReview: ReviewState = Object.freeze({ accepted: Object.freeze({}), correction: null });
-const keys = ['notes', 'verdict', 'confidence', 'findings', 'summary'] as const;
-const fragmentSchema = z.object({
-  notes: z.string().min(1).optional(),
-  verdict: z.enum(['clean', 'minor', 'blocking']).optional(),
-  confidence: z.enum(['high', 'medium', 'low']).optional(),
-  findings: z.array(ReviewVerdictFindingSchema).optional(),
-  summary: z.string().min(1).optional(),
-}).strict();
+const keys = reviewFields;
 export type ReviewParse =
   | Readonly<{ kind: 'valid'; fragment: ReviewFragment }>
   | Readonly<{ kind: 'invalid'; issues: readonly QuestionIssue[] }>;
@@ -38,13 +30,13 @@ export type ReviewParse =
 /** Only the pinned obligation chooses this decoder. Payload shape never selects a profile. */
 export function parseReviewFragment(input: unknown): ReviewParse {
   const json = AnswerJsonSchema.safeParse(input);
-  const parsed = fragmentSchema.safeParse(input);
+  const parsed = ReviewFragmentSchema.safeParse(input);
   if (!json.success || !parsed.success) return { kind: 'invalid', issues: parsed.success
     ? [{ kind: 'field', field: 'findings', reason: 'Provide JSON review fields.' }]
     : parsed.error.issues.map(issue => ({ kind: 'field',
-      field: keys.find(key => key === issue.path[0]) ?? 'notes', reason: issue.message })) };
+      field: keys.find(key => key === issue.path[0]) ?? 'notes', reason: `${issue.path.join('.') || 'answer'}: ${issue.message}` })) };
   const value = parsed.data;
-  if (!keys.some(key => value[key] !== undefined)) return { kind: 'invalid', issues: [
+  if (keys.filter(key => value[key] !== undefined).length < minimumReviewFields) return { kind: 'invalid', issues: [
     { kind: 'field', field: 'notes', reason: 'Provide at least one review field.' },
   ] };
   // Validation above proves the source is the strict field object with a findings array.

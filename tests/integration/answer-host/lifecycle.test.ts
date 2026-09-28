@@ -339,7 +339,7 @@ it('binds acknowledged deliveries and skips the factory when replaying a retaine
       expect(canonical).toMatchObject({ kind: 'delivered', delivery, epoch: owner.epoch.toString() });
       deliveries.push(delivery);
       return { kind: 'created', model: { async generate(input) {
-        expect(Object.keys(input).sort()).toEqual(['instruction', 'issues', 'retainedSummaries']);
+        expect(Object.keys(input).sort()).toEqual(['answerFormat', 'instruction', 'issues', 'retainedSummaries']);
         generated++;
         return { kind: 'completed', response: response('retained answer') };
       } } };

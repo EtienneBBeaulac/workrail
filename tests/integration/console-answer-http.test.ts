@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util';
+import { answerFormat } from '../../src/answer-v1/answer-format.js';
 /** Acceptance over mounted console HTTP routes and durable session storage. */
 import 'reflect-metadata';
 import type { AnswerMcpCompositionOptions } from '../../src/answer-v1/contracts/host-composition.js';
@@ -84,6 +86,7 @@ const questionViewSchema = z.object({
   kind: z.literal('question'),
   read: z.string(),
   instruction: z.string(),
+  answerFormat: z.unknown().refine(value => isDeepStrictEqual(value, answerFormat('notes')) || isDeepStrictEqual(value, answerFormat('review'))),
   retained: z.array(evidenceSummarySchema),
   issues: z.array(questionIssueSchema),
 }).strict();

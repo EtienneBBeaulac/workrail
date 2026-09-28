@@ -1,0 +1,701 @@
+{
+  "root": "/var/folders/d1/28j8k6jd08s9nd7lf1nvm2900000gp/T/workrail-format-manual-2hc95i",
+  "transcript": [
+    {
+      "name": "open_work",
+      "args": {
+        "workflowId": "proof",
+        "workspacePath": "/var/folders/d1/28j8k6jd08s9nd7lf1nvm2900000gp/T/workrail-format-manual-2hc95i",
+        "goal": "Record observed marker then review"
+      },
+      "result": {
+        "kind": "opened",
+        "recovery": "wr1.sess_7nnsgfty463jfek57vqj4dsjpq.evt_wzcckcqr7yzvnaamkmyhql7vie",
+        "view": {
+          "kind": "question",
+          "read": "<opaque-reference-1>",
+          "instruction": "Report the observed value",
+          "answerFormat": {
+            "kind": "notes",
+            "instructions": "Set answer to an object with a nonempty notes string. The example illustrates formatting only; replace it with your actual evidence.",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "notes": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "notes"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            },
+            "example": {
+              "notes": "Describe the work performed and evidence observed here."
+            }
+          },
+          "issues": [],
+          "retained": [],
+          "reply": "<opaque-reference-2>"
+        }
+      },
+      "isError": false
+    },
+    {
+      "name": "answer_work",
+      "args": {
+        "reply": "<opaque-reference-2>",
+        "answer": {
+          "notes": [
+            "MARKER observed"
+          ]
+        }
+      },
+      "result": {
+        "kind": "recorded",
+        "receipt": "evt_uktwprhl5e3fxlr34y6mwhlhz4",
+        "disposition": "rejected",
+        "view": {
+          "kind": "question",
+          "read": "<opaque-reference-1>",
+          "instruction": "Report the observed value",
+          "answerFormat": {
+            "kind": "notes",
+            "instructions": "Set answer to an object with a nonempty notes string. The example illustrates formatting only; replace it with your actual evidence.",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "notes": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "notes"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            },
+            "example": {
+              "notes": "Describe the work performed and evidence observed here."
+            }
+          },
+          "issues": [
+            {
+              "kind": "field",
+              "field": "notes",
+              "reason": "answer.notes: Expected string, received array"
+            }
+          ],
+          "retained": [
+            {
+              "receipt": "evt_uktwprhl5e3fxlr34y6mwhlhz4",
+              "description": "Retained answer"
+            }
+          ],
+          "reply": "<opaque-reference-3>"
+        }
+      },
+      "isError": false
+    },
+    {
+      "name": "inspect_work",
+      "args": {
+        "read": "<opaque-reference-1>",
+        "receipt": "evt_uktwprhl5e3fxlr34y6mwhlhz4"
+      },
+      "result": {
+        "receipt": "evt_uktwprhl5e3fxlr34y6mwhlhz4",
+        "disposition": "rejected",
+        "encoding": "canonical_json",
+        "chunk": "{\"notes\":[\"MARKER observed\"]}",
+        "kind": "complete"
+      },
+      "isError": false
+    },
+    {
+      "name": "inspect_work",
+      "args": {
+        "read": "<opaque-reference-1>"
+      },
+      "result": {
+        "kind": "question",
+        "read": "<opaque-reference-1>",
+        "instruction": "Report the observed value",
+        "answerFormat": {
+          "kind": "notes",
+          "instructions": "Set answer to an object with a nonempty notes string. The example illustrates formatting only; replace it with your actual evidence.",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "notes": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "notes"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          },
+          "example": {
+            "notes": "Describe the work performed and evidence observed here."
+          }
+        },
+        "issues": [
+          {
+            "kind": "field",
+            "field": "notes",
+            "reason": "answer.notes: Expected string, received array"
+          }
+        ],
+        "retained": [
+          {
+            "receipt": "evt_uktwprhl5e3fxlr34y6mwhlhz4",
+            "description": "Retained answer"
+          }
+        ]
+      },
+      "isError": false
+    },
+    {
+      "name": "recover_work",
+      "args": {
+        "recovery": "wr1.sess_7nnsgfty463jfek57vqj4dsjpq.evt_wzcckcqr7yzvnaamkmyhql7vie"
+      },
+      "result": {
+        "kind": "question",
+        "read": "<opaque-reference-1>",
+        "instruction": "Report the observed value",
+        "answerFormat": {
+          "kind": "notes",
+          "instructions": "Set answer to an object with a nonempty notes string. The example illustrates formatting only; replace it with your actual evidence.",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "notes": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "notes"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          },
+          "example": {
+            "notes": "Describe the work performed and evidence observed here."
+          }
+        },
+        "issues": [
+          {
+            "kind": "field",
+            "field": "notes",
+            "reason": "answer.notes: Expected string, received array"
+          }
+        ],
+        "retained": [
+          {
+            "receipt": "evt_uktwprhl5e3fxlr34y6mwhlhz4",
+            "description": "Retained answer"
+          }
+        ],
+        "reply": "<opaque-reference-3>"
+      },
+      "isError": false
+    },
+    {
+      "name": "answer_work",
+      "args": {
+        "reply": "<opaque-reference-3>",
+        "answer": {
+          "notes": "MARKER observed"
+        }
+      },
+      "result": {
+        "kind": "recorded",
+        "receipt": "evt_kc6oh722mkwmweizpb6otqnqoa",
+        "disposition": "accepted",
+        "view": {
+          "kind": "question",
+          "read": "<opaque-reference-1>",
+          "instruction": "Review the observations\n\n- Artifact contract: wr.contracts.review_verdict\n- Provide a valid wr.review_verdict artifact in continue_workflow's output.artifacts parameter (or top-level artifacts).\n- Required schema (verdict, confidence, findings, summary are mandatory):\n-   verdict: \"clean\" | \"minor\" | \"blocking\"\n-   confidence: \"high\" | \"medium\" | \"low\"\n-   findings: array of { severity, summary, findingCategory? } plus any enrichment fields (empty array for clean verdicts)\n-   summary: one-line overall verdict string\n- Enrichment fields allowed on each finding (optional): file, startLine, endLine, causalLink, remediation\n- Canonical format:\n- ```json\n- { \"output\": { \"artifacts\": [{ \"kind\": \"wr.review_verdict\", \"verdict\": \"minor\", \"confidence\": \"medium\", \"findings\": [{ \"severity\": \"minor\", \"summary\": \"Missing null check\", \"findingCategory\": \"correctness\", \"file\": \"src/foo.ts\", \"startLine\": 42, \"causalLink\": \"PR removed the guard\", \"remediation\": \"Restore null check\" }], \"summary\": \"Minor issues found\" }] } }\n- ```\n- For a clean review with no findings use: \"verdict\": \"clean\", \"findings\": []",
+          "answerFormat": {
+            "kind": "review",
+            "instructions": "Set answer to an object with one or more review fields. Valid partial answers are retained; all completionFields are needed to finish. To replace a retained value, repeat the proposed replacement on the next reply after the correction question. The example is fictional formatting guidance; supply your actual review, not these conclusions.",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "notes": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "verdict": {
+                  "type": "string",
+                  "enum": [
+                    "clean",
+                    "minor",
+                    "blocking"
+                  ]
+                },
+                "confidence": {
+                  "type": "string",
+                  "enum": [
+                    "high",
+                    "medium",
+                    "low"
+                  ]
+                },
+                "findings": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "severity": {
+                        "type": "string",
+                        "enum": [
+                          "critical",
+                          "major",
+                          "minor",
+                          "nit"
+                        ]
+                      },
+                      "summary": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "findingCategory": {
+                        "type": "string",
+                        "enum": [
+                          "correctness",
+                          "security",
+                          "architecture",
+                          "ux",
+                          "performance",
+                          "testing",
+                          "style"
+                        ],
+                        "description": "Category of the finding. Used by coordinators to route audit chains."
+                      }
+                    },
+                    "required": [
+                      "severity",
+                      "summary"
+                    ],
+                    "additionalProperties": true
+                  }
+                },
+                "summary": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#",
+              "minProperties": 1
+            },
+            "completionFields": [
+              "notes",
+              "verdict",
+              "confidence",
+              "findings",
+              "summary"
+            ],
+            "example": {
+              "notes": "Example only: inspected an input validation path.",
+              "verdict": "minor",
+              "confidence": "low",
+              "findings": [
+                {
+                  "severity": "minor",
+                  "summary": "Example only: an input error needs a clearer explanation."
+                }
+              ],
+              "summary": "Example only: a small improvement was identified."
+            }
+          },
+          "issues": [
+            {
+              "kind": "field",
+              "field": "notes",
+              "reason": "Provide notes."
+            },
+            {
+              "kind": "field",
+              "field": "verdict",
+              "reason": "Provide verdict."
+            },
+            {
+              "kind": "field",
+              "field": "confidence",
+              "reason": "Provide confidence."
+            },
+            {
+              "kind": "field",
+              "field": "findings",
+              "reason": "Provide findings."
+            },
+            {
+              "kind": "field",
+              "field": "summary",
+              "reason": "Provide summary."
+            }
+          ],
+          "retained": [
+            {
+              "receipt": "evt_uktwprhl5e3fxlr34y6mwhlhz4",
+              "description": "Retained answer"
+            },
+            {
+              "receipt": "evt_kc6oh722mkwmweizpb6otqnqoa",
+              "description": "Retained answer"
+            }
+          ],
+          "reply": "<opaque-reference-4>"
+        }
+      },
+      "isError": false
+    },
+    {
+      "name": "answer_work",
+      "args": {
+        "reply": "<opaque-reference-4>",
+        "answer": {
+          "verdict": "clean"
+        }
+      },
+      "result": {
+        "kind": "recorded",
+        "receipt": "evt_quuliv72nvgwzlixtse5uplf2a",
+        "disposition": "partial",
+        "view": {
+          "kind": "question",
+          "read": "<opaque-reference-1>",
+          "instruction": "Review the observations\n\n- Artifact contract: wr.contracts.review_verdict\n- Provide a valid wr.review_verdict artifact in continue_workflow's output.artifacts parameter (or top-level artifacts).\n- Required schema (verdict, confidence, findings, summary are mandatory):\n-   verdict: \"clean\" | \"minor\" | \"blocking\"\n-   confidence: \"high\" | \"medium\" | \"low\"\n-   findings: array of { severity, summary, findingCategory? } plus any enrichment fields (empty array for clean verdicts)\n-   summary: one-line overall verdict string\n- Enrichment fields allowed on each finding (optional): file, startLine, endLine, causalLink, remediation\n- Canonical format:\n- ```json\n- { \"output\": { \"artifacts\": [{ \"kind\": \"wr.review_verdict\", \"verdict\": \"minor\", \"confidence\": \"medium\", \"findings\": [{ \"severity\": \"minor\", \"summary\": \"Missing null check\", \"findingCategory\": \"correctness\", \"file\": \"src/foo.ts\", \"startLine\": 42, \"causalLink\": \"PR removed the guard\", \"remediation\": \"Restore null check\" }], \"summary\": \"Minor issues found\" }] } }\n- ```\n- For a clean review with no findings use: \"verdict\": \"clean\", \"findings\": []",
+          "answerFormat": {
+            "kind": "review",
+            "instructions": "Set answer to an object with one or more review fields. Valid partial answers are retained; all completionFields are needed to finish. To replace a retained value, repeat the proposed replacement on the next reply after the correction question. The example is fictional formatting guidance; supply your actual review, not these conclusions.",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "notes": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "verdict": {
+                  "type": "string",
+                  "enum": [
+                    "clean",
+                    "minor",
+                    "blocking"
+                  ]
+                },
+                "confidence": {
+                  "type": "string",
+                  "enum": [
+                    "high",
+                    "medium",
+                    "low"
+                  ]
+                },
+                "findings": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "severity": {
+                        "type": "string",
+                        "enum": [
+                          "critical",
+                          "major",
+                          "minor",
+                          "nit"
+                        ]
+                      },
+                      "summary": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "findingCategory": {
+                        "type": "string",
+                        "enum": [
+                          "correctness",
+                          "security",
+                          "architecture",
+                          "ux",
+                          "performance",
+                          "testing",
+                          "style"
+                        ],
+                        "description": "Category of the finding. Used by coordinators to route audit chains."
+                      }
+                    },
+                    "required": [
+                      "severity",
+                      "summary"
+                    ],
+                    "additionalProperties": true
+                  }
+                },
+                "summary": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#",
+              "minProperties": 1
+            },
+            "completionFields": [
+              "notes",
+              "verdict",
+              "confidence",
+              "findings",
+              "summary"
+            ],
+            "example": {
+              "notes": "Example only: inspected an input validation path.",
+              "verdict": "minor",
+              "confidence": "low",
+              "findings": [
+                {
+                  "severity": "minor",
+                  "summary": "Example only: an input error needs a clearer explanation."
+                }
+              ],
+              "summary": "Example only: a small improvement was identified."
+            }
+          },
+          "issues": [
+            {
+              "kind": "field",
+              "field": "notes",
+              "reason": "Provide notes."
+            },
+            {
+              "kind": "field",
+              "field": "confidence",
+              "reason": "Provide confidence."
+            },
+            {
+              "kind": "field",
+              "field": "findings",
+              "reason": "Provide findings."
+            },
+            {
+              "kind": "field",
+              "field": "summary",
+              "reason": "Provide summary."
+            }
+          ],
+          "retained": [
+            {
+              "receipt": "evt_uktwprhl5e3fxlr34y6mwhlhz4",
+              "description": "Retained answer"
+            },
+            {
+              "receipt": "evt_kc6oh722mkwmweizpb6otqnqoa",
+              "description": "Retained answer"
+            },
+            {
+              "receipt": "evt_quuliv72nvgwzlixtse5uplf2a",
+              "description": "Retained answer"
+            }
+          ],
+          "reply": "<opaque-reference-5>"
+        }
+      },
+      "isError": false
+    },
+    {
+      "name": "inspect_work",
+      "args": {
+        "read": "<opaque-reference-1>"
+      },
+      "result": {
+        "kind": "question",
+        "read": "<opaque-reference-1>",
+        "instruction": "Review the observations\n\n- Artifact contract: wr.contracts.review_verdict\n- Provide a valid wr.review_verdict artifact in continue_workflow's output.artifacts parameter (or top-level artifacts).\n- Required schema (verdict, confidence, findings, summary are mandatory):\n-   verdict: \"clean\" | \"minor\" | \"blocking\"\n-   confidence: \"high\" | \"medium\" | \"low\"\n-   findings: array of { severity, summary, findingCategory? } plus any enrichment fields (empty array for clean verdicts)\n-   summary: one-line overall verdict string\n- Enrichment fields allowed on each finding (optional): file, startLine, endLine, causalLink, remediation\n- Canonical format:\n- ```json\n- { \"output\": { \"artifacts\": [{ \"kind\": \"wr.review_verdict\", \"verdict\": \"minor\", \"confidence\": \"medium\", \"findings\": [{ \"severity\": \"minor\", \"summary\": \"Missing null check\", \"findingCategory\": \"correctness\", \"file\": \"src/foo.ts\", \"startLine\": 42, \"causalLink\": \"PR removed the guard\", \"remediation\": \"Restore null check\" }], \"summary\": \"Minor issues found\" }] } }\n- ```\n- For a clean review with no findings use: \"verdict\": \"clean\", \"findings\": []",
+        "answerFormat": {
+          "kind": "review",
+          "instructions": "Set answer to an object with one or more review fields. Valid partial answers are retained; all completionFields are needed to finish. To replace a retained value, repeat the proposed replacement on the next reply after the correction question. The example is fictional formatting guidance; supply your actual review, not these conclusions.",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "notes": {
+                "type": "string",
+                "minLength": 1
+              },
+              "verdict": {
+                "type": "string",
+                "enum": [
+                  "clean",
+                  "minor",
+                  "blocking"
+                ]
+              },
+              "confidence": {
+                "type": "string",
+                "enum": [
+                  "high",
+                  "medium",
+                  "low"
+                ]
+              },
+              "findings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "severity": {
+                      "type": "string",
+                      "enum": [
+                        "critical",
+                        "major",
+                        "minor",
+                        "nit"
+                      ]
+                    },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "findingCategory": {
+                      "type": "string",
+                      "enum": [
+                        "correctness",
+                        "security",
+                        "architecture",
+                        "ux",
+                        "performance",
+                        "testing",
+                        "style"
+                      ],
+                      "description": "Category of the finding. Used by coordinators to route audit chains."
+                    }
+                  },
+                  "required": [
+                    "severity",
+                    "summary"
+                  ],
+                  "additionalProperties": true
+                }
+              },
+              "summary": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "minProperties": 1
+          },
+          "completionFields": [
+            "notes",
+            "verdict",
+            "confidence",
+            "findings",
+            "summary"
+          ],
+          "example": {
+            "notes": "Example only: inspected an input validation path.",
+            "verdict": "minor",
+            "confidence": "low",
+            "findings": [
+              {
+                "severity": "minor",
+                "summary": "Example only: an input error needs a clearer explanation."
+              }
+            ],
+            "summary": "Example only: a small improvement was identified."
+          }
+        },
+        "issues": [
+          {
+            "kind": "field",
+            "field": "notes",
+            "reason": "Provide notes."
+          },
+          {
+            "kind": "field",
+            "field": "confidence",
+            "reason": "Provide confidence."
+          },
+          {
+            "kind": "field",
+            "field": "findings",
+            "reason": "Provide findings."
+          },
+          {
+            "kind": "field",
+            "field": "summary",
+            "reason": "Provide summary."
+          }
+        ],
+        "retained": [
+          {
+            "receipt": "evt_uktwprhl5e3fxlr34y6mwhlhz4",
+            "description": "Retained answer"
+          },
+          {
+            "receipt": "evt_kc6oh722mkwmweizpb6otqnqoa",
+            "description": "Retained answer"
+          },
+          {
+            "receipt": "evt_quuliv72nvgwzlixtse5uplf2a",
+            "description": "Retained answer"
+          }
+        ]
+      },
+      "isError": false
+    },
+    {
+      "name": "answer_work",
+      "args": {
+        "reply": "<opaque-reference-5>",
+        "answer": {
+          "notes": "Compared observation with marker",
+          "confidence": "high",
+          "findings": [],
+          "summary": "Marker matches"
+        }
+      },
+      "result": {
+        "kind": "recorded",
+        "receipt": "evt_est2aap2x7hytxkhddbbrrec3m",
+        "disposition": "accepted",
+        "view": {
+          "kind": "finished",
+          "read": "<opaque-reference-1>",
+          "retained": [
+            {
+              "receipt": "evt_uktwprhl5e3fxlr34y6mwhlhz4",
+              "description": "Retained answer"
+            },
+            {
+              "receipt": "evt_kc6oh722mkwmweizpb6otqnqoa",
+              "description": "Retained answer"
+            },
+            {
+              "receipt": "evt_quuliv72nvgwzlixtse5uplf2a",
+              "description": "Retained answer"
+            },
+            {
+              "receipt": "evt_est2aap2x7hytxkhddbbrrec3m",
+              "description": "Retained answer"
+            }
+          ],
+          "execution": {
+            "kind": "completed"
+          },
+          "taskOutcome": "unknown"
+        }
+      },
+      "isError": false
+    }
+  ]
+}
