@@ -118,7 +118,7 @@ export async function inspectionView(engine: AnswerReadEngine, state: HostState,
     if (pinned.isErr() || pinned.value?.sourceKind !== 'v1_pinned' || !hasWorkflowDefinitionShape(pinned.value.definition))
         return { kind: 'unavailable', detail: 'Missing pinned workflow' };
     const workflow = getCachedWorkflow(state.run.data.workflowHash, pinned.value.definition);
-    const rendered = renderPendingPrompt({ workflow, stepId: pending.stepId, loopPath: pending.loopPath, truth: state.truth, runId: asRunId(state.run.scope.runId), nodeId: asNodeId(node), rehydrateOnly: false, cleanResponseFormat: true });
+    const rendered = renderPendingPrompt({ workflow, stepId: pending.stepId, loopPath: pending.loopPath, truth: state.truth, runId: asRunId(state.run.scope.runId), nodeId: asNodeId(node), rehydrateOnly: false, cleanResponseFormat: true, outputGuidance: 'answer_fields' });
     if (rendered.isErr())
         return { kind: 'unavailable', detail: rendered.error.message };
     const step = pinned.value.definition.steps.find(s => s.id === pending.stepId);

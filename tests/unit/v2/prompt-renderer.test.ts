@@ -453,6 +453,29 @@ describe('renderPendingPrompt', () => {
   });
 
   describe('output contract guidance (system-injected)', () => {
+    it.each([false, true])('keeps review guidance specific to the output protocol with clean format %s', (cleanResponseFormat) => {
+      const authored = 'Audit continue_workflow usage and preserve {{subject}} evidence.';
+      const workflow = createWorkflow({
+        id: 'review-guidance', name: 'Review', description: 'Review guidance', version: '1.0.0',
+        steps: [{ id: 'review', title: 'Review', prompt: authored,
+          outputContract: { contractRef: 'wr.contracts.review_verdict', required: true } }],
+      }, createBundledSource());
+      const args = { workflow, stepId: 'review', loopPath: [],
+        truth: { events: [], manifest: [] }, runId: 'run_1', nodeId: 'node_1',
+        rehydrateOnly: false, cleanResponseFormat };
+      const legacy = renderPendingPrompt(args);
+      const explicitLegacy = renderPendingPrompt({ ...args, outputGuidance: 'artifact_submission' });
+      const answers = renderPendingPrompt({ ...args, outputGuidance: 'answer_fields' });
+      expect(legacy.isOk() && explicitLegacy.isOk() && answers.isOk()).toBe(true);
+      if (legacy.isErr() || explicitLegacy.isErr() || answers.isErr()) return;
+      expect(explicitLegacy.value).toEqual(legacy.value);
+      expect(legacy.value.prompt).toContain("continue_workflow's output.artifacts");
+      expect(legacy.value.prompt).toContain('findings[].severity: critical | major | minor | nit');
+      expect(answers.value.prompt).toBe('Audit continue_workflow usage and preserve [unset: subject] evidence.');
+      expect(answers.value.title).toBe(legacy.value.title);
+      expect(answers.value.stepId).toBe(legacy.value.stepId);
+    });
+
     it('appends system OUTPUT REQUIREMENTS for outputContract', () => {
       const workflowWithContract = createWorkflow(
         {

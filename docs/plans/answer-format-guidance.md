@@ -29,3 +29,9 @@ A `question` response includes `answerFormat.kind`, `instructions`, `schema`, an
 For a notes question, submit `{"notes":"Actual observations"}` as `answer`. Arrays of notes are invalid; combine the observations into a string. For a review question, any nonempty subset of the review fields can be submitted. `completionFields` names the fields needed across retained contributions; `issues` identifies what is still missing or requires correction. Finding objects may carry enrichment beyond their validated routing fields.
 
 Examples illustrate structure only. They are not evidence, default verdicts, or claims that work has been performed. An invalid domain answer is still recorded with a rejection receipt and a follow-up question. The permissive transport schema exists to retain those answers; it does not replace the question's domain schema.
+
+## Submission guidance follows the question protocol
+
+For the answers profile, `instruction` contains the rendered task prompt and `answerFormat` supplies the submission contract. WorkRail does not append legacy `continue_workflow` or `output.artifacts` guidance to an answers question. Authored task text, context substitution and validation requirements remain intact. Inspection, partial answers and recovery publish the same pinned format.
+
+Legacy artifact callers continue to receive their existing artifact instructions. This is a presentation boundary; it does not change artifact validation, output retention, execution authority or workflow definitions.

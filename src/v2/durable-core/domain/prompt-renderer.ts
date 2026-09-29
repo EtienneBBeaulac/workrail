@@ -497,6 +497,9 @@ function loadRecoveryProjections(args: {
  * This is the single seam used by all prompt construction call sites to prevent drift.
  * Lock: Recap recovery (contract §315-350, locks §1040-1051)
  */
+/** Artifact guidance belongs to token-based delivery; answer fields are described by answerFormat. */
+export type OutputGuidance = 'artifact_submission' | 'answer_fields';
+
 export function renderPendingPrompt(args: {
   readonly workflow: Workflow;
   readonly stepId: string;
@@ -513,6 +516,8 @@ export function renderPendingPrompt(args: {
    * than read directly from process.env inside this pure rendering function.
    */
   readonly cleanResponseFormat?: boolean;
+  /** Defaults to legacy artifact submission for existing callers. */
+  readonly outputGuidance?: OutputGuidance;
 }): Result<StepMetadata, PromptRenderError> {
   // Extract base step metadata.
   // Fail-fast: a missing step is a structural invariant violation, not a "use a fallback" situation.
@@ -740,7 +745,12 @@ export function renderPendingPrompt(args: {
     : '';
   
   const isAutonomous = sessionContext.is_autonomous === true || sessionContext.is_autonomous === 'true';
-  const contractRequirements = formatOutputContractRequirements(outputContract, { isAutonomous });
+  const contractRequirements = ((): readonly string[] => {
+    switch (args.outputGuidance ?? 'artifact_submission') {
+      case 'answer_fields': return [];
+      case 'artifact_submission': return formatOutputContractRequirements(outputContract, { isAutonomous });
+    }
+  })();
   const contractSection = contractRequirements.length > 0
     ? cleanResponseFormat
       ? `\n\n${contractRequirements.map(r => `- ${r}`).join('\n')}`
