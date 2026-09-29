@@ -6,7 +6,13 @@ import { createAnswerWorker } from '../../../src/answer-v1/worker.js';
 import { answerFormat } from '../../../src/answer-v1/answer-format.js';
 import type { WorkView } from '../../../src/answer-v1/contracts/answer-contract.js';
 const signal = () => AbortSignal.timeout(10000);
-function question(view: WorkView) { if (view.kind !== 'question') throw new Error(view.kind); return view; }
+function question(view: WorkView) {
+  if (view.kind !== 'question') throw new Error(view.kind);
+  expect(view.instruction).not.toContain('continue_workflow');
+  expect(view.instruction).not.toContain('output.artifacts');
+  expect(view.instruction).not.toContain('Artifact contract:');
+  return view;
+}
 
 it('publishes the pinned format across rejected answers, inspection, restart and contract changes', async () => {
   const root = await mkdtemp(join(tmpdir(), 'answer-format-'));
@@ -49,7 +55,16 @@ it('publishes the pinned format across rejected answers, inspection, restart and
     if (partial.kind !== 'recorded') throw new Error(partial.kind);
     expect(partial.disposition).toBe('partial');
     expect(question(partial.view).answerFormat).toEqual(answerFormat('review'));
-    const done = await worker.worker.answer(question(partial.view).reply, { kind: 'unvalidated_json', value: { notes: 'Reviewed', confidence: 'low', findings: [], summary: 'Complete' } }, signal());
+    const readOnlyReview = await worker.inspector.inspect(partial.view.read, signal());
+    expect(readOnlyReview).toMatchObject({ kind: 'question', instruction: 'Review the evidence', answerFormat: answerFormat('review') });
+    expect(readOnlyReview).not.toHaveProperty('reply');
+    await worker.close(signal());
+    worker = await boot();
+    const resumedReview = await worker.recovery.recover(open.recovery, signal());
+    if (resumedReview.kind === 'unavailable') throw new Error(resumedReview.reason);
+    expect(question(resumedReview).instruction).toBe('Review the evidence');
+    expect(question(resumedReview).answerFormat).toEqual(answerFormat('review'));
+    const done = await worker.worker.answer(question(resumedReview).reply, { kind: 'unvalidated_json', value: { notes: 'Reviewed', confidence: 'low', findings: [], summary: 'Complete' } }, signal());
     if (done.kind !== 'recorded') throw new Error(done.kind);
     expect(done.disposition).toBe('accepted');
     expect(question(done.view).answerFormat).toEqual(answerFormat('notes'));
