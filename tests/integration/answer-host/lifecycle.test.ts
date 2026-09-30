@@ -125,8 +125,39 @@ it('unbound workers refuse active and released host sessions, and recover their 
     await scheduler.close(signal());
 }));
 
+it('pins an opened workflow through registry replacement while new work uses the replacement', () => fixture(async config => {
+  const original = await createAnswerWorker(config, signal());
+  if (original.kind !== 'created') throw new Error(original.kind);
+  const opened = await original.opener.open({ workflowId: 'lifecycle', goal: 'original', workspacePath: config.workflowStoragePath }, signal());
+  if (opened.kind !== 'opened' || opened.view.kind !== 'question') throw new Error(opened.kind);
+  const first = await original.worker.answer(opened.view.reply, { kind: 'notes', notes: 'original first' }, signal());
+  if (first.kind !== 'recorded' || first.view.kind !== 'question') throw new Error(first.kind);
+  expect(first.view.instruction).toContain('Second notes');
+  await original.close(signal());
+  await writeFile(join(config.workflowStoragePath, 'lifecycle.json'), JSON.stringify({
+    id: 'lifecycle', name: 'Replacement', description: 'Replacement workflow', version: '2.0.0',
+    steps: [{ id: 'replacement', title: 'Replacement', prompt: 'Replacement notes' }],
+  }));
+  const fresh = await createAnswerWorker(config, signal());
+  if (fresh.kind !== 'created') throw new Error(fresh.kind);
+  try {
+    const recovered = await fresh.recovery.recover(opened.recovery, signal());
+    expect(recovered).toEqual(first.view);
+    if (recovered.kind !== 'question') throw new Error(recovered.kind);
+    const replacement = await fresh.opener.open({ workflowId: 'lifecycle', goal: 'replacement', workspacePath: config.workflowStoragePath }, signal());
+    if (replacement.kind !== 'opened' || replacement.view.kind !== 'question') throw new Error(replacement.kind);
+    expect(replacement.view.instruction).toContain('Replacement notes');
+    expect(replacement.view.instruction).not.toContain('Second notes');
+    expect(await fresh.worker.answer(replacement.view.reply, { kind: 'notes', notes: 'replacement finished' }, signal()))
+      .toMatchObject({ kind: 'recorded', disposition: 'accepted', view: { kind: 'finished' } });
+    expect(await fresh.worker.answer(recovered.reply, { kind: 'notes', notes: 'original second' }, signal()))
+      .toMatchObject({ kind: 'recorded', disposition: 'accepted', view: { kind: 'finished' } });
+  } finally { await fresh.close(signal()); }
+}));
+
 type AnswerTransport = Readonly<{
   client: Client;
+  serverTransport: InMemoryTransport;
   composed: Awaited<ReturnType<typeof composeServer>>;
   call(name: string, args: Record<string, unknown>): Promise<any>;
 }>;
@@ -146,7 +177,7 @@ async function withAnswerTransport(config: AnswerHostConfig, run: (transport: An
       const content = result.content as { type: string; text: string }[];
       return JSON.parse(content[0]!.text);
     };
-    await run({ client, composed, call });
+    await run({ client, serverTransport, composed, call });
   } finally {
     try { await client.close(); await composed?.server.close(); }
     finally { if (oldProfile === undefined) delete process.env.WORKRAIL_AGENT_PROFILE; else process.env.WORKRAIL_AGENT_PROFILE = oldProfile; }
@@ -178,6 +209,36 @@ it.each([{ notes: 42, unknownField: 'kept' }, { notes: 'attempt', approval: true
     expect(repaired).toMatchObject({ kind: 'recorded', disposition: 'accepted', view: { kind: 'question' } });
     expect(await call('answer_work', { reply: repaired.view.reply, answer: { notes: 'last' } })).toMatchObject({ kind: 'recorded', view: { kind: 'finished' } });
   })));
+
+it('MCP retries a lost committed response without consuming the next assignment', () => fixture(config => withAnswerTransport(config, async ({ client, serverTransport, call }) => {
+  const opened = await call('open_work', { workflowId: 'lifecycle', goal: 'lost response', workspacePath: config.workflowStoragePath });
+  const answer = { notes: 'Committed before response loss.' };
+  const send = serverTransport.send.bind(serverTransport);
+  const cancelled = new AbortController();
+  let dropped: unknown;
+  serverTransport.send = async (message, options) => {
+    if ('result' in message && dropped === undefined) {
+      dropped = message.result;
+      cancelled.abort(new Error('Test transport dropped the committed response'));
+      return;
+    }
+    await send(message, options);
+  };
+  await expect(client.callTool({ name: 'answer_work', arguments: { reply: opened.view.reply, answer } }, undefined, { signal: cancelled.signal }))
+    .rejects.toThrow('Test transport dropped the committed response');
+  serverTransport.send = send;
+  expect(dropped).toBeDefined();
+  const retained = dropped as { content: { text: string }[] };
+  const committed = JSON.parse(retained.content[0]!.text);
+  expect(committed).toMatchObject({ kind: 'recorded', disposition: 'accepted', view: { kind: 'question' } });
+  const replay = await call('answer_work', { reply: opened.view.reply, answer });
+  expect(replay).toMatchObject({ kind: 'replay', receipt: committed.receipt });
+  expect(replay).not.toHaveProperty('reply');
+  const evidence = await call('inspect_work', { read: committed.view.read, receipt: committed.receipt });
+  expect(JSON.parse(evidence.chunk)).toEqual(answer);
+  expect(await call('answer_work', { reply: committed.view.reply, answer: { notes: 'Second assignment.' } }))
+    .toMatchObject({ kind: 'recorded', disposition: 'accepted', view: { kind: 'finished' } });
+})));
 
 it('MCP shutdown drains accepted requests and refuses new requests', () => fixture(config => withAnswerTransport(config, async ({ client, composed }) => {
   let enter!: () => void, release!: () => void;

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { isAbsolute, normalize, resolve } from 'node:path';
+import { isAbsolute, normalize, resolve, relative, sep, type PlatformPath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const STAGES = ['A', 'B'] as const;
@@ -438,16 +438,20 @@ export function deepFreeze<T>(obj: T): DeepReadonly<T> {
   return obj as DeepReadonly<T>;
 }
 
-function normalizeWorkspacePath(rawPath: string): string {
-  const norm = normalize(rawPath);
-  return norm.length > 1 && norm.endsWith('/') ? norm.replace(/\/+$/, '') : norm;
-}
-
-function checkWorkspacePathsOverlap(normA: string, normB: string): boolean {
-  if (normA === normB) return true;
-  const prefixA = normA === '/' ? '/' : normA + '/';
-  const prefixB = normB === '/' ? '/' : normB + '/';
-  return normB.startsWith(prefixA) || normA.startsWith(prefixB);
+// Relative paths honor the host separator, roots and Windows case semantics.
+// This is lexical isolation only; it does not resolve symlinks.
+export function workspacePathRelation(
+  pathA: string,
+  pathB: string,
+  paths: Pick<PlatformPath, 'relative' | 'isAbsolute' | 'sep'> = { relative, isAbsolute, sep },
+): 'same' | 'overlapping' | 'separate' {
+  const fromA = paths.relative(pathA, pathB);
+  if (fromA === '') return 'same';
+  const isDescendant = (rel: string): boolean =>
+    !paths.isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${paths.sep}`);
+  return isDescendant(fromA) || isDescendant(paths.relative(pathB, pathA))
+    ? 'overlapping'
+    : 'separate';
 }
 
 export function extractManifestArtifacts(
@@ -565,7 +569,6 @@ export function validateStudyManifest(input: unknown): DeclarativeValidationResu
   // 4. Pairs validation (armOrder, observations, runIds, workspacePaths)
   const seenRunIds = new Set<string>();
   const seenObsValues = new Set<string>();
-  const seenNormWorkspacePaths = new Set<string>();
   const recordedWorkspaces: string[] = [];
 
   for (const pair of manifest.pairs) {
@@ -597,26 +600,21 @@ export function validateStudyManifest(input: unknown): DeclarativeValidationResu
         });
         continue;
       }
-      const norm = normalizeWorkspacePath(rawWs);
-      if (seenNormWorkspacePaths.has(norm)) {
-        errors.push({
-          kind: 'duplicate_workspace_path',
-          workspacePath: norm,
-        });
-      } else {
-        for (const recorded of recordedWorkspaces) {
-          if (checkWorkspacePathsOverlap(recorded, norm)) {
-            errors.push({
-              kind: 'overlapping_workspace_path',
-              pathA: recorded,
-              pathB: norm,
-              reason: 'Workspace paths have ancestor/descendant lexical nesting',
-            });
-          }
+      const norm = normalize(rawWs);
+      for (const recorded of recordedWorkspaces) {
+        const relation = workspacePathRelation(recorded, norm);
+        if (relation === 'same') {
+          errors.push({ kind: 'duplicate_workspace_path', workspacePath: norm });
+        } else if (relation === 'overlapping') {
+          errors.push({
+            kind: 'overlapping_workspace_path',
+            pathA: recorded,
+            pathB: norm,
+            reason: 'Workspace paths have ancestor/descendant lexical nesting',
+          });
         }
-        seenNormWorkspacePaths.add(norm);
-        recordedWorkspaces.push(norm);
       }
+      recordedWorkspaces.push(norm);
     }
 
     // Expected observations within pair

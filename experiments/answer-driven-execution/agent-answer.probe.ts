@@ -286,6 +286,82 @@ it('control: the actual notes profile completes both steps of the notes workflow
   expect(await f.notes()).toEqual(['First observation.', 'Second observation.']);
 }));
 
+it('notes acceptance preserves consumed-reference conflicts and the original receipt through restart', () => fixture(async f => {
+  await f.boot('answers');
+  const opened = openedSchema.parse(await f.call('open_work', { workflowId: 'answer-notes', workspacePath: f.root, goal: 'Preserve exact notes.' }));
+  const originalReply = question(opened.view).reply;
+  const answer = { notes: 'Exact original notes.\nSecond line.' };
+  const first = recordedSchema.parse(await f.call('answer_work', { reply: originalReply, answer }));
+  expect(first.disposition).toBe('accepted');
+  await f.boot('answers');
+  const before = await f.sessionFiles();
+  const conflict = await f.call('answer_work', { reply: originalReply, answer: { notes: 'Different payload.' } });
+  expect(conflict).toMatchObject({ kind: 'conflict', original: first.receipt });
+  assertNoReply(conflict);
+  expect(await f.sessionFiles()).toEqual(before);
+  expect(JSON.parse((await drainReceipt(f.call, first.view.read, first.receipt)).reassembled)).toEqual(answer);
+  expect(await f.call('answer_work', { reply: originalReply, answer })).toMatchObject({ kind: 'replay', receipt: first.receipt });
+  expect(await f.sessionFiles()).toEqual(before);
+  const finished = recordedSchema.parse(await f.call('answer_work', { reply: question(first.view).reply, answer: { notes: 'Second observation.' } }));
+  expect(finished.view).toMatchObject({ kind: 'finished', execution: { kind: 'completed' } });
+  expect(await f.notes()).toEqual([answer.notes, 'Second observation.']);
+}));
+
+it('notes acceptance retains rejected payload and correction authority across MCP restart', () => fixture(async f => {
+  await f.boot('answers');
+  const opened = openedSchema.parse(await f.call('open_work', { workflowId: 'answer-notes', workspacePath: f.root, goal: 'Correct retained notes.' }));
+  const originalReply = question(opened.view).reply;
+  const invalid = { notes: 42 };
+  const rejected = recordedSchema.parse(await f.call('answer_work', { reply: originalReply, answer: invalid }));
+  expect(rejected.disposition).toBe('rejected');
+  expect(question(rejected.view).instruction).toBe(question(opened.view).instruction);
+  const correctionReply = question(rejected.view).reply;
+  await f.boot('answers');
+  const before = await f.sessionFiles();
+  expect(await f.call('answer_work', { reply: originalReply, answer: invalid })).toMatchObject({ kind: 'replay', receipt: rejected.receipt });
+  expect(JSON.parse((await drainReceipt(f.call, rejected.view.read, rejected.receipt)).reassembled)).toEqual(invalid);
+  expect(await f.sessionFiles()).toEqual(before);
+  const recovered = question(viewSchema.parse(await f.call('recover_work', { recovery: opened.recovery })));
+  expect(recovered.instruction).toBe(question(rejected.view).instruction);
+  expect(recovered.reply).toBe(correctionReply);
+  const corrected = recordedSchema.parse(await f.call('answer_work', { reply: correctionReply, answer: { notes: 'Corrected first.' } }));
+  expect(corrected.disposition).toBe('accepted');
+  expect(question(corrected.view).instruction).toContain('Record the second observation.');
+  const finished = recordedSchema.parse(await f.call('answer_work', { reply: question(corrected.view).reply, answer: { notes: 'Second.' } }));
+  expect(finished.view).toMatchObject({ kind: 'finished', execution: { kind: 'completed' } });
+  expect(JSON.parse((await drainReceipt(f.call, rejected.view.read, rejected.receipt)).reassembled)).toEqual(invalid);
+  expect(await f.notes()).toEqual(['Corrected first.', 'Second.']);
+}));
+
+it('notes acceptance resolves simultaneous divergent answers to one commit and its original receipt', () => fixture(async f => {
+  await f.boot('answers');
+  const opened = openedSchema.parse(await f.call('open_work', { workflowId: 'answer-notes', workspacePath: f.root, goal: 'Resolve racing answers.' }));
+  const answers = [{ notes: 'Race A.' }, { notes: 'Race B.' }];
+  const results = await Promise.all(answers.map(answer => f.call('answer_work', { reply: question(opened.view).reply, answer })));
+  const committed = results.filter(result => recordedSchema.safeParse(result).success).map(result => recordedSchema.parse(result));
+  expect(committed).toHaveLength(1);
+  const winner = committed[0]!;
+  expect(winner.disposition).toBe('accepted');
+  const loserIndex = results.findIndex(result => !recordedSchema.safeParse(result).success);
+  expect(loserIndex).toBeGreaterThanOrEqual(0);
+  const loser = z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('conflict'), original: z.literal(winner.receipt), current: viewSchema }).strict(),
+    z.object({ kind: z.literal('unconfirmed'), reason: z.literal('commit_uncertain') }).strict(),
+  ]).parse(results[loserIndex]);
+  assertNoReply(loser);
+  const beforeRetry = await f.sessionFiles();
+  const settled = await f.call('answer_work', { reply: question(opened.view).reply, answer: answers[loserIndex] });
+  expect(settled).toMatchObject({ kind: 'conflict', original: winner.receipt });
+  assertNoReply(settled);
+  expect(await f.sessionFiles()).toEqual(beforeRetry);
+  const winnerPayload = JSON.parse((await drainReceipt(f.call, winner.view.read, winner.receipt)).reassembled);
+  expect(answers).toContainEqual(winnerPayload);
+  expect(await f.notes()).toEqual([winnerPayload.notes]);
+  expect(recordedSchema.parse(await f.call('answer_work', { reply: question(winner.view).reply, answer: { notes: 'Final.' } })).view)
+    .toMatchObject({ kind: 'finished', execution: { kind: 'completed' } });
+  expect(await f.notes()).toEqual([winnerPayload.notes, 'Final.']);
+}));
+
 it('retains a partial review across MCP recomposition and materializes the exact full artifact', () => fixture(async f => {
   await f.boot('answers');
   const opened = openedSchema.parse(await f.call('open_work', { workflowId: 'answer-review', workspacePath: f.root, goal: 'Review.' }));
@@ -566,6 +642,7 @@ it('refuses wrong-operation and corrupted capabilities without consuming a valid
     const refusal = await f.call(name, args);
     expect(refusal).toMatchObject({ kind });
     assertNoReply(refusal);
+    expect(JSON.stringify(refusal)).not.toContain('Must not be retained.');
     expect(await f.sessionFiles()).toEqual(before);
   }
   const inspected = await f.call('inspect_work', { read: initial.read });
@@ -737,11 +814,13 @@ it('refuses cross-scope receipt and cursor reads across unbound runs while prese
   const crossReadAB = evidenceReadSchema.parse(await f.call('inspect_work', { read: pendingA.read, receipt: firstB.receipt }));
   assertNoReply(crossReadAB);
   expect(crossReadAB).toEqual({ kind: 'refused', reason: 'invalid_scope' });
+  expect(JSON.stringify(crossReadAB)).not.toContain('Observation B payload');
   expect(await f.sessionFiles()).toEqual(filesBeforeRefusals);
 
   const crossReadBA = evidenceReadSchema.parse(await f.call('inspect_work', { read: pendingB.read, receipt: firstA.receipt }));
   assertNoReply(crossReadBA);
   expect(crossReadBA).toEqual({ kind: 'refused', reason: 'invalid_scope' });
+  expect(JSON.stringify(crossReadBA)).not.toContain('Observation A payload');
   expect(await f.sessionFiles()).toEqual(filesBeforeRefusals);
 
   // Cursor is receipt-bound within the same run: crossing cursors between two receipts in Run A refuses
