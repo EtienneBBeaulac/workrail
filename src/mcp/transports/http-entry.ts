@@ -2,7 +2,7 @@
  * HTTP transport entry point for WorkRail MCP server.
  * 
  * This is the bot service use case — connects over HTTP using the MCP SDK's
- * StreamableHTTPServerTransport. No workspace roots (bot passes explicit
+ * NodeStreamableHTTPServerTransport. No workspace roots (bot passes explicit
  * workspacePath on start_workflow).
  * 
  * Philosophy:
@@ -52,11 +52,11 @@ export async function startHttpServer(port: number): Promise<HttpServerHandle> {
   registerGracefulShutdown(shutdown);
   wireShutdownHooks({ onBeforeTerminate: shutdown });
 
-  const { StreamableHTTPServerTransport } = await import(
-    '@modelcontextprotocol/sdk/server/streamableHttp.js'
+  const { NodeStreamableHTTPServerTransport } = await import(
+    '@modelcontextprotocol/node'
   );
 
-  const transport = new StreamableHTTPServerTransport({
+  const transport = new NodeStreamableHTTPServerTransport({
     sessionIdGenerator: () => crypto.randomUUID(),
     enableJsonResponse: true, // Simple request/response, not SSE streaming
   });

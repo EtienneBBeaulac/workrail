@@ -52,7 +52,7 @@ export type V2WorkflowToolName =
 /**
  * MCP SDK result type (matches MCP SDK expectations).
  *
- * Note: Intentionally duplicated from @modelcontextprotocol/sdk to avoid coupling
+ * Note: Intentionally independent of SDK wire types to avoid coupling
  * registry modules to the SDK. The SDK is dynamically imported only at the server
  * composition root (server.ts). If the SDK's CallToolResult changes, update this
  * type to match.
