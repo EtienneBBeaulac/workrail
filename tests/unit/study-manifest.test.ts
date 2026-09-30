@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, normalize, posix, win32 } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import {
+  workspacePathRelation,
   computeSha256,
   validateStudyManifest,
   verifyManifestArtifacts,
@@ -23,7 +24,7 @@ function createSyntheticStore() {
   const fileStore = new Map<string, string | Uint8Array>();
   let readCount = 0;
   const register = (path: string, content: string | Uint8Array): string => {
-    fileStore.set(path, content);
+    fileStore.set(normalize(path), content);
     return computeSha256(content);
   };
   const reader: ArtifactReader = (path: string, signal?: AbortSignal) => {
@@ -33,7 +34,7 @@ function createSyntheticStore() {
       err.name = 'AbortError';
       throw err;
     }
-    const data = fileStore.get(path);
+    const data = fileStore.get(normalize(path));
     if (data === undefined) throw new Error(`Synthetic file not found: ${path}`);
     return data;
   };
@@ -260,9 +261,9 @@ describe('study manifest and artifact verifier', () => {
 
       // Enumerate producer inputs, independently of the verifier's artifact extractor.
       for (const [path, original] of fileStore) {
-        fileStore.set(path, 'changed artifact bytes');
+        fileStore.set(normalize(path), 'changed artifact bytes');
         const corrupt = await verifyStudyManifest(manifest, reader);
-        fileStore.set(path, original);
+        fileStore.set(normalize(path), original);
         expect(corrupt.kind, path).toBe('rejected');
         if (corrupt.kind !== 'rejected') throw new Error(`Unchecked artifact: ${path}`);
         expect(corrupt.phase).toBe('artifacts');
@@ -275,16 +276,16 @@ describe('study manifest and artifact verifier', () => {
     const { fileStore, register, reader } = createSyntheticStore();
     const manifest = buildStageAManifest(register);
     const bytes = new Uint8Array([0, 255, 128, 195, 40, 10]);
-    fileStore.set(manifest.executables.baseline.path, bytes);
+    fileStore.set(normalize(manifest.executables.baseline.path), bytes);
     // The expected digest does not use the implementation helper under test.
     manifest.executables.baseline.sha256 = createHash('sha256').update(bytes).digest('hex');
     expect((await verifyStudyManifest(manifest, reader)).kind).toBe('manifest_verified');
-    fileStore.set(manifest.executables.baseline.path, new Uint8Array([0, 255, 128, 195, 41, 10]));
+    fileStore.set(normalize(manifest.executables.baseline.path), new Uint8Array([0, 255, 128, 195, 41, 10]));
     const changed = await verifyStudyManifest(manifest, reader);
     expect(changed.kind).toBe('rejected');
     if (changed.kind !== 'rejected') throw new Error('Expected binary mismatch');
     expect(changed.errors).toContainEqual(expect.objectContaining({
-      kind: 'hash_mismatch', path: manifest.executables.baseline.path,
+      kind: 'hash_mismatch', path: normalize(manifest.executables.baseline.path),
     }));
   });
 
@@ -512,7 +513,7 @@ describe('study manifest and artifact verifier', () => {
         if (callCount === 2) {
           controller.abort('aborted-after-2-reads');
         }
-        return fileStore.get(path) ?? 'bytes';
+        return fileStore.get(normalize(path)) ?? 'bytes';
       };
 
       const res = await verifyStudyManifest(manifest, abortingReader, controller.signal);
@@ -572,7 +573,7 @@ describe('study manifest and artifact verifier', () => {
       const artifactResult = await verifyManifestArtifacts(declResult.manifest, reader);
       expect(artifactResult.kind).toBe('verified');
       if (artifactResult.kind === 'verified') {
-        const sharedArtifact = artifactResult.artifacts.find(a => a.path === manifest.workflows.baseline.path);
+        const sharedArtifact = artifactResult.artifacts.find(a => a.path === normalize(manifest.workflows.baseline.path));
         expect(sharedArtifact).toBeDefined();
         expect(sharedArtifact?.roles).toContain('workflow_baseline');
         expect(sharedArtifact?.roles).toContain('workflow_candidate');
@@ -581,6 +582,23 @@ describe('study manifest and artifact verifier', () => {
   });
 
   describe('lexical directory isolation and path aliasing', () => {
+    it.each([
+      [posix, '/study/base', '/study/base/nested', 'overlapping'],
+      [posix, '/study/base/', '/study/base', 'same'],
+      [posix, '/study/base', '/study/base-sibling', 'separate'],
+      [win32, 'C:/study/base', 'C:/study/base/nested', 'overlapping'],
+      [win32, 'C:/study/base/nested', 'C:/study/base', 'overlapping'],
+      [win32, 'C:/study/base/', 'C:/study/base', 'same'],
+      [win32, 'C:/study/BASE', 'c:/study/base', 'same'],
+      [win32, 'C:/study/base', 'C:/study/base-sibling', 'separate'],
+      [win32, 'C:/study/base', 'D:/study/base', 'separate'],
+      [win32, 'C:/', 'C:/study/base', 'overlapping'],
+      [win32, '//server/share/study', '//server/share/study/nested', 'overlapping'],
+      [win32, '//server/share/study', '//other/share/study', 'separate'],
+    ] as const)('compares lexical path roots and boundaries: %s %s %s', (paths, a, b, expected) => {
+      expect(workspacePathRelation(a, b, paths)).toBe(expected);
+    });
+
     it('rejects relative workspace paths', () => {
       const { register } = createSyntheticStore();
       const manifest = buildStageAManifest(register);
@@ -697,7 +715,7 @@ describe('study manifest and artifact verifier', () => {
       const original = [...fileStore.entries()];
       expect(original.length).toBeGreaterThan(0);
       for (const [path, bytes] of original) {
-        fileStore.set(path, bytes + '\nchanged');
+        fileStore.set(normalize(path), bytes + '\nchanged');
         const changed = await verifyStudyManifest(manifest, reader);
         expect(changed.kind, path).toBe('rejected');
         if (changed.kind !== 'rejected') throw new Error('Artifact mutation was accepted: ' + path);
@@ -709,7 +727,7 @@ describe('study manifest and artifact verifier', () => {
         if (missing.kind !== 'rejected') throw new Error('Missing artifact was accepted: ' + path);
         expect(missing.phase).toBe('artifacts');
         expect(missing.errors).toContainEqual(expect.objectContaining({ kind: 'read_error', path }));
-        fileStore.set(path, bytes);
+        fileStore.set(normalize(path), bytes);
       }
       const restored = await verifyStudyManifest(manifest, reader);
       expect(restored).toMatchObject({ kind: 'manifest_verified', trialAuthorization: false, scope: 'declaration_and_artifact_bytes_only' });
@@ -718,13 +736,13 @@ describe('study manifest and artifact verifier', () => {
     it('detects corrupted executable bytes and returns rejected artifacts phase', async () => {
       const { fileStore, register, reader } = createSyntheticStore();
       const manifest = buildStageAManifest(register);
-      fileStore.set(manifest.executables.baseline.path, 'corrupted-baseline');
+      fileStore.set(normalize(manifest.executables.baseline.path), 'corrupted-baseline');
 
       const res = await verifyStudyManifest(manifest, reader);
       expect(res.kind).toBe('rejected');
       if (res.kind === 'rejected') {
         expect(res.phase).toBe('artifacts');
-        expect(res.errors.some(e => e.kind === 'hash_mismatch' && e.path === manifest.executables.baseline.path)).toBe(true);
+        expect(res.errors.some(e => e.kind === 'hash_mismatch' && e.path === normalize(manifest.executables.baseline.path))).toBe(true);
       }
     });
 
@@ -732,26 +750,26 @@ describe('study manifest and artifact verifier', () => {
       const { fileStore, register, reader } = createSyntheticStore();
       const manifest = buildStageAManifest(register);
       const fixPath = manifest.pairs[0]!.fixture.path;
-      fileStore.set(fixPath, 'corrupted-fixture-bytes');
+      fileStore.set(normalize(fixPath), 'corrupted-fixture-bytes');
 
       const res = await verifyStudyManifest(manifest, reader);
       expect(res.kind).toBe('rejected');
       if (res.kind === 'rejected') {
         expect(res.phase).toBe('artifacts');
-        expect(res.errors.some(e => e.kind === 'hash_mismatch' && e.path === fixPath)).toBe(true);
+        expect(res.errors.some(e => e.kind === 'hash_mismatch' && e.path === normalize(fixPath))).toBe(true);
       }
     });
 
     it('reports read_error when a file is unreadable', async () => {
       const { fileStore, register, reader } = createSyntheticStore();
       const manifest = buildStageAManifest(register);
-      fileStore.delete(manifest.protocol.path);
+      fileStore.delete(normalize(manifest.protocol.path));
 
       const res = await verifyStudyManifest(manifest, reader);
       expect(res.kind).toBe('rejected');
       if (res.kind === 'rejected') {
         expect(res.phase).toBe('artifacts');
-        expect(res.errors.some(e => e.kind === 'read_error' && e.path === manifest.protocol.path)).toBe(true);
+        expect(res.errors.some(e => e.kind === 'read_error' && e.path === normalize(manifest.protocol.path))).toBe(true);
       }
     });
 
