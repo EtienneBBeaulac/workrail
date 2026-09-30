@@ -3,6 +3,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import {
   computeSha256,
@@ -339,7 +340,8 @@ describe('study manifest and artifact verifier', () => {
       await writeFile(manifestFile, JSON.stringify(manifest, null, 2));
 
       const cliScript = resolve('experiments/answer-driven-execution/study-manifest.mts');
-      const valid = spawnSync(process.execPath, [cliScript, manifestFile], { encoding: 'utf8', timeout: 10_000 });
+      const cli = [createRequire(import.meta.url).resolve('vite-node/vite-node.mjs'), '--script', cliScript];
+      const valid = spawnSync(process.execPath, [...cli, manifestFile], { encoding: 'utf8', timeout: 10_000 });
       expect(valid.status, valid.stderr).toBe(0);
       const validOut = JSON.parse(valid.stdout);
       expect(validOut.kind).toBe('manifest_verified');
@@ -347,7 +349,7 @@ describe('study manifest and artifact verifier', () => {
 
       // Corrupt a byte to verify exit 1 and discriminated union phase: artifacts
       await writeFile(manifest.protocol.path, 'corrupted');
-      const fail = spawnSync(process.execPath, [cliScript, manifestFile], { encoding: 'utf8', timeout: 10_000 });
+      const fail = spawnSync(process.execPath, [...cli, manifestFile], { encoding: 'utf8', timeout: 10_000 });
       expect(fail.status).toBe(1);
       const failOut = JSON.parse(fail.stdout);
       expect(failOut.kind).toBe('rejected');
@@ -355,7 +357,7 @@ describe('study manifest and artifact verifier', () => {
       expect(failOut.errors).toBeDefined();
 
       // Missing argument triggers exit 2
-      expect(spawnSync(process.execPath, [cliScript], { timeout: 10_000 }).status).toBe(2);
+      expect(spawnSync(process.execPath, cli, { timeout: 10_000 }).status).toBe(2);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

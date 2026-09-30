@@ -3,6 +3,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { scoreInput, type Study, type Trial } from '../../experiments/answer-driven-execution/usability-scorer.mts';
 
 function trial(scenario: Trial['scenario'], repetition: number, arm: Trial['arm']): Trial {
@@ -42,7 +43,7 @@ describe('normalized usability evidence scorer', () => {
     const input = join(dir, 'input.json');
     try {
       await writeFile(input, JSON.stringify(study()));
-      const args = [resolve('experiments/answer-driven-execution/usability-scorer.mts'), input];
+      const args = [createRequire(import.meta.url).resolve('vite-node/vite-node.mjs'), '--script', resolve('experiments/answer-driven-execution/usability-scorer.mts'), input];
       const valid = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 10_000 });
       expect(valid.status, valid.stderr).toBe(0);
       expect(JSON.parse(valid.stdout).report.releaseApproval).toBe(false);
