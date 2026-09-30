@@ -7,6 +7,34 @@ import type { WorkView, AnswerSubmission } from '../../../src/answer-v1/contract
 const signal = () => new AbortController().signal;
 function question(view: WorkView) { if (view.kind !== 'question') throw new Error(view.kind); return view; }
 
+it.each(['complete', 'missing summary'] as const)('accepts a complete review after %s admission', async mode => {
+  const root = await mkdtemp(join(tmpdir(), 'review-summary-'));
+  const config = { storage: { journalRootDir: join(root, 'sessions'), hostIndexRootDir: join(root, 'index') },
+    keyringPath: join(root, 'keys.json'), workflowStoragePath: join(root, 'workflows') };
+  try {
+    await mkdir(config.workflowStoragePath);
+    await writeFile(join(config.workflowStoragePath, 'review.json'), JSON.stringify({ id: 'review', name: 'Review', description: 'Summary admission', version: '1.0.0',
+      steps: [{ id: 'review', title: 'Review', prompt: 'Review the code.', outputContract: { contractRef: 'wr.contracts.review_verdict', required: true } }] }));
+    const worker = await createAnswerWorker(config, signal());
+    if (worker.kind !== 'created') throw new Error(worker.kind);
+    try {
+      const opened = await worker.opener.open({ workflowId: 'review', workspacePath: root, goal: 'Summary admission' }, signal());
+      if (opened.kind !== 'opened') throw new Error(opened.kind);
+      const complete = { notes: 'Reviewed.', verdict: 'clean', confidence: 'high', findings: [], summary: 'No findings.' } as const;
+      let reply = question(opened.view).reply;
+      if (mode === 'missing summary') {
+        const { summary: _summary, ...partial } = complete;
+        const result = await worker.worker.answer(reply, { kind: 'unvalidated_json', value: partial }, signal());
+        expect(result).toMatchObject({ kind: 'recorded', disposition: 'partial', view: { kind: 'question', issues: [{ field: 'summary' }] } });
+        if (result.kind !== 'recorded') throw new Error(result.kind);
+        reply = question(result.view).reply;
+      }
+      expect(await worker.worker.answer(reply, { kind: 'unvalidated_json', value: complete }, signal()))
+        .toMatchObject({ kind: 'recorded', disposition: 'accepted', view: { kind: 'finished', execution: { kind: 'completed' } } });
+    } finally { await worker.close(signal()); }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 it('durably retains review fragments, explicit corrections, replay receipts and final artifact through restart', async () => {
   const root = await mkdtemp(join(tmpdir(), 'review-host-'));
   const config = { storage: { journalRootDir: join(root, 'sessions'), hostIndexRootDir: join(root, 'index') },

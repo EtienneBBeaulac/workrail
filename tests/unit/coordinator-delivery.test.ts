@@ -6,6 +6,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { extractPrNumberFromUrl, runCoordinatorDelivery } from '../../src/coordinators/coordinator-delivery.js';
 import type { AdaptiveCoordinatorDeps } from '../../src/coordinators/adaptive-pipeline.js';
 import { ok as nok } from 'neverthrow';
+import { readFile } from 'node:fs/promises';
 
 // ── extractPrNumberFromUrl ────────────────────────────────────────────────
 
@@ -89,6 +90,44 @@ const VALID_RECAP = [
 ].join('\n');
 
 describe('runCoordinatorDelivery', () => {
+  it('stages exactly declared paths and preserves delivery text with attribution', async () => {
+    const calls: { file: string; args: readonly string[] }[] = [];
+    let body: string | undefined;
+    const deps = makeFakeDeps(async (file, args) => {
+      calls.push({ file, args: [...args] });
+      if (file === 'gh' && args[0] === 'pr') {
+        body = await readFile(args[args.indexOf('--body-file') + 1]!, 'utf8');
+        return { stdout: 'https://github.com/org/repo/pull/42', stderr: '' };
+      }
+      return { stdout: '', stderr: '' };
+    });
+    expect((await runCoordinatorDelivery(deps, VALID_RECAP, 'worktrain/test-branch', '/workspace')).kind).toBe('ok');
+    expect(calls.filter(c => c.file === 'git' && c.args[0] === 'add')).toEqual([{ file: 'git', args: ['add', 'src/auth.ts'] }]);
+    const commit = calls.find(c => c.file === 'git' && c.args[0] === 'commit');
+    expect(commit?.args[1]).toBe('-m');
+    expect(commit?.args[2]).toContain('feat(mcp): implement auth');
+    expect(commit?.args[2]).toContain('Co-authored-by: WorkTrain <worktrain@noreply.local>');
+    const pr = calls.find(c => c.file === 'gh' && c.args[0] === 'pr');
+    expect(pr?.args[pr.args.indexOf('--title') + 1]).toContain('feat(mcp): implement auth');
+    expect(body).toContain('## Summary\n- Implements auth');
+    expect(body).toContain('Automated by WorkTrain');
+  });
+
+  it.each(['commitType', 'commitScope', 'commitSubject', 'prTitle', 'prBody', 'filesChanged'])('refuses missing %s before delivery and still accepts a complete handoff', async field => {
+    const calls: string[] = [];
+    const deps = makeFakeDeps(async (file, args) => {
+      calls.push(file);
+      return { stdout: file === 'gh' && args[0] === 'pr' ? 'https://github.com/org/repo/pull/42' : '', stderr: '' };
+    });
+    const handoff: Record<string, unknown> = JSON.parse(VALID_RECAP.split('\n')[2]!);
+    delete handoff[field];
+    const invalid = '```json\n' + JSON.stringify(handoff) + '\n```';
+    expect((await runCoordinatorDelivery(deps, invalid, 'worktrain/test-branch', '/workspace')).kind).toBe('err');
+    expect(calls).toEqual([]);
+    expect((await runCoordinatorDelivery(deps, VALID_RECAP, 'worktrain/test-branch', '/workspace')).kind).toBe('ok');
+    expect(calls).toContain('gh');
+  });
+
   it('returns ok with PR URL when delivery succeeds and PR is opened', async () => {
     const deps = makeFakeDeps();
     const result = await runCoordinatorDelivery(deps, VALID_RECAP, 'worktrain/test-branch', '/workspace');
