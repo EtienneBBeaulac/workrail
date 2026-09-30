@@ -1,3 +1,4 @@
+import { createMcpHandler, PROTOCOL_VERSION_META_KEY, CLIENT_INFO_META_KEY, CLIENT_CAPABILITIES_META_KEY } from '@modelcontextprotocol/server';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { composeServer } from '../../../src/mcp/server.js';
@@ -760,3 +761,41 @@ it.skipIf(process.env.WORKRAIL_TEST_LINUX_SCRATCH !== '1').each(['stopped', 'run
     await scheduler.close(signal());
   }
 }));
+
+
+it('fresh modern protocol units preserve shared answer authority after each request closes', () => fixture(config => withAnswerTransport(config, async ({ composed }) => {
+  const identities = new Set<unknown>();
+  const modern = createMcpHandler(() => {
+    const unit = composed.createProtocolUnit();
+    identities.add(unit.server);
+    return unit.server;
+  }, { legacy: 'reject' });
+  let requestId = 0;
+  async function request(method: 'tools/list' | 'tools/call', name?: string, args?: Record<string, unknown>) {
+    const response = await modern.fetch(new Request('http://localhost/mcp', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream',
+        'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': method, ...(name ? { 'Mcp-Name': name } : {}) },
+      body: JSON.stringify({ jsonrpc: '2.0', id: ++requestId, method, params: {
+        ...(name ? { name, arguments: args } : {}),
+        _meta: { [PROTOCOL_VERSION_META_KEY]: '2026-07-28', [CLIENT_INFO_META_KEY]: { name: 'modern-answer-proof', version: '1' }, [CLIENT_CAPABILITIES_META_KEY]: {} },
+      } }),
+    }));
+    expect(response.status).toBe(200);
+    const wire = await response.json();
+    expect(wire.result.resultType).toBe('complete');
+    expect(wire.result.isError).not.toBe(true);
+    return wire.result;
+  }
+  try {
+    expect((await request('tools/list')).tools.map((t: { name: string }) => t.name).sort()).toEqual(['answer_work', 'inspect_work', 'open_work', 'recover_work']);
+    const opened = JSON.parse((await request('tools/call', 'open_work', { workflowId: 'lifecycle', workspacePath: config.workflowStoragePath, goal: 'modern lifecycle' })).content[0].text);
+    const first = JSON.parse((await request('tools/call', 'answer_work', { reply: opened.view.reply, answer: { notes: 'first' } })).content[0].text);
+    expect(first).toMatchObject({ kind: 'recorded', view: { kind: 'question' } });
+    const recovered = JSON.parse((await request('tools/call', 'recover_work', { recovery: opened.recovery })).content[0].text);
+    expect(recovered).toEqual(first.view);
+    const last = JSON.parse((await request('tools/call', 'answer_work', { reply: first.view.reply, answer: { notes: 'last' } })).content[0].text);
+    expect(last).toMatchObject({ kind: 'recorded', view: { kind: 'finished' } });
+    expect(identities.size).toBe(5);
+  } finally { await modern.close(); await composed.closeDomain(signal()); }
+})));
