@@ -1,3 +1,4 @@
+import { selectAgentProfile } from './agent-profile.js';
 import { resolveAnswerAuthority } from './answer-authority-config.js';
 import { RequestLifetime } from './request-lifetime.js';
 /**
@@ -267,7 +268,9 @@ export interface ComposedServerInternal extends ComposedServer {
  * Those belong in the transport-specific entry points.
  */
 export async function composeServer(options?: import('../answer-v1/contracts/host-composition.js').AnswerMcpCompositionOptions): Promise<ComposedServerInternal> {
-  const answers = process.env.WORKRAIL_AGENT_PROFILE === 'answers';
+  const selected = selectAgentProfile(process.env.WORKRAIL_AGENT_PROFILE);
+  if (selected.kind === 'refused') throw new Error('Unsupported WORKRAIL_AGENT_PROFILE: expected legacy or answers');
+  const answers = selected.profile === 'answers';
   const authorityFile = process.env.WORKRAIL_ANSWER_AUTHORITY_FILE;
   if (!answers && (options || authorityFile !== undefined)) throw new Error('Answer authority is only valid for the answers profile');
   const authority = answers ? await resolveAnswerAuthority(options, authorityFile) : undefined;
