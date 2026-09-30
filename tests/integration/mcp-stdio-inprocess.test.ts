@@ -8,7 +8,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { composeServer } from '../../src/mcp/server.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { PassThrough } from 'stream';
 import { resetContainer } from '../../src/di/container.js';
 import * as os from 'os';

@@ -47,15 +47,13 @@ export async function startStdioServer(): Promise<void> {
   wireShutdownHooks({ onBeforeTerminate: shutdown });
   wireStdinShutdown();
 
-  const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
-  const {
-    RootsListChangedNotificationSchema,
-  } = await import('@modelcontextprotocol/sdk/types.js');
+  const { StdioServerTransport } = await import('@modelcontextprotocol/server/stdio');
+
 
   // -------------------------------------------------------------------------
   // stdio-specific: Handle root change notifications from the IDE client
   // -------------------------------------------------------------------------
-  server.setNotificationHandler(RootsListChangedNotificationSchema, async () => {
+  server.setNotificationHandler('notifications/roots/list_changed', async () => {
     try {
       const result = await server.listRoots();
       rootsManager.updateRootUris(result.roots.map((r: { uri: string }) => r.uri));

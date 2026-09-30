@@ -1,3 +1,5 @@
+import type { CallToolRequest, CallToolResult } from '@modelcontextprotocol/server';
+import { toSdkTool, toSdkCallResult } from './sdk-boundary.js';
 import { selectAgentProfile } from './agent-profile.js';
 import { resolveAnswerAuthority } from './answer-authority-config.js';
 import { RequestLifetime } from './request-lifetime.js';
@@ -242,7 +244,7 @@ function toMcpTool<TInput extends z.ZodType>(tool: ToolDefinition<TInput>): Tool
  */
 export interface ComposedServer {
   readonly closeRequests: () => Promise<void>;
-  readonly server: import('@modelcontextprotocol/sdk/server/index.js').Server;
+  readonly server: import('@modelcontextprotocol/server').Server;
   readonly ctx: ToolContext;
   readonly rootsReader: RootsReader;
   readonly tools: readonly Tool[];
@@ -351,13 +353,8 @@ export async function composeServer(options?: import('../answer-v1/contracts/hos
   const rootsManager = new WorkspaceRootsManager();
 
   // Dynamically import SDK modules (ESM-only)
-  const { Server } = await import('@modelcontextprotocol/sdk/server/index.js');
-  const {
-    CallToolRequestSchema,
-    ListToolsRequestSchema,
-    ListResourcesRequestSchema,
-    ReadResourceRequestSchema,
-  } = await import('@modelcontextprotocol/sdk/types.js');
+  const { Server } = await import('@modelcontextprotocol/server');
+
 
   // Create server
   const server = new Server(
@@ -398,9 +395,8 @@ export async function composeServer(options?: import('../answer-v1/contracts/hos
   }
 
   // Register ListTools handler
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools,
-  }));
+  const wireTools = tools.map(toSdkTool);
+  server.setRequestHandler('tools/list', async () => ({ tools: wireTools }));
 
   // ---------------------------------------------------------------------------
   // Tool call timing sink
@@ -437,7 +433,7 @@ export async function composeServer(options?: import('../answer-v1/contracts/hos
   // rather than becoming an unhandled promise rejection that kills the process.
   // "Errors are data" / "validate at boundaries" — this is the outermost seam.
   const requests = new RequestLifetime();
-  server.setRequestHandler(CallToolRequestSchema, requests.wrap( async (request: any): Promise<any> => {
+  server.setRequestHandler('tools/call', requests.wrap( async (request: CallToolRequest): Promise<CallToolResult> => {
     try {
       const { name, arguments: args } = request.params;
       // Capture start time at the very top so unknown-tool elapsed time is accurate.
@@ -448,7 +444,7 @@ export async function composeServer(options?: import('../answer-v1/contracts/hos
       if (!handler) {
         // Record unknown tool as a timing observation so gaps are visible in perf data
         const unknownResult = {
-          content: [{ type: 'text', text: `Unknown tool: ${name}` }],
+          content: [{ type: 'text' as const, text: `Unknown tool: ${name}` }],
           isError: true,
         };
         const durationMs = Math.round((performance.now() - handlerStartHr) * 100) / 100;
@@ -464,11 +460,11 @@ export async function composeServer(options?: import('../answer-v1/contracts/hos
         ? { ...ctx, v2: { ...ctx.v2, resolvedRootUris: rootsManager.getCurrentRootUris() } }
         : ctx;
 
-      return await withToolCallTiming(
+      return toSdkCallResult(await withToolCallTiming(
         name,
         () => handler(args ?? {}, requestCtx),
         timingSink,
-      );
+      ));
     } catch (err) {
       // An exception escaped the tool handler boundary. This must not crash the
       // server — return a structured error response and keep running.
@@ -493,7 +489,7 @@ export async function composeServer(options?: import('../answer-v1/contracts/hos
   // Register ListResources handler — exposes the workrail://tags catalog resource.
   // Agents can read tag definitions without calling list_workflows at all (~500 tokens
   // vs 3-5K for the full workflow list).
-  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+  server.setRequestHandler('resources/list', async () => ({
     resources: [
       {
         uri: 'workrail://tags',
@@ -509,7 +505,7 @@ export async function composeServer(options?: import('../answer-v1/contracts/hos
   }));
 
   // Register ReadResource handler — serves spec/workflow-tags.json verbatim.
-  server.setRequestHandler(ReadResourceRequestSchema, async (request: any): Promise<any> => {
+  server.setRequestHandler('resources/read', async (request: any): Promise<any> => {
     const uri: string = request.params?.uri ?? '';
     if (uri !== 'workrail://tags') {
       return {
