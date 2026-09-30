@@ -73,3 +73,45 @@ it.each(['missing', 'malformed', 'wrong_profile'] as const)('refuses %s authorit
     expect(await readdir(root)).toEqual(before);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+// Profile admission happens before DI creates a data directory or keyring.
+it.each(['notes', 'unknown-profile', '', 'Answers'])('refuses explicit unsupported profile %j before initialization', async profile => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const { readdir } = await import('node:fs/promises');
+  const root = await mkdtemp(join(tmpdir(), 'profile-stdio-refusal-'));
+  try {
+    const before = await readdir(root);
+    const result = await promisify(execFile)(process.execPath, [executable], {
+      env: { ...getDefaultEnvironment(), HOME: root, WORKRAIL_TRANSPORT: 'stdio',
+        WORKRAIL_DATA_DIR: join(root, 'data'), WORKRAIL_KEYS_DIR: join(root, 'keys'),
+        WORKRAIL_AGENT_PROFILE: profile, WORKRAIL_ENABLE_SESSION_TOOLS: 'false' }, timeout: 5000,
+    }).then(value => ({ kind: 'unexpected_success' as const, value }), (error: unknown) => ({ kind: 'failed' as const, error }));
+    expect(result.kind).toBe('failed');
+    if (result.kind !== 'failed') throw new Error(result.kind);
+    const failed = z.object({ code: z.literal(1), stderr: z.string() }).passthrough().parse(result.error);
+    expect(failed.stderr).toContain('Unsupported WORKRAIL_AGENT_PROFILE');
+    expect(failed.stderr).not.toContain('[DI] Container initialized');
+    expect(await readdir(root)).toEqual(before);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it.each([undefined, 'legacy'] as const)('retains explicit and default legacy composition for %j', async profile => {
+  const root = await mkdtemp(join(tmpdir(), 'legacy-profile-stdio-'));
+  const client = new Client({ name: 'legacy-profile-boundary-proof', version: '1' });
+  const workflows = join(root, 'workflows');
+  await mkdir(workflows);
+  const transport = new StdioClientTransport({ command: process.execPath, args: [executable],
+    env: { ...getDefaultEnvironment(), HOME: root, WORKRAIL_TRANSPORT: 'stdio',
+      WORKRAIL_DATA_DIR: join(root, 'data'), WORKRAIL_KEYS_DIR: join(root, 'keys'),
+      WORKFLOW_STORAGE_PATH: workflows, WORKRAIL_WORKFLOWS_DIR: workflows,
+      WORKRAIL_ENABLE_SESSION_TOOLS: 'false', WORKRAIL_ENABLE_V2_TOOLS: 'true',
+      ...(profile === undefined ? {} : { WORKRAIL_AGENT_PROFILE: profile }) }, stderr: 'pipe' });
+  try {
+    await client.connect(transport, { timeout: 5000 });
+    expect((await client.listTools()).tools.map(tool => tool.name).sort()).toEqual([
+      'checkpoint_workflow', 'continue_workflow', 'inspect_workflow', 'list_workflows',
+      'manage_workflow_source', 'resume_session', 'start_workflow',
+    ]);
+  } finally { await client.close(); await transport.close(); await rm(root, { recursive: true, force: true }); }
+});
