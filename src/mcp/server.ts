@@ -251,8 +251,16 @@ export interface ComposedServer {
   readonly handlers: Record<string, WrappedToolHandler>;
 }
 
+/** A serving unit can release its protocol without closing shared domain authority. */
+export interface ProtocolUnit {
+  readonly server: import('@modelcontextprotocol/server').Server;
+  readonly rootsManager: WorkspaceRootsManager;
+}
+
 /** @internal Transport entry points need write access to roots. */
 export interface ComposedServerInternal extends ComposedServer {
+  readonly createProtocolUnit: () => ProtocolUnit;
+  readonly closeDomain: (signal: AbortSignal) => Promise<import('./transports/transport-lifetime.js').CloseOutcome>;
   readonly rootsManager: WorkspaceRootsManager;
 }
 
@@ -349,26 +357,7 @@ export async function composeServer(options?: import('../answer-v1/contracts/hos
       assertNever(workflowEdition);
   }
 
-  // Mutable roots cell — write surface held locally, read surface passed to handlers.
-  const rootsManager = new WorkspaceRootsManager();
-
-  // Dynamically import SDK modules (ESM-only)
   const { Server } = await import('@modelcontextprotocol/server');
-
-
-  // Create server
-  const server = new Server(
-    {
-      name: 'workrail-server',
-      version: '0.1.0',
-    },
-    {
-      capabilities: {
-        tools: {},
-        resources: {},
-      },
-    }
-  );
 
   // Build tool list from selected edition
   const tools: Tool[] = workflowEdition.tools.map(toMcpTool);
@@ -396,7 +385,6 @@ export async function composeServer(options?: import('../answer-v1/contracts/hos
 
   // Register ListTools handler
   const wireTools = tools.map(toSdkTool);
-  server.setRequestHandler('tools/list', async () => ({ tools: wireTools }));
 
   // ---------------------------------------------------------------------------
   // Tool call timing sink
@@ -433,6 +421,23 @@ export async function composeServer(options?: import('../answer-v1/contracts/hos
   // rather than becoming an unhandled promise rejection that kills the process.
   // "Errors are data" / "validate at boundaries" — this is the outermost seam.
   const requests = new RequestLifetime();
+  function createProtocolUnit(): ProtocolUnit {
+    const rootsManager = new WorkspaceRootsManager();
+  // Create server
+  const server = new Server(
+    {
+      name: 'workrail-server',
+      version: '0.1.0',
+    },
+    {
+      capabilities: {
+        tools: {},
+        resources: {},
+      },
+    }
+  );
+
+    server.setRequestHandler('tools/list', async () => ({ tools: wireTools }));
   server.setRequestHandler('tools/call', requests.wrap( async (request: CallToolRequest): Promise<CallToolResult> => {
     try {
       const { name, arguments: args } = request.params;
@@ -538,6 +543,14 @@ export async function composeServer(options?: import('../answer-v1/contracts/hos
     }
   });
 
-  return { closeRequests: () => requests.close(), server, ctx, rootsManager, rootsReader: rootsManager, tools, handlers };
+    return { server, rootsManager };
+  }
+  const { server, rootsManager } = createProtocolUnit();
+  const closeDomain = async (signal: AbortSignal) => {
+    await requests.close();
+    return ctx.backgroundWork.close(signal);
+  };
+
+  return { createProtocolUnit, closeDomain, closeRequests: () => requests.close(), server, ctx, rootsManager, rootsReader: rootsManager, tools, handlers };
 }
 
