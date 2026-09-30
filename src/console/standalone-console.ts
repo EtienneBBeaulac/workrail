@@ -26,7 +26,7 @@ import { createStandaloneAnswerReader } from '../answer-v1/console.js';
 import express from 'express';
 import cors from 'cors';
 import * as http from 'node:http';
-import * as fs from 'node:fs/promises';
+import { createConsoleDiscovery, type ConsoleDiscoveryPort } from './console-discovery.js';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
@@ -85,12 +85,13 @@ export interface StartStandaloneConsoleOptions {
  * after, or without either of them.
  *
  * Returns:
- * - { kind: 'ok', port, stop } on successful bind
+ * - { kind: 'ok', port, stop } after binding and the discovery attempt settles
  * - { kind: 'port_conflict', port } when the port is already in use
  * - { kind: 'io_error', message } on other errors
  */
 export async function startStandaloneConsole(
   options: StartStandaloneConsoleOptions = {},
+  ports?: Readonly<{ discovery: ConsoleDiscoveryPort }>,
 ): Promise<StandaloneConsoleResult> {
   const port = options.port ?? 3456;
   const env = process.env as Record<string, string | undefined>;
@@ -109,6 +110,7 @@ export async function startStandaloneConsole(
 
   const lockFilePath = options.lockFilePath
     ?? path.join(os.homedir(), '.workrail', 'daemon-console.lock');
+  const discovery = ports?.discovery ?? createConsoleDiscovery(lockFilePath);
 
   // ---------------------------------------------------------------------------
   // Build infrastructure adapters
@@ -217,19 +219,9 @@ export async function startStandaloneConsole(
 
       // Write lock file so `worktrain spawn` and other tools can discover the port.
       // Non-fatal: if the write fails the server still works.
-      const lockDir = path.dirname(lockFilePath);
-      const lockWritten = fs.mkdir(lockDir, { recursive: true })
-        .then(() => fs.writeFile(
-          lockFilePath,
-          JSON.stringify({ pid: process.pid, port: actualPort }),
-          'utf-8',
-        ))
-        .catch((writeErr: unknown) => {
-          console.warn(
-            '[StandaloneConsole] Could not write lock file:',
-            writeErr instanceof Error ? writeErr.message : String(writeErr),
-          );
-        });
+      const lockWritten = discovery.publish({ pid: process.pid, port: actualPort }).then(outcome => {
+        if (outcome.kind === 'unavailable') console.warn('[StandaloneConsole] Could not write lock file:', outcome.message);
+      });
 
       let stopped = false;
       const stop = (): Promise<void> => {
@@ -249,14 +241,15 @@ export async function startStandaloneConsole(
             // Cancel the safety timer -- server closed in time.
             clearTimeout(safetyTimer);
             // 3. Delete the lock file (best-effort; ignore errors).
-            void lockWritten.then(() => fs.unlink(lockFilePath))
+            void lockWritten.then(() => discovery.remove())
               .catch(() => { /* already gone or never written -- ok */ })
               .finally(() => res());
           });
         });
       };
 
-      resolve({ kind: 'ok', port: actualPort, stop });
+      // Port discovery is part of startup readiness, even when publication fails.
+      void lockWritten.then(() => resolve({ kind: 'ok', port: actualPort, stop }));
     });
   });
 }

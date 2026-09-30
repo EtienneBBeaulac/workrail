@@ -144,7 +144,6 @@ describe('worktrain console -- lock file', () => {
     if (result.kind !== 'ok') return;
     handles.push(result);
 
-    await new Promise((r) => setTimeout(r, 50));
     const content = await fs.readFile(lockFilePath, 'utf-8');
     const parsed = JSON.parse(content) as { pid: number; port: number };
     expect(parsed.pid).toBe(process.pid);
@@ -160,7 +159,6 @@ describe('worktrain console -- lock file', () => {
     handles.push(result);
 
     // Lock file should exist after start
-    await new Promise((r) => setTimeout(r, 50));
     await expect(fs.readFile(lockFilePath, 'utf-8')).resolves.toBeTruthy();
 
     // Stop: lock file should be deleted
@@ -168,4 +166,45 @@ describe('worktrain console -- lock file', () => {
     handles.splice(handles.indexOf(result), 1);
     await expect(fs.readFile(lockFilePath, 'utf-8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
+});
+
+
+it('does not report startup ready while discovery publication is held', async () => {
+  let entered!: () => void;
+  const publishing = new Promise<void>(resolve => { entered = resolve; });
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let ready = false;
+  const order: string[] = [];
+  const started = startStandaloneConsole({ port: 0, lockFilePath: tmpLockPath('held-publication') }, {
+    discovery: {
+      async publish(record) { expect(record.port).toBeGreaterThan(0); order.push('publishing'); entered(); await held; order.push('published'); return { kind: 'published' }; },
+      async remove() { order.push('removed'); },
+    },
+  });
+  void started.then(() => { ready = true; });
+  try {
+    await publishing;
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(ready).toBe(false);
+  } finally {
+    release();
+    const result = await started;
+    if (result.kind === 'ok') await result.stop();
+    expect(order).toEqual(['publishing', 'published', 'removed']);
+  }
+});
+
+
+it('keeps serving when discovery publication returns unavailable', async () => {
+  const result = await startStandaloneConsole({ port: 0 }, {
+    discovery: {
+      async publish() { return { kind: 'unavailable', message: 'intentional publication unavailable' }; },
+      async remove() {},
+    },
+  });
+  expect(result.kind).toBe('ok');
+  if (result.kind !== 'ok') return;
+  try { expect(await httpGet(`http://127.0.0.1:${result.port}/api/v2/sessions`)).toBeDefined(); }
+  finally { await result.stop(); }
 });
