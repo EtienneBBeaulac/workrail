@@ -642,6 +642,7 @@ it('refuses wrong-operation and corrupted capabilities without consuming a valid
     const refusal = await f.call(name, args);
     expect(refusal).toMatchObject({ kind });
     assertNoReply(refusal);
+    expect(JSON.stringify(refusal)).not.toContain('Must not be retained.');
     expect(await f.sessionFiles()).toEqual(before);
   }
   const inspected = await f.call('inspect_work', { read: initial.read });
@@ -813,11 +814,13 @@ it('refuses cross-scope receipt and cursor reads across unbound runs while prese
   const crossReadAB = evidenceReadSchema.parse(await f.call('inspect_work', { read: pendingA.read, receipt: firstB.receipt }));
   assertNoReply(crossReadAB);
   expect(crossReadAB).toEqual({ kind: 'refused', reason: 'invalid_scope' });
+  expect(JSON.stringify(crossReadAB)).not.toContain('Observation B payload');
   expect(await f.sessionFiles()).toEqual(filesBeforeRefusals);
 
   const crossReadBA = evidenceReadSchema.parse(await f.call('inspect_work', { read: pendingB.read, receipt: firstA.receipt }));
   assertNoReply(crossReadBA);
   expect(crossReadBA).toEqual({ kind: 'refused', reason: 'invalid_scope' });
+  expect(JSON.stringify(crossReadBA)).not.toContain('Observation A payload');
   expect(await f.sessionFiles()).toEqual(filesBeforeRefusals);
 
   // Cursor is receipt-bound within the same run: crossing cursors between two receipts in Run A refuses
