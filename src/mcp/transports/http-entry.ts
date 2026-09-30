@@ -1,3 +1,6 @@
+import { ServingAdmission } from './serving-admission.js';
+import { createMcpHandler, isLegacyRequest, isJsonContentType } from '@modelcontextprotocol/server';
+import { toWebRequest, toNodeHandler, localhostHostValidation, localhostOriginValidation } from '@modelcontextprotocol/node';
 /**
  * HTTP transport entry point for WorkRail MCP server.
  * 
@@ -23,6 +26,7 @@ import express from 'express';
 const HTTP_PORT_SCAN_END = 3199;
 
 export interface HttpServerHandle {
+  readonly port: number;
   close(signal: AbortSignal): Promise<'closed' | 'incomplete' | 'failed'>;
 }
 
@@ -31,7 +35,15 @@ export async function startHttpServer(port: number): Promise<HttpServerHandle> {
   registerFatalHandlers('http');
   logStartup('http', { port });
 
-  const { server, ctx, closeRequests } = await composeServer();
+  const composed = await composeServer();
+  const { ctx, closeRequests, closeDomain } = composed;
+  const { server } = composed.createProtocolUnit();
+  const admission = new ServingAdmission();
+  // WorkRail exposes tools/resources, not subscription streams.
+  const modern = createMcpHandler(() => composed.createProtocolUnit().server, { legacy: 'reject', maxSubscriptions: 0 });
+  const modernRequest = toNodeHandler(modern);
+  const validHost = localhostHostValidation();
+  const validOrigin = localhostOriginValidation();
 
   // Scan from the requested port up to HTTP_PORT_SCAN_END so a second
   // concurrent WorkRail instance can bind to a different port rather than
@@ -43,10 +55,11 @@ export async function startHttpServer(port: number): Promise<HttpServerHandle> {
   // Register graceful shutdown so that fatalExit() stops the MCP HTTP listener
   // cleanly before calling process.exit(1). The 3s timeout guarantees exit within a bounded window.
   const close = createTransportClose({
-    closeRequests,
+    closeRequests: async () => { await admission.close(); await closeRequests(); },
     stopListener: () => listener.stop(),
-    closeProtocol: () => server.close(),
+    closeProtocol: async () => { await modern.close(); await server.close(); },
     drainBackground: () => ctx.backgroundWork.close(new AbortController().signal),
+    drainDomain: () => closeDomain(new AbortController().signal),
   });
   const shutdown = () => drainBeforeTerminate(close, AbortSignal.timeout(3000));
   registerGracefulShutdown(shutdown);
@@ -70,9 +83,26 @@ export async function startHttpServer(port: number): Promise<HttpServerHandle> {
   // Express dispatches by app-level routing, not by listen order, so
   // registering routes on an already-started server is safe.
   listener.app.use(express.json());
-  listener.app.post('/mcp', (req, res) => transport.handleRequest(req, res, req.body));
-  listener.app.get('/mcp', (req, res) => transport.handleRequest(req, res));
-  listener.app.delete('/mcp', (req, res) => transport.handleRequest(req, res));
+  listener.app.all('/mcp', async (req, res) => {
+    if (req.method === 'POST' && !isJsonContentType(req.get('Content-Type'))) {
+      res.status(415).json({ jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Content-Type must be application/json' } });
+      return;
+    }
+    const outcome = await admission.serve(async () => {
+      const probe = await toWebRequest(req, req.body);
+      if (await isLegacyRequest(probe, req.body)) {
+        await transport.handleRequest(req, res, req.body);
+      } else if (validHost(req, res) && validOrigin(req, res)) {
+        await modernRequest(req, res, req.body);
+      }
+    });
+    if (outcome.kind === 'refused') {
+      res.status(503).json({ jsonrpc: '2.0', id: null, error: { code: -32000, message: `Server unavailable: ${outcome.reason}` } });
+    } else if (outcome.kind === 'failed') {
+      console.error('[Transport]', outcome.message);
+      if (!res.headersSent) res.status(500).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: 'Transport request failed' } });
+    }
+  });
 
   await server.connect(transport);
 
@@ -83,6 +113,7 @@ export async function startHttpServer(port: number): Promise<HttpServerHandle> {
   });
 
   const boundPort = listener.getBoundPort();
+  if (boundPort === null) throw new Error('MCP listener has no bound port');
   console.error('[Transport] WorkRail MCP Server running on HTTP');
   console.error(`[Transport] MCP endpoint: http://localhost:${boundPort}/mcp`);
 
@@ -93,5 +124,5 @@ export async function startHttpServer(port: number): Promise<HttpServerHandle> {
   // handles this correctly.
   // -------------------------------------------------------------------------
 
-  return { close };
+  return { close, port: boundPort };
 }

@@ -34,69 +34,39 @@ export async function startStdioServer(): Promise<void> {
   registerFatalHandlers('stdio');
   logStartup('stdio');
 
-  const { server, ctx, rootsManager, closeRequests } = await composeServer();
+  const composed = await composeServer();
+  const { server, ctx, closeRequests, closeDomain } = composed;
+  let entry: import('@modelcontextprotocol/server/stdio').StdioServerHandle | undefined;
 
   const close = createTransportClose({
     closeRequests,
     stopListener: async () => { process.stdin.pause(); },
-    closeProtocol: () => server.close(),
+    closeProtocol: async () => { await entry?.close(); await server.close(); },
     drainBackground: () => ctx.backgroundWork.close(new AbortController().signal),
+    drainDomain: () => closeDomain(new AbortController().signal),
   });
   const shutdown = () => drainBeforeTerminate(close, AbortSignal.timeout(3000));
   registerGracefulShutdown(shutdown);
   wireShutdownHooks({ onBeforeTerminate: shutdown });
   wireStdinShutdown();
 
-  const { StdioServerTransport } = await import('@modelcontextprotocol/server/stdio');
-
-
-  // -------------------------------------------------------------------------
-  // stdio-specific: Handle root change notifications from the IDE client
-  // -------------------------------------------------------------------------
-  server.setNotificationHandler('notifications/roots/list_changed', async () => {
-    try {
-      const result = await server.listRoots();
-      rootsManager.updateRootUris(result.roots.map((r: { uri: string }) => r.uri));
-      try { process.stderr.write(`[Roots] Updated workspace roots: ${result.roots.map((r: { uri: string }) => r.uri).join(', ') || '(none)'}\n`); } catch { /* ignore */ }
-    } catch {
-      try { process.stderr.write('[Roots] Failed to fetch updated roots after change notification\n'); } catch { /* ignore */ }
-    }
-  });
-
-  // -------------------------------------------------------------------------
-  // stdio-specific: Guard stdout against EPIPE before connecting transport.
-  //
-  // The MCP SDK's StdioServerTransport only registers error listeners on
-  // stdin. If the client disconnects while a write is in-flight, stdout emits
-  // EPIPE with no listener -- Node.js converts this to an uncaught exception
-  // and the process crashes. wireStdoutShutdown() registers the listener
-  // *before* server.connect() so no write can occur without the guard in place.
-  // -------------------------------------------------------------------------
+  const { serveStdio } = await import('@modelcontextprotocol/server/stdio');
   wireStdoutShutdown();
-
-  // -------------------------------------------------------------------------
-  // stdio-specific: Connect transport
-  // -------------------------------------------------------------------------
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-
-  try { process.stderr.write('[Transport] WorkRail MCP Server running on stdio\n'); } catch { /* ignore */ }
-
-  // -------------------------------------------------------------------------
-  // stdio-specific: Fetch initial workspace roots from the IDE client
-  // -------------------------------------------------------------------------
-  void fetchInitialRootsWithTimeout(server)
-    .then((result) => {
-      if (result == null) {
-        try { process.stderr.write('[Roots] Initial roots probe timed out; workspace context will use server CWD fallback\n'); } catch { /* ignore */ }
-        return;
-      }
-
-      rootsManager.updateRootUris(result.roots.map((r: { uri: string }) => r.uri));
-      try { process.stderr.write(`[Roots] Initial workspace roots: ${result.roots.map((r: { uri: string }) => r.uri).join(', ') || '(none)'}\n`); } catch { /* ignore */ }
-    })
-    .catch(() => {
-      try { process.stderr.write('[Roots] Client does not support roots/list; workspace context will use server CWD fallback\n'); } catch { /* ignore */ }
-    });
-
+  entry = serveStdio(({ era }) => {
+    const unit = composed.createProtocolUnit();
+    if (era === 'legacy') {
+      const updateRoots = async () => {
+        try {
+          const result = await fetchInitialRootsWithTimeout(unit.server);
+          if (result !== null) unit.rootsManager.updateRootUris(result.roots.map(root => root.uri));
+        } catch {
+          try { process.stderr.write('[Roots] Client roots unavailable; workspace context will use server CWD fallback\n'); } catch { /* reporting is best-effort */ }
+        }
+      };
+      unit.server.oninitialized = () => { void updateRoots(); };
+      unit.server.setNotificationHandler('notifications/roots/list_changed', updateRoots);
+    }
+    return unit.server;
+  }, { maxSubscriptions: 0, onerror: error => { try { process.stderr.write(`[Transport] ${error.message}\n`); } catch { /* reporting is best-effort */ } } });
+  try { process.stderr.write('[Transport] WorkRail MCP Server running on stdio\n'); } catch { /* reporting is best-effort */ }
 }
