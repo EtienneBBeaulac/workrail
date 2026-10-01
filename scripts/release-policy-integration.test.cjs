@@ -71,7 +71,7 @@ test('the required CI Success shell fails closed on policy and change-detection 
         if (expression === 'github.event_name') return 'pull_request';
         if (expression === 'needs.ci-policy.result') return policy;
         if (expression === 'needs.changes.result') return changes;
-        if (/^needs\.[a-z-]+\.result$/.test(expression)) return 'success';
+        if (/^needs\.[a-z0-9-]+\.result$/.test(expression)) return 'success';
         throw new Error('Unexpected workflow expression: ' + expression);
       });
       return spawnSync('bash', ['-e', '-c', rendered], { encoding: 'utf8', env: { ...process.env, GITHUB_STEP_SUMMARY: path.join(root, 'summary') } }).status;
