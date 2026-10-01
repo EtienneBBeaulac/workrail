@@ -203,4 +203,55 @@ describe('MCP HTTP transport integration', () => {
     const continueText = continueData.result.content[0].text;
     expect(continueText).toContain('continueToken');
   });
+
+  const post = (body: unknown, contentType = 'application/json') => fetch(`http://localhost:${HTTP_PORT}/mcp`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': contentType,
+      'Accept': 'application/json, text/event-stream',
+      'Mcp-Session-Id': mcpSessionId,
+    },
+    body: JSON.stringify(body),
+  });
+
+  it('accepts the maximum supported batch of read-only requests', async () => {
+    const response = await post(Array.from({ length: 100 }, (_, index) => 100 + index).map(id => ({ jsonrpc: '2.0', id, method: 'tools/list', params: {} })));
+    expect(response.status).toBe(200);
+    const results = await response.json() as Array<{ id: number; result: { tools: unknown[] } }>;
+    expect(results.map(result => result.id).sort()).toEqual(Array.from({ length: 100 }, (_, index) => 100 + index));
+    expect(results.every(result => result.result.tools.length > 0)).toBe(true);
+  });
+
+  it('rejects an oversized batch before its workflow request creates a session', async () => {
+    const before = await fs.readdir(path.join(tempDataDir, 'sessions'));
+    const response = await post([
+      { jsonrpc: '2.0', id: 200, method: 'tools/call', params: {
+        name: 'start_workflow', arguments: {
+          workflowId: 'test-session-persistence', workspacePath: process.cwd(), goal: 'Must not execute',
+        },
+      } },
+      ...Array.from({ length: 100 }, (_, index) => ({ jsonrpc: '2.0', id: 201 + index, method: 'tools/list', params: {} })),
+    ]);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: -32600 } });
+    expect(await fs.readdir(path.join(tempDataDir, 'sessions'))).toEqual(before);
+  });
+
+  it('rejects an oversized parsed body before creating a workflow session', async () => {
+    const before = await fs.readdir(path.join(tempDataDir, 'sessions'));
+    const response = await post({ jsonrpc: '2.0', id: 400, method: 'tools/call', params: {
+      name: 'start_workflow', arguments: {
+        workflowId: 'test-session-persistence', workspacePath: process.cwd(), goal: 'x'.repeat(128 * 1024),
+      },
+    } });
+    expect(response.status).toBe(413);
+    expect(await fs.readdir(path.join(tempDataDir, 'sessions'))).toEqual(before);
+  });
+
+  it('rejects a non-JSON media type containing the JSON media type as a parameter', async () => {
+    const response = await post({ jsonrpc: '2.0', id: 500, method: 'tools/list', params: {} },
+      'text/plain; note=application/json');
+    expect(response.status).toBe(415);
+  });
+
 });
