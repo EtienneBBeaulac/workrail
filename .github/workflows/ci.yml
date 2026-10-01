@@ -2,6 +2,7 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
     branches:
       - '**'
   push:
@@ -78,7 +79,9 @@ jobs:
         run: npm install --ignore-scripts
 
       - name: Run CI policy check
-        run: node scripts/ci-policy-check.js
+        run: |
+          node --test scripts/release-title-policy.test.cjs scripts/release-policy-integration.test.cjs
+          node scripts/ci-policy-check.js
 
   # ============================================================================
   # REQUIRED: Lockfile is stable under npm install

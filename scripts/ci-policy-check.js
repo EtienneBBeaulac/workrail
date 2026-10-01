@@ -9,6 +9,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { titleViolation } = require('./release-title-policy.cjs');
 
 function fail(message) {
   console.error(message);
@@ -34,6 +35,17 @@ function main() {
 
   const ci = loadYaml(ciPath);
 
+  if (process.env.GITHUB_EVENT_NAME === 'pull_request') {
+    const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
+    const violation = titleViolation(event.pull_request?.title, event.number);
+    if (violation) fail(`Release title policy violation: ${violation}`);
+  }
+
+  const release = fs.readFileSync('.github/workflows/release.yml', 'utf8');
+  if (/\[(?:skip ci|ci skip)\]/i.test(release) || /--admin\b/.test(release)) {
+    fail('Release policy violation: release automation must not skip CI or bypass protection');
+  }
+
   // 1) Ensure CI triggers on push to main (required for release workflow_run)
   const on = ci.on;
   if (!on || !on.push || !Array.isArray(on.push.branches) || !on.push.branches.includes('main')) {
@@ -56,6 +68,7 @@ function main() {
 
   // 4) Ensure CI Success depends on the full required set
   const requiredNeeds = [
+    'ci-policy',
     'lockfile',
     'build-artifact',
     'semantic-release-dry-run',
