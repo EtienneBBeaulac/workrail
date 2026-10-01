@@ -58,3 +58,30 @@ test('release source and downloaded CI artifacts belong to the same checked revi
   const download = steps.find((step) => step.uses?.startsWith('actions/download-artifact@'));
   assert.equal(download.with['run-id'], '${{ github.event.workflow_run.id }}');
 });
+
+test('the required CI Success shell fails closed on policy and change-detection outcomes', () => {
+  const yaml = require('js-yaml');
+  const workflow = yaml.load(fs.readFileSync('.github/workflows/ci.yml', 'utf8'));
+  const aggregate = workflow.jobs['ci-success'];
+  const script = aggregate.steps.find((step) => step.name === 'Check required jobs').run;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workrail-ci-result-'));
+  try {
+    const run = (policy, changes = 'success') => {
+      const rendered = script.replace(/\$\{\{\s*([^}]+?)\s*\}\}/g, (_, expression) => {
+        if (expression === 'github.event_name') return 'pull_request';
+        if (expression === 'needs.ci-policy.result') return policy;
+        if (expression === 'needs.changes.result') return changes;
+        if (/^needs\.[a-z-]+\.result$/.test(expression)) return 'success';
+        throw new Error('Unexpected workflow expression: ' + expression);
+      });
+      return spawnSync('bash', ['-e', '-c', rendered], { encoding: 'utf8', env: { ...process.env, GITHUB_STEP_SUMMARY: path.join(root, 'summary') } }).status;
+    };
+    assert.equal(run('success'), 0);
+    for (const outcome of ['failure', 'cancelled', 'skipped', '']) {
+      assert.equal(run(outcome), 1);
+      assert.equal(run('success', outcome), 1);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
