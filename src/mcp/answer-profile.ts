@@ -7,7 +7,7 @@ import { createAnswerWorker } from '../answer-v1/worker.js';
 import type { SharedAuthorityConfig } from '../answer-v1/contracts/host-composition.js';
 import type { ReplyRef, ReadRef, ReceiptRef, EvidenceCursor, RecoveryRef, OpenAttemptRef } from '../answer-v1/contracts/answer-contract.js';
 import type { ToolContext } from './types.js';
-import type { ComposedServerInternal } from './server.js';
+import type { ComposedServerInternal, ProtocolUnit } from './server.js';
 import type { McpCallToolResult } from './types/workflow-tool-edition.js';
 import { WorkspaceRootsManager } from './workspace-roots-manager.js';
 import { zodToJsonSchema } from './zod-to-json-schema.js';
@@ -15,11 +15,11 @@ type AnswerHandler = (args: unknown, ctx: ToolContext, signal?: AbortSignal) => 
 /** Separate composition prevents exposing legacy token-based execution beside answer capabilities. */
 export async function composeAnswerProfile(config: SharedAuthorityConfig, ctx: ToolContext): Promise<ComposedServerInternal> {
     const lifetime = new AbortController();
-    const runtime = await createAnswerWorker(config, lifetime.signal);
-    if (runtime.kind !== 'created')
-        throw new Error(`Answer profile unavailable: ${runtime.kind}`);
+    const created = await createAnswerWorker(config, lifetime.signal);
+    if (created.kind !== 'created')
+        throw new Error(`Answer profile unavailable: ${created.kind}`);
+    const runtime = created;
     const { Server } = await import('@modelcontextprotocol/server');
-    const server = new Server({ name: 'workrail-server', version: '0.1.0' }, { capabilities: { tools: {} } });
     const schemas = {
         open_work: z.object({ workflowId: z.string(), workspacePath: z.string(), goal: z.string() }).strict(),
         answer_work: z.object({ reply: z.string(), answer: AnswerJsonSchema }).strict(),
@@ -43,8 +43,10 @@ export async function composeAnswerProfile(config: SharedAuthorityConfig, ctx: T
         recover_work: handler(schemas.recover_work, (input, signal) => 'recovery' in input ? runtime.recovery.recover(input.recovery as RecoveryRef, signal) : runtime.recovery.reconcileOpen(input.attempt as OpenAttemptRef, signal)),
     };
     const tools = (Object.keys(schemas) as (keyof typeof schemas)[]).map(name => ({ name, description: descriptions[name], inputSchema: zodToJsonSchema(schemas[name]) })).map(toSdkTool);
-    server.setRequestHandler('tools/list', async () => ({ tools }));
     const requests = new RequestLifetime();
+    function createProtocolUnit(): ProtocolUnit {
+        const server = new Server({ name: 'workrail-server', version: '0.1.0' }, { capabilities: { tools: {} } });
+    server.setRequestHandler('tools/list', async () => ({ tools }));
     server.setRequestHandler('tools/call', requests.wrap( async (request: CallToolRequest, extra: ServerContext): Promise<CallToolResult> => {
         const name = request.params.name;
         if (!Object.prototype.hasOwnProperty.call(handlers, name))
@@ -58,7 +60,20 @@ export async function composeAnswerProfile(config: SharedAuthorityConfig, ctx: T
             return { isError: true, content: [{ type: 'text', text: JSON.stringify({ kind: 'unavailable', detail: String(error) }) }] };
         }
     }));
-    server.onclose = () => { void requests.close(); lifetime.abort(); void runtime.close(new AbortController().signal); };
-    const rootsManager = new WorkspaceRootsManager();
-    return { closeRequests: () => requests.close(), server, ctx, rootsManager, rootsReader: rootsManager, tools, handlers };
+        return { server, rootsManager: new WorkspaceRootsManager() };
+    }
+    async function closeDomain(signal: AbortSignal) {
+        await requests.close();
+        const background = await ctx.backgroundWork.close(signal);
+        if (background !== 'closed') return background;
+        const result = await runtime.close(signal);
+        if (result.kind !== 'closed') return 'incomplete' as const;
+        lifetime.abort();
+        return 'closed' as const;
+    }
+    const { server, rootsManager } = createProtocolUnit();
+    // The legacy composition facade retains domain ownership for direct consumers.
+    // Fresh serving units intentionally have no domain-close callback.
+    server.onclose = () => { void closeDomain(new AbortController().signal); };
+    return { createProtocolUnit, closeDomain, closeRequests: () => requests.close(), server, ctx, rootsManager, rootsReader: rootsManager, tools, handlers };
 }
