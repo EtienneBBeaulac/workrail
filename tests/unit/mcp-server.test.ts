@@ -202,11 +202,8 @@ describe('MCP Server Core Functionality', () => {
       expect(serverContent).toContain("version: '0.1.0'");
     });
 
-    it('should register request handlers', () => {
-      expect(serverContent).toContain('ListToolsRequestSchema');
-      expect(serverContent).toContain('CallToolRequestSchema');
-      expect(serverContent).toContain('setRequestHandler');
-    });
+    // Handler registration is exercised over the wire in mcp-stdio-inprocess
+    // and mcp-http-transport integration tests, rather than SDK symbol names.
 
     it('should create tool context from DI container', () => {
       expect(serverContent).toContain('createToolContext');

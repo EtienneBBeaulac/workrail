@@ -14,6 +14,7 @@ type JsonSchema = {
   required?: string[];
   items?: JsonSchema;
   oneOf?: JsonSchema[];
+  anyOf?: JsonSchema[];
   enum?: string[];
   const?: unknown;
   default?: unknown;
@@ -94,6 +95,11 @@ function convertZodType(schema: z.ZodType): JsonSchema {
         };
       }),
     };
+  }
+
+  // Plain unions preserve each branch, including strict object exclusivity.
+  if (schema instanceof z.ZodUnion) {
+    return { anyOf: schema._def.options.map((option: z.ZodType) => convertZodType(option)) };
   }
 
   // Handle ZodString

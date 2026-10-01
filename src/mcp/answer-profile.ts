@@ -1,3 +1,5 @@
+import { toSdkTool, toSdkCallResult } from './sdk-boundary.js';
+import type { CallToolRequest, CallToolResult, ServerContext } from '@modelcontextprotocol/server';
 import { AnswerJsonSchema } from '../answer-v1/answer-json.js';
 import { RequestLifetime } from './request-lifetime.js';
 import { z } from 'zod';
@@ -16,8 +18,7 @@ export async function composeAnswerProfile(config: SharedAuthorityConfig, ctx: T
     const runtime = await createAnswerWorker(config, lifetime.signal);
     if (runtime.kind !== 'created')
         throw new Error(`Answer profile unavailable: ${runtime.kind}`);
-    const { Server } = await import('@modelcontextprotocol/sdk/server/index.js');
-    const { ListToolsRequestSchema, CallToolRequestSchema } = await import('@modelcontextprotocol/sdk/types.js');
+    const { Server } = await import('@modelcontextprotocol/server');
     const server = new Server({ name: 'workrail-server', version: '0.1.0' }, { capabilities: { tools: {} } });
     const schemas = {
         open_work: z.object({ workflowId: z.string(), workspacePath: z.string(), goal: z.string() }).strict(),
@@ -41,17 +42,17 @@ export async function composeAnswerProfile(config: SharedAuthorityConfig, ctx: T
         inspect_work: handler(schemas.inspect_work, (input, signal) => input.receipt === undefined ? runtime.inspector.inspect(input.read as ReadRef, signal) : runtime.inspector.inspectReceipt(input.read as ReadRef, input.receipt as ReceiptRef, signal, input.cursor as EvidenceCursor | undefined)),
         recover_work: handler(schemas.recover_work, (input, signal) => 'recovery' in input ? runtime.recovery.recover(input.recovery as RecoveryRef, signal) : runtime.recovery.reconcileOpen(input.attempt as OpenAttemptRef, signal)),
     };
-    const tools = (Object.keys(schemas) as (keyof typeof schemas)[]).map(name => ({ name, description: descriptions[name], inputSchema: zodToJsonSchema(schemas[name]) }));
-    server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
+    const tools = (Object.keys(schemas) as (keyof typeof schemas)[]).map(name => ({ name, description: descriptions[name], inputSchema: zodToJsonSchema(schemas[name]) })).map(toSdkTool);
+    server.setRequestHandler('tools/list', async () => ({ tools }));
     const requests = new RequestLifetime();
-    server.setRequestHandler(CallToolRequestSchema, requests.wrap( async (request, extra) => {
+    server.setRequestHandler('tools/call', requests.wrap( async (request: CallToolRequest, extra: ServerContext): Promise<CallToolResult> => {
         const name = request.params.name;
         if (!Object.prototype.hasOwnProperty.call(handlers, name))
             return { isError: true, content: [{ type: 'text', text: 'Unknown tool: ' + name }] };
         try {
             // The transport owns cancellation; worker operations also observe runtime shutdown.
             const fn = handlers[name as keyof typeof handlers];
-            return await fn(request.params.arguments ?? {}, ctx, extra.signal);
+            return toSdkCallResult(await fn(request.params.arguments ?? {}, ctx, extra.mcpReq.signal));
         }
         catch (error) {
             return { isError: true, content: [{ type: 'text', text: JSON.stringify({ kind: 'unavailable', detail: String(error) }) }] };
