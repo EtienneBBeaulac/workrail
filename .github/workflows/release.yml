@@ -69,7 +69,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: refs/heads/main
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
           persist-credentials: true
           token: ${{ steps.app-token.outputs.token }}
@@ -132,8 +132,8 @@ jobs:
           set -euo pipefail
 
           # Configure git remote to use the app token for push authentication.
-          # @semantic-release/git pushes using the remote URL; setting it here ensures
-          # the app token (which has bypass permission) is used, not GITHUB_TOKEN.
+          # Release tags and version branches authenticate with the app token.
+          # Version updates still require an approved PR and normal CI.
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
 
           # Ensure we use the corepack-activated npm (OIDC requires npm >= 11.5.1).
@@ -168,24 +168,23 @@ jobs:
           fi
 
           # Update package-lock.json to match the new version
-          npm install --package-lock-only --ignore-scripts 2>/dev/null || true
+          npm install --package-lock-only --ignore-scripts
 
           git config user.name  "workrail-release-bot[bot]"
           git config user.email "workrail-release-bot[bot]@users.noreply.github.com"
           git checkout -b "${BRANCH}"
           git add package.json package-lock.json
-          git commit --no-verify -m "chore(release): ${NEW_VERSION} [skip ci]"
+          git commit --no-verify -m "chore: update package version to ${NEW_VERSION}"
           git push origin "${BRANCH}"
 
           PR_URL="$(gh pr create \
-            --title "chore(release): ${NEW_VERSION} [skip ci]" \
+            --title "chore: update package version to ${NEW_VERSION}" \
             --body "Automated version bump after publishing v${NEW_VERSION} to npm." \
             --base main \
             --head "${BRANCH}")"
 
-          # Admin-merge immediately -- this is a mechanical version number change,
-          # no code risk, no need to wait for CI on a trivial package.json edit.
-          gh pr merge "${BRANCH}" --squash --admin
+          # Leave the version update for approval and protected merge after CI.
+          echo "Version update awaiting review: ${PR_URL}"
 
       - name: Cleanup tag on failed publish
         if: failure()

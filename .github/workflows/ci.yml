@@ -2,6 +2,7 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
     branches:
       - '**'
   push:
@@ -78,7 +79,9 @@ jobs:
         run: npm install --ignore-scripts
 
       - name: Run CI policy check
-        run: node scripts/ci-policy-check.js
+        run: |
+          node --test scripts/release-title-policy.test.cjs scripts/release-policy-integration.test.cjs
+          node scripts/ci-policy-check.js
 
   # ============================================================================
   # REQUIRED: Lockfile is stable under npm install
@@ -556,6 +559,13 @@ jobs:
         run: |
           echo "## CI Success Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Policy and change detection must succeed, including on docs-only PRs.
+          if [[ "${{ needs.ci-policy.result }}" != "success" || "${{ needs.changes.result }}" != "success" ]]; then
+            echo "- CI Policy or Detect Changes: FAILED" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          echo "- CI Policy and Detect Changes: PASSED" >> $GITHUB_STEP_SUMMARY
 
           # Lockfile: advisory only (continue-on-error -- does not block merge)
           if [[ "${{ needs.lockfile.result }}" == "success" ]]; then
