@@ -66,8 +66,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--checkout', required=True)
     parser.add_argument('--output-dir', required=True)
+    parser.add_argument('--dependency-cache', type=Path, help='Explicit npm offline cache; build runtimes remain independent')
     args = parser.parse_args()
     checkout = Path(args.checkout).resolve()
+    dependency_cache = (args.dependency_cache or Path.home() / '.npm').resolve()
+    if not dependency_cache.is_dir():
+        raise ValueError('Dependency cache unavailable: supply --dependency-cache explicitly')
     output = Path(args.output_dir).resolve()
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
@@ -79,7 +83,7 @@ def main():
     before = inventory(checkout, names)
     report = {'checkout': str(checkout), 'head': head, 'baseline': BASELINE,
               'currentSource': 'tracked working-tree bytes, including controls',
-              'sourceInventory': before, 'phases': []}
+              'sourceInventory': before, 'phases': [], 'dependencyCache': str(dependency_cache)}
     code = 1
     root = Path(tempfile.mkdtemp(prefix='workrail-portable-compat-'))
     try:
@@ -105,7 +109,7 @@ def main():
         private_home = root / 'home'
         private_home.mkdir()
         env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TMPDIR') if k in os.environ}
-        env.update({'HOME': str(private_home), 'npm_config_cache': str(Path.home() / '.npm'),
+        env.update({'HOME': str(private_home), 'npm_config_cache': str(dependency_cache),
                     'WORKRAIL_COMPAT_ROOT': str(root / 'fixture-state'),
                     'WORKRAIL_COMPAT_REQUIRE_BLOCKED': '1',
                     'WORKRAIL_DATA_DIR': str(root / 'fixture-state/state'),
