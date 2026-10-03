@@ -1,0 +1,22 @@
+{
+  "sourceCommit": "396cdfa4e665afa993b50fcf0ec59ca53a2167db",
+  "archiveSha256": "6ac4f5344f355db5e3adc57867b235c38266d7a959f8b5ef2069e81367374b9e",
+  "uncompressedArchiveSha256": "581d108da0535bec959149e9ac6b5cf761a0ad017d7572908e34aeaf143a0259",
+  "generation": [
+    "git",
+    "archive",
+    "--format=tar",
+    "396cdfa4e665afa993b50fcf0ec59ca53a2167db",
+    "src",
+    "workflows",
+    "spec",
+    "package.json",
+    "package-lock.json",
+    "tsconfig.json",
+    "tsconfig.base.json",
+    "tsconfig.build.json"
+  ],
+  "compression": "Python gzip.compress with mtime=0",
+  "role": "Historical source fixture only; private dependency installation, no packaged runtime activation.",
+  "projection": "Complete src/workflows/spec directories and package/TypeScript configs; no runtime source rewriting."
+}
