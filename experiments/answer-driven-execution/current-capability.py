@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 
 HELPER = Path(__file__).with_name('current-cross-version.py')
@@ -13,7 +14,13 @@ SPEC = importlib.util.spec_from_file_location('compatibility_process', HELPER)
 if SPEC is None or SPEC.loader is None:
     raise SystemExit('Current compatibility helpers unavailable')
 process = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(process)
+# Loading a tracked helper must not leave bytecode in the checkout being proved.
+previous_bytecode_policy = sys.dont_write_bytecode
+sys.dont_write_bytecode = True
+try:
+    SPEC.loader.exec_module(process)
+finally:
+    sys.dont_write_bytecode = previous_bytecode_policy
 HOST = 'src/answer-v1/host.ts'
 POLICY = "Object.freeze(['notes' as const, 'wr.contracts.review_verdict' as const])"
 NOTES_POLICY = "Object.freeze(['notes' as const])"
