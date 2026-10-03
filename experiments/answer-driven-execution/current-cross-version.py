@@ -12,6 +12,8 @@ import tempfile
 import time
 
 BASELINE = '396cdfa4e665afa993b50fcf0ec59ca53a2167db'
+ARCHIVE = 'experiments/answer-driven-execution/fixtures/legacy-writer-396cdfa4.tar.gz'
+ARCHIVE_SHA256 = '6ac4f5344f355db5e3adc57867b235c38266d7a959f8b5ef2069e81367374b9e'
 FIXTURE = 'experiments/answer-driven-execution/cross-version.fixture.ts'
 CONFIG = 'experiments/answer-driven-execution/cross-version.config.js'
 
@@ -85,9 +87,10 @@ def main():
         reader = root / 'reader'
         writer.mkdir()
         reader.mkdir()
-        archive = root / 'baseline.tar'
-        subprocess.run(['git', 'archive', '--format=tar', '-o', str(archive), BASELINE],
-                       cwd=checkout, check=True, timeout=30)
+        archive = checkout / ARCHIVE
+        if digest(archive) != ARCHIVE_SHA256:
+            raise ValueError('Historical writer archive identity mismatch')
+        report['writerArchiveSha256'] = ARCHIVE_SHA256
         with tarfile.open(archive) as source:
             source.extractall(writer, filter='data')
         # Never archive HEAD for the reader: doing so would discard sabotage.
