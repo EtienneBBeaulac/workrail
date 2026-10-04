@@ -366,6 +366,50 @@ describe('AgentLoop', () => {
   });
 
   describe('abort()', () => {
+    it.each([false, true])('preserves completed effects and stops later batch work when abort is %s', async abortDuringTool => {
+      const completedEffects: string[] = [];
+      let firstSignal: AbortSignal | undefined;
+      let observedAbortEvent = false;
+      const first: AgentTool = {
+        name: 'first', description: 'First effect', label: 'First',
+        inputSchema: { type: 'object', properties: {} },
+        async execute(_id, _params, signal) {
+          firstSignal = signal;
+          expect(signal?.aborted).toBe(false);
+          completedEffects.push('first effect committed');
+          if (abortDuringTool) {
+            expect(signal).toBeDefined();
+            await new Promise<void>(resolve => {
+              signal!.addEventListener('abort', () => { observedAbortEvent = true; resolve(); }, { once: true });
+              queueMicrotask(() => agent.abort());
+            });
+          }
+          return { content: [{ type: 'text', text: 'Effect retained' }], details: null };
+        },
+      };
+      const second = makeTool('second');
+      const batch: Anthropic.Message = {
+        ...makeToolUseMessage('first', 'call_first'),
+        content: [
+          { type: 'tool_use', id: 'call_first', name: 'first', input: {} },
+          { type: 'tool_use', id: 'call_second', name: 'second', input: {} },
+        ],
+      };
+      const client = new FakeAnthropicClient([batch, makeEndTurnMessage()]);
+      const agent = new AgentLoop({ systemPrompt: 'Run two effects.', tools: [first, second], client, modelId: 'claude-test' });
+      await agent.prompt(USER_MSG);
+      expect(firstSignal).toBeDefined();
+      expect(firstSignal!.aborted).toBe(abortDuringTool);
+      expect(observedAbortEvent).toBe(abortDuringTool);
+      const toolMessages = agent.state.messages.filter(message => message.role === 'user' && Array.isArray(message.content));
+      const secondResult = toolMessages.flatMap(message => Array.isArray(message.content) ? message.content : [])
+        .find(block => block.type === 'tool_result' && block.tool_use_id === 'call_second');
+      expect(secondResult).toMatchObject({ type: 'tool_result', tool_use_id: 'call_second', is_error: abortDuringTool });
+      expect(completedEffects).toEqual(['first effect committed']);
+      expect(second.executionCount).toBe(abortDuringTool ? 0 : 1);
+      expect(client.callCount).toBe(abortDuringTool ? 1 : 2);
+    });
+
     it('stops the loop when abort() is called before prompt()', async () => {
       const client = new FakeAnthropicClient([makeEndTurnMessage()]);
       const agent = new AgentLoop({
