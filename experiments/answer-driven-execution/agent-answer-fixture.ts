@@ -5,7 +5,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { mkdtemp, mkdir, writeFile, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { z } from 'zod';
 import { ARTIFACT_CONTRACT_REFS } from '../../src/v2/durable-core/schemas/artifacts/index.js';
 
@@ -170,7 +170,7 @@ async function fixture(run: (f: {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name);
       if (entry.isDirectory()) Object.assign(result, await journal(path));
-      else if (path.includes('/sessions/') && entry.name.endsWith('.jsonl')) result[path] = await readFile(path, 'utf8');
+      else if (relative(root, path).split(sep).includes('sessions') && entry.name.endsWith('.jsonl')) result[path] = await readFile(path, 'utf8');
     }
     return result;
   };
@@ -178,7 +178,7 @@ async function fixture(run: (f: {
     const result: Record<string, string> = {};
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name);
-      const inSessions = path.includes('/sessions/') || path.endsWith('/sessions');
+      const inSessions = relative(root, path).split(sep).includes('sessions');
       if (entry.isDirectory()) {
         if (inSessions) result[path] = '<directory>';
         Object.assign(result, await sessionFiles(path));
