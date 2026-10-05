@@ -12,8 +12,8 @@
   },
   "dependencies": {
     "@formkit/auto-animate": "^0.10.0",
-    "@tanstack/react-query": "^5.103.2",
-    "@tanstack/react-router": "^1.170.39",
+    "@tanstack/react-query": "^5.104.1",
+    "@tanstack/react-router": "^1.170.41",
     "@xyflow/react": "^12.12.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
@@ -28,7 +28,7 @@
     "jsdom": "^30.1.1",
     "tailwindcss": "^4.1.0",
     "typescript": "^7.0.2",
-    "vite": "^8.3.1",
-    "vitest": "^5.0.2"
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3"
   }
 }
