@@ -1,4 +1,4 @@
-# Metrics proof definitions
+# Copied source proof definitions
 
 This checks the real metrics projection with completed-run observations. An absent
 reported outcome must remain unknown, and each supported reported outcome must
@@ -65,3 +65,27 @@ errors. A stored file-proof recipe binds one declared mutation and its complete
 receipt. A second independent control is supplementary evidence, not another
 stored witness or exhaustive product correctness. This verifies provenance
 projection behavior and does not assign historical delivery ownership.
+
+## Verdict routing
+
+`gate-verdict.py` observes the actual evaluator dispatcher and gate-verdict schema.
+Successful fake evaluator sessions exercise missing, valid approval, invalid,
+rejected and uncertain artifacts. Only a complete typed observation reaches
+Python assertions; import, runtime, archive and observation failures exit 2.
+This proves routing and validation, not live evaluator judgment.
+
+```bash
+python3 experiments/answer-driven-execution/proofs/gate-verdict-controls.py \
+  --node /absolute/path/to/node --sha256 <sha256>
+python3 experiments/answer-driven-execution/proofs/gate-verdict.py \
+  --root /absolute/path/to/workrail \
+  --node /absolute/path/to/node --sha256 <sha256>
+```
+
+The declaration must witness `gate-verdict.py`, `gate-verdict.mjs`,
+`metrics-outcome.py` (shared boundary helpers), the dispatcher, the real
+`gate-verdict.ts` schema, `package.json`, `package-lock.json`, and the archived
+dependency under `vendor/`. The archive is verified against the lockfile and
+materialized without npm, network access or ambient `node_modules`. A changed
+lockfile requires reviewed dependency/proof refresh, not an installed fallback.
+See [the dependency fixture](vendor/README.md).
