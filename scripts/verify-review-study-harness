@@ -6,6 +6,9 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 cd "$REPO_ROOT"
 
+echo "==> Verifying recovery harness outcomes and retained diagnostics..."
+python3 "$REPO_ROOT/experiments/answer-driven-execution/host-recovery-outcomes.test.py"
+
 echo "==> Running review study harness probes with Vitest..."
 "$REPO_ROOT/node_modules/.bin/vitest" run \
   -c "$REPO_ROOT/experiments/answer-driven-execution/vitest.config.js" \
