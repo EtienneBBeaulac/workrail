@@ -124,3 +124,26 @@ Independent staging, commit, title, body and missing-field mutants must reach
 Python assertion failures. Malformed observations, syntax errors, undeclared
 imports and absent source remain unavailable (exit 2). Existing Vitest coverage
 remains separate and unchanged.
+
+## Assessment consequence scoping
+
+`assessment-scoping.py` checks the actual pure evaluator with five ordered cases:
+missing named assessment, high named assessment with an unrelated low assessment,
+matching named low assessment, two matching declarations, and a matching high
+rule. Assertions compare every effect field, guidance and declaration order.
+This verifies evaluation, not durable follow-up effects or model judgment.
+
+Declare the definition, adjacent bridge, `metrics-outcome.py` helpers,
+`package.json`, and `src/mcp/handlers/v2-advance-core/assessment-consequences.ts`.
+The subject currently has only type imports; new runtime imports refuse rather
+than loading undeclared dependencies. Use the same explicit Node identity and
+absolute source root as the other copied definitions.
+
+```bash
+python3 experiments/answer-driven-execution/proofs/assessment-scoping-controls.py \
+  --node /absolute/path/to/node --sha256 <sha256>
+```
+
+Scope, guidance and declaration-order mutants must reach Python assertions.
+Missing source, syntax, undeclared imports and malformed observations remain
+unavailable (exit 2). Existing Vitest coverage remains unchanged.
