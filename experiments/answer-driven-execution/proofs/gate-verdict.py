@@ -34,6 +34,12 @@ class Verdict(str, Enum):
     UNCERTAIN = 'uncertain'
 
 
+class Confidence(str, Enum):
+    HIGH = 'high'
+    MEDIUM = 'medium'
+    LOW = 'low'
+
+
 class Case(str, Enum):
     MISSING = 'missing'
     APPROVED = 'approved'
@@ -42,16 +48,16 @@ class Case(str, Enum):
     UNCERTAIN = 'uncertain'
 
 
-EXPECTED = MappingProxyType({Case.MISSING: (Verdict.UNCERTAIN, 'low'),
-    Case.APPROVED: (Verdict.APPROVED, 'high'), Case.INVALID: (Verdict.UNCERTAIN, 'low'),
-    Case.REJECTED: (Verdict.REJECTED, 'high'), Case.UNCERTAIN: (Verdict.UNCERTAIN, 'high')})
+EXPECTED = MappingProxyType({Case.MISSING: (Verdict.UNCERTAIN, Confidence.LOW),
+    Case.APPROVED: (Verdict.APPROVED, Confidence.HIGH), Case.INVALID: (Verdict.UNCERTAIN, Confidence.LOW),
+    Case.REJECTED: (Verdict.REJECTED, Confidence.HIGH), Case.UNCERTAIN: (Verdict.UNCERTAIN, Confidence.HIGH)})
 
 
 @dataclass(frozen=True)
 class Row:
     case: Case
     verdict: Verdict
-    confidence: str
+    confidence: Confidence
     step_id: str
 
 
@@ -71,10 +77,10 @@ def decode(raw: bytes) -> Observation | Failure:
         for case, row in zip(Case, value['rows']):
             if (not isinstance(row, dict) or set(row) != {'case', 'verdict', 'confidence', 'stepId'}
                     or row['case'] != case or row['verdict'] not in tuple(Verdict)
-                    or row['confidence'] not in ('high', 'medium', 'low')
+                    or row['confidence'] not in tuple(Confidence)
                     or not isinstance(row['stepId'], str) or len(row['stepId']) > 128):
                 return Failure('Incomplete or invalid verdict observation')
-            rows.append(Row(case, Verdict(row['verdict']), row['confidence'], row['stepId']))
+            rows.append(Row(case, Verdict(row['verdict']), Confidence(row['confidence']), row['stepId']))
         return Observation(tuple(rows))
     except (ValueError, UnicodeError, RecursionError):
         return Failure('Unreadable observation')
