@@ -14,6 +14,12 @@ const question = z.object({ kind: z.literal('question'), reply: z.string(), inst
 const opened = z.object({ kind: z.literal('opened'), recovery: z.string(), view: question }).passthrough();
 const recorded = z.object({ kind: z.literal('recorded'), receipt: z.string(), view: z.object({ kind: z.string() }).passthrough() }).passthrough();
 
+const OPERATION_TIMEOUT_MS = 5000;
+// This scenario includes sixteen MCP operations, a script, four HTTP reads and
+// three client shutdowns. Its budget composes those operations; it is not a
+// ten-second latency assertion on an entire process-death/replay lifecycle.
+const CASE_TIMEOUT_MS = 24 * OPERATION_TIMEOUT_MS;
+
 // WorkRail is the MCP engine, not the agent's tool runner. This deterministic agent
 // substitutes only model judgment; file/command effects, MCP and HTTP remain real.
 it.each(['acknowledged_notes', 'lost_ack_review'] as const)('completes %s through tools, process death, replay and HTTP receipts', async scenario => {
@@ -53,18 +59,18 @@ it.each(['acknowledged_notes', 'lost_ack_review'] as const)('completes %s throug
           WORKRAIL_DATA_DIR: data, WORKRAIL_ENABLE_SESSION_TOOLS: 'false', WORKRAIL_TRANSPORT: 'stdio' }, stderr: 'pipe' });
       clients.push({ client, transport, closed });
       transport.stderr?.resume();
-      await phase('connect', () => client.connect(transport, { timeout: 5000 }));
+      await phase('connect', () => client.connect(transport, { timeout: OPERATION_TIMEOUT_MS }));
       transport.stderr?.resume();
-      expect((await phase('listTools', () => client.listTools())).tools.map(t => t.name).sort()).toEqual(['answer_work', 'inspect_work', 'open_work', 'recover_work']);
+      expect((await phase('listTools', () => client.listTools(undefined, { timeout: OPERATION_TIMEOUT_MS }))).tools.map(t => t.name).sort()).toEqual(['answer_work', 'inspect_work', 'open_work', 'recover_work']);
       return { client, transport, closed };
     };
     const call = async (client: Client, name: string, args: Record<string, unknown>) => {
-      const result = await phase(name, () => client.callTool({ name, arguments: args }, undefined, { timeout: 5000 }));
+      const result = await phase(name, () => client.callTool({ name, arguments: args }, undefined, { timeout: OPERATION_TIMEOUT_MS }));
       expect(result.isError).not.toBe(true);
       return JSON.parse(envelope.parse(result).content[0]!.text) as unknown;
     };
     const get = async (path: string) => {
-      const response = await fetch(`http://127.0.0.1:${viewer.port}${path}`);
+      const response = await fetch(`http://127.0.0.1:${viewer.port}${path}`, { signal: AbortSignal.timeout(OPERATION_TIMEOUT_MS) });
       expect(response.status).toBe(200);
       const body = await response.json();
       expect(JSON.stringify(body)).not.toContain('"reply"');
@@ -116,7 +122,7 @@ it.each(['acknowledged_notes', 'lost_ack_review'] as const)('completes %s throug
     const resumed = question.parse(await call(cold.client, 'recover_work', { recovery: work.recovery }));
     if (nextReply) expect(resumed.reply).toBe(nextReply);
     expect(resumed.instruction).toContain('Run produce.cjs');
-    const output = await promisify(execFile)(process.execPath, ['produce.cjs'], { cwd: workspace, timeout: 5000 });
+    const output = await promisify(execFile)(process.execPath, ['produce.cjs'], { cwd: workspace, timeout: OPERATION_TIMEOUT_MS });
     expect(output.stdout).toBe('RETAINED RESULT');
     const competitor = await boot();
     const raced = await Promise.all([cold.client, competitor.client].map(client => call(client, 'answer_work', { reply: resumed.reply, answer: { notes: output.stdout } })));
@@ -160,4 +166,4 @@ it.each(['acknowledged_notes', 'lost_ack_review'] as const)('completes %s throug
     await phase('viewer cleanup', async () => { await stopViewer?.(); });
     await rm(root, { recursive: true, force: true });
   }
-});
+}, { timeout: CASE_TIMEOUT_MS, retry: 0 });
