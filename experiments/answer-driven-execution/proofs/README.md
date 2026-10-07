@@ -1,4 +1,4 @@
-# Metrics outcome proof definition
+# Metrics proof definitions
 
 This checks the real metrics projection with completed-run observations. An absent
 reported outcome must remain unknown, and each supported reported outcome must
@@ -38,3 +38,30 @@ Run the boundary controls with the same explicit runtime:
 python3 experiments/answer-driven-execution/proofs/metrics-outcome-controls.py \
   --node /absolute/node --sha256 <executable-sha256>
 ```
+
+## Delivery provenance
+
+`metrics-delivery.py` checks seven ordered cases: matching-run delivery wins over
+agent reports, context and completed-run fallback remain available, another run's
+delivery neither replaces nor erases fallback, an earlier other-run event does not
+suppress matching delivery, and empty delivery preserves context fallback.
+Expected commits live in the Python assertion definition; the Node bridge reports
+actual projection results without deciding whether they are correct.
+
+Use the same absolute root, selected runtime and SHA256 arguments as the outcome
+definition. The copied input declaration must include `metrics-delivery.py`,
+`metrics-delivery.mjs`, and `metrics-outcome.py` for the reused boundary helpers,
+alongside the projection, constants and `package.json`. The existing outcome
+source stays unchanged, preserving its current sealed input identity.
+
+```sh
+python3 experiments/answer-driven-execution/proofs/metrics-delivery-controls.py \
+  --node /absolute/node --sha256 <executable-sha256>
+```
+
+Controls execute precedence and wrong-run mutants independently. Both must reach
+an assertion failure; runtime, syntax and malformed observations must remain
+errors. A stored file-proof recipe binds one declared mutation and its complete
+receipt. A second independent control is supplementary evidence, not another
+stored witness or exhaustive product correctness. This verifies provenance
+projection behavior and does not assign historical delivery ownership.
