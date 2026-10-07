@@ -38,6 +38,9 @@ import subprocess
 import sys
 import tempfile
 import time
+# Probe imports must not mutate the source checkout being verified.
+sys.dont_write_bytecode = True
+from host_recovery_outcomes import CaseStatus, terminal_exit, diagnostic_tail
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / 'experiments/answer-driven-execution/host-recovery.fixture.ts'
@@ -86,8 +89,14 @@ report = {
     'cases': [],
 }
 
+def wire_report():
+    return {**report, 'cases': [
+        {**case, 'success': CaseStatus(case['status']) is CaseStatus.PASSED}
+        for case in report['cases']
+    ]}
+
 def save_report():
-    (out_dir / 'result.json').write_text(json.dumps(report, indent=2) + '\n')
+    (out_dir / 'result.json').write_text(json.dumps(wire_report(), indent=2) + '\n')
 
 save_report()
 
@@ -146,7 +155,6 @@ def validate_pointer_file(pointer_path: Path) -> tuple[bool, str]:
     return True, ""
 
 cases_to_run = args.case or ['harness_control', 'di2', 'di2_runner', 'di5', 'di5_runner', 'di9', 'di9_unstopped', 'di4_runner']
-overall_success = True
 
 vitest_bin = str(ROOT / 'node_modules/.bin/vitest')
 cmd_base = [vitest_bin, 'run', '--config', str(CONFIG), str(FIXTURE)]
@@ -205,9 +213,7 @@ for case in cases_to_run:
                     'error': writer_error,
                 })
                 case_record['status'] = 'harness_error'
-                case_record['success'] = False
                 save_report()
-                overall_success = False
                 continue
 
             try:
@@ -245,9 +251,7 @@ for case in cases_to_run:
                         })
                         case_record['status'] = 'runtime_unavailable'
                         case_record['writerExitCode'] = writer_exit_code
-                        case_record['success'] = False
                         save_report()
-                        overall_success = False
                         continue
                     elif 'runtime_error: src/answer-v1/host.ts' in writer_log_text:
                         print(f"[{case}] Observed runtime_error in src/answer-v1/host.ts.")
@@ -260,23 +264,23 @@ for case in cases_to_run:
                         })
                         case_record['status'] = 'runtime_error'
                         case_record['writerExitCode'] = writer_exit_code
-                        case_record['success'] = False
                         save_report()
-                        overall_success = False
                         continue
                     else:
-                        writer_error = f"Writer exited prematurely with code {writer_exit_code} before acknowledged barrier"
+                        writer_error = (
+                            'Writer deadline elapsed before acknowledged barrier'
+                            if writer_exit_code is None else
+                            f'Writer exited prematurely with code {writer_exit_code} before acknowledged barrier'
+                        )
                         case_record['phases'].append({
                             'phase': 'write',
                             'barrierConfirmed': False,
                             'error': writer_error,
                             'writerExitCode': writer_exit_code,
                         })
-                        case_record['status'] = 'harness_error'
+                        case_record['status'] = 'harness_timeout' if writer_exit_code is None else 'harness_error'
                         case_record['writerExitCode'] = writer_exit_code
-                        case_record['success'] = False
                         save_report()
-                        overall_success = False
                         continue
 
                 # Strict barrier schema validation before kill
@@ -308,9 +312,7 @@ for case in cases_to_run:
                         'error': writer_error,
                     })
                     case_record['status'] = 'harness_error'
-                    case_record['success'] = False
                     save_report()
-                    overall_success = False
                     continue
 
                 if case in ('di2', 'di2_runner', 'di5', 'di5_runner', 'di9', 'di9_unstopped', 'di4_runner'):
@@ -323,9 +325,7 @@ for case in cases_to_run:
                             'error': writer_error,
                         })
                         case_record['status'] = 'harness_error'
-                        case_record['success'] = False
                         save_report()
-                        overall_success = False
                         continue
 
                 print(f"[{case}] Acknowledged barrier reached and schema verified. Terminating writer process group with SIGKILL...")
@@ -363,9 +363,7 @@ for case in cases_to_run:
                     'writerExitCode': writer_proc.returncode if writer_proc else None,
                 })
                 case_record['status'] = 'harness_error'
-                case_record['success'] = False
                 save_report()
-                overall_success = False
                 continue
 
             # Copy barrier proof out before temp dir cleanup
@@ -430,9 +428,7 @@ for case in cases_to_run:
                     'error': reader_launch_error,
                 })
                 case_record['status'] = 'harness_error'
-                case_record['success'] = False
                 save_report()
-                overall_success = False
                 continue
 
             print(f"[{case}] Reader finished with exit code {reader_code}.")
@@ -444,10 +440,11 @@ for case in cases_to_run:
 
             # Reject nonzero reader exit code even if observation claims success
             if reader_code != 0:
-                case_record['status'] = 'test_failed'
-                case_record['error'] = f"Reader exited with non-zero code {reader_code}"
-                case_record['success'] = False
-                overall_success = False
+                case_record['status'] = 'harness_timeout' if reader_code == 124 else 'test_failed'
+                case_record['error'] = (
+                    'Reader deadline elapsed' if reader_code == 124 else
+                    f'Reader exited with non-zero code {reader_code}'
+                )
                 save_report()
                 continue
 
@@ -455,8 +452,6 @@ for case in cases_to_run:
             if not isinstance(obs_data, dict):
                 case_record['status'] = 'harness_error'
                 case_record['error'] = "Reader observation must be a JSON object"
-                case_record['success'] = False
-                overall_success = False
                 save_report()
                 continue
 
@@ -516,8 +511,6 @@ for case in cases_to_run:
             if not base_obs_valid:
                 case_record['status'] = 'harness_error'
                 case_record['error'] = f"Reader observation metadata validation failed: {obs_data}"
-                case_record['success'] = False
-                overall_success = False
                 save_report()
                 continue
 
@@ -527,12 +520,9 @@ for case in cases_to_run:
                         obs_data.get('barrierObserved') is True and
                         obs_data.get('storageIntact') is True):
                     case_record['status'] = 'passed'
-                    case_record['success'] = True
                 else:
                     case_record['status'] = 'harness_error'
                     case_record['error'] = f"Harness control observation checks failed: {obs_data}"
-                    case_record['success'] = False
-                    overall_success = False
 
             elif case == 'di2':
                 if (obs_data.get('retainedReceiptCount') == 2 and
@@ -549,12 +539,9 @@ for case in cases_to_run:
                         len(obs_data.get('receipts')) == 2 and
                         all(r.get('disposition') == 'accepted' and r.get('id') for r in obs_data.get('receipts'))):
                     case_record['status'] = 'passed'
-                    case_record['success'] = True
                 else:
                     case_record['status'] = 'test_failed'
                     case_record['error'] = f"DI2 observation failed invariant predicates: {obs_data}"
-                    case_record['success'] = False
-                    overall_success = False
 
             elif case == 'di5':
                 if (obs_data.get('initialRecoveredReceiptCount') == 1 and
@@ -573,12 +560,9 @@ for case in cases_to_run:
                         len(obs_data.get('receipts')) == 2 and
                         all(r.get('disposition') == 'accepted' and r.get('id') for r in obs_data.get('receipts'))):
                     case_record['status'] = 'passed'
-                    case_record['success'] = True
                 else:
                     case_record['status'] = 'test_failed'
                     case_record['error'] = f"DI5 observation failed invariant predicates: {obs_data}"
-                    case_record['success'] = False
-                    overall_success = False
 
             elif case == 'di9':
                 if (isinstance(obs_data.get('stopped'), bool) and
@@ -593,12 +577,9 @@ for case in cases_to_run:
                         isinstance(obs_data.get('noRecoveredExecution'), bool) and
                         obs_data.get('noRecoveredExecution') is True):
                     case_record['status'] = 'passed'
-                    case_record['success'] = True
                 else:
                     case_record['status'] = 'test_failed'
                     case_record['error'] = f"DI9 observation failed invariant predicates: {obs_data}"
-                    case_record['success'] = False
-                    overall_success = False
 
             elif case == 'di9_unstopped':
                 if (isinstance(obs_data.get('replayedOriginal'), bool) and
@@ -613,12 +594,9 @@ for case in cases_to_run:
                         len(obs_data.get('receipts')) == 2 and
                         all(r.get('disposition') == 'accepted' and r.get('id') for r in obs_data.get('receipts'))):
                     case_record['status'] = 'passed'
-                    case_record['success'] = True
                 else:
                     case_record['status'] = 'test_failed'
                     case_record['error'] = f"DI9 unstopped observation failed invariant predicates: {obs_data}"
-                    case_record['success'] = False
-                    overall_success = False
 
             elif case in ('di4_runner', 'di5_runner', 'di2_runner'):
                 expected_model_calls = 2 if case == 'di2_runner' else 1
@@ -633,12 +611,9 @@ for case in cases_to_run:
                         len(obs_data.get('receipts')) == 2 and
                         all(r.get('disposition') == 'accepted' and r.get('id') for r in obs_data.get('receipts'))):
                     case_record['status'] = 'passed'
-                    case_record['success'] = True
                 else:
                     case_record['status'] = 'test_failed'
                     case_record['error'] = f"{case} observation failed invariant predicates: {obs_data}"
-                    case_record['success'] = False
-                    overall_success = False
 
             save_report()
 
@@ -646,15 +621,26 @@ for case in cases_to_run:
         print(f"[{case}] Harness error during case execution: {e}")
         case_record['status'] = 'harness_error'
         case_record['error'] = str(e)
-        case_record['success'] = False
         save_report()
-        overall_success = False
         continue
 
 print("\n=== Final Report ===")
-print(json.dumps(report, indent=2))
+print(json.dumps(wire_report(), indent=2))
 
-if not overall_success:
-    sys.exit(1)
-else:
-    sys.exit(0)
+# Capture bounded failed-phase evidence before the caller removes temporary logs.
+# Prefix child lines so they cannot impersonate a gate verdict.
+for case in report['cases']:
+    status = CaseStatus(case['status'])
+    if status is CaseStatus.PASSED:
+        continue
+    print(f"CHECKCASE: {case['case']}: {status.value}")
+    errors = [case.get('error', '')] + [phase.get('error', '') for phase in case['phases']]
+    for error in errors:
+        for line in error.splitlines():
+            print('    | ' + line[:512])
+    for phase, suffix in (('write', 'writer'), ('read', 'reader')):
+        print(f'    | {phase} phase log:')
+        for line in diagnostic_tail(out_dir / f"{case['case']}_{suffix}.log"):
+            print('    | ' + line)
+
+sys.exit(terminal_exit(tuple(CaseStatus(case['status']) for case in report['cases'])))
