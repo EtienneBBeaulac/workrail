@@ -400,12 +400,14 @@ it('refuses cross-scope receipt and cursor reads across unbound runs while prese
   const readRawA_rej = await f.call('inspect_work', { read: pendingA.read, receipt: rejectedA.receipt });
   assertNoReply(readRawA_rej);
   const pageA_rej = evidenceReadSchema.parse(readRawA_rej);
+  expect(pageA_rej.kind).toBe('more');
   if (pageA_rej.kind !== 'more') throw new Error('Expected more pages for rejected A');
   const cursorA_rej = pageA_rej.next;
 
   const readRawA = await f.call('inspect_work', { read: pendingA.read, receipt: firstA.receipt });
   assertNoReply(readRawA);
   const pageA1 = evidenceReadSchema.parse(readRawA);
+  expect(pageA1.kind).toBe('more');
   if (pageA1.kind !== 'more') throw new Error('Expected more pages for run A');
   expect(pageA1.receipt).toBe(firstA.receipt);
   expect(pageA1.disposition).toBe('accepted');
@@ -415,6 +417,7 @@ it('refuses cross-scope receipt and cursor reads across unbound runs while prese
   const readRawB = await f.call('inspect_work', { read: pendingB.read, receipt: firstB.receipt });
   assertNoReply(readRawB);
   const pageB1 = evidenceReadSchema.parse(readRawB);
+  expect(pageB1.kind).toBe('more');
   if (pageB1.kind !== 'more') throw new Error('Expected more pages for run B');
   expect(pageB1.receipt).toBe(firstB.receipt);
   expect(pageB1.disposition).toBe('accepted');
