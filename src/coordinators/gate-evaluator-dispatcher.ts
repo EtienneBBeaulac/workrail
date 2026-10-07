@@ -15,8 +15,8 @@
  *   spawn failure). The coordinator escalates 'uncertain' to operator outbox.
  */
 
-import type { GateVerdictArtifactV1 } from '../v2/durable-core/schemas/artifacts/index.js';
-import { isGateVerdictArtifact, parseGateVerdictArtifact } from '../v2/durable-core/schemas/artifacts/index.js';
+import type { GateVerdictArtifactV1 } from '../v2/durable-core/schemas/artifacts/gate-verdict.js';
+import { isGateVerdictArtifact, parseGateVerdictArtifact } from '../v2/durable-core/schemas/artifacts/gate-verdict.js';
 import type { Result } from '../runtime/result.js';
 import type { AwaitResult } from '../cli/commands/worktrain-await.js';
 import type { SessionId } from '../v2/durable-core/ids/index.js';
