@@ -89,3 +89,38 @@ dependency under `vendor/`. The archive is verified against the lockfile and
 materialized without npm, network access or ambient `node_modules`. A changed
 lockfile requires reviewed dependency/proof refresh, not an installed fallback.
 See [the dependency fixture](vendor/README.md).
+
+## Delivery handoff command contract
+
+`delivery-handoff.py` exercises the actual coordinator and delivery implementation
+through its injected execution boundary. Seven ordered cases verify a complete
+handoff and each missing required field. Each invalid handoff must refuse before
+any delivery call, and a subsequent complete handoff must remain usable.
+
+The definition asserts the exact staging arguments, commit text and attribution,
+PR title, and literal body read from the real temporary file. It also checks
+command order, workspace and existing operation deadlines, and body-file cleanup.
+The execution boundary records calls and supplies deterministic responses; it
+never invokes Git, the optional scanner or GitHub. This proves command
+construction and refusal, not remote publication or actual Git effects.
+
+Declare the Python definition, adjacent bridge, `metrics-outcome.py` boundary
+helpers, `package.json`, `src/coordinators/coordinator-delivery.ts`,
+`src/trigger/delivery-action.ts`, and `src/runtime/result.ts`. The bridge permits
+only those runtime edges and the delivery module's declared Node builtins.
+Use the same absolute root, explicit Node executable and SHA256 arguments as the
+other copied definitions. Missing or mismatched copied runtime capabilities have
+no ambient fallback.
+
+```bash
+python3 experiments/answer-driven-execution/proofs/delivery-handoff-controls.py \
+  --node /absolute/path/to/node --sha256 <sha256>
+python3 experiments/answer-driven-execution/proofs/delivery-handoff.py \
+  --root /absolute/path/to/workrail \
+  --node /absolute/path/to/node --sha256 <sha256>
+```
+
+Independent staging, commit, title, body and missing-field mutants must reach
+Python assertion failures. Malformed observations, syntax errors, undeclared
+imports and absent source remain unavailable (exit 2). Existing Vitest coverage
+remains separate and unchanged.
