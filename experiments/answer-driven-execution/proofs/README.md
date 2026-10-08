@@ -294,3 +294,10 @@ service projection and native durable storage for one accepted review fixture.
 The unchanged legacy HTTP integration test remains separate acceptance. This proof
 does not establish HTTP/MCP transport, daemon/model quality, static TypeScript
 checking or metadata variants not present in its declared fixture.
+
+The Shared Study Primitives job continuously runs the existing named-assessment
+control suite. Its six groups check complete typed observations, semantic failure
+for valid incorrect observations, copied and mismatched runtime refusal, the real
+evaluator baseline, and narrow source mutations for scope, guidance and order.
+This adds hosted acceptance for the existing pure-evaluator proof; its source,
+fixtures, requirement assertion and witness scope remain unchanged.
