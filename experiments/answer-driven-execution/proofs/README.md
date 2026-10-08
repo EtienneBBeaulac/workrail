@@ -301,3 +301,10 @@ for valid incorrect observations, copied and mismatched runtime refusal, the rea
 evaluator baseline, and narrow source mutations for scope, guidance and order.
 This adds hosted acceptance for the existing pure-evaluator proof; its source,
 fixtures, requirement assertion and witness scope remain unchanged.
+
+The Shared Study Primitives job continuously runs the existing gate-verdict
+controls. These exercise the actual evaluator/parser with injected session
+boundaries, preserving uncertain missing verdicts and valid approval evidence.
+Source/schema mutations must fail semantically; unavailable source, dependency
+or runtime inputs refuse separately. This adds hosted acceptance of existing
+fixtures and assertions, with no live model or external approval-quality claim.
