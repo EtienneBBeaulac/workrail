@@ -101,3 +101,27 @@ jobs:
         run: |
           python experiments/answer-driven-execution/proofs/workflow-pinning-controls.py \
             --node "$PROOF_NODE_EXECUTABLE" --sha256 "$PROOF_NODE_SHA256"
+
+      - name: Verify console metadata and unchanged durable bytes
+        env:
+          PROOF_NODE_EXECUTABLE: ${{ steps.runtime.outputs.node }}
+          PROOF_NODE_SHA256: ${{ steps.runtime.outputs.sha256 }}
+        run: |
+          python experiments/answer-driven-execution/proofs/console-preservation-controls.py \
+            --node "$PROOF_NODE_EXECUTABLE" --sha256 "$PROOF_NODE_SHA256"
+
+      - name: Verify reported metrics outcome
+        env:
+          PROOF_NODE_EXECUTABLE: ${{ steps.runtime.outputs.node }}
+          PROOF_NODE_SHA256: ${{ steps.runtime.outputs.sha256 }}
+        run: |
+          python experiments/answer-driven-execution/proofs/metrics-outcome-controls.py \
+            --node "$PROOF_NODE_EXECUTABLE" --sha256 "$PROOF_NODE_SHA256"
+
+      - name: Verify selected run delivery provenance
+        env:
+          PROOF_NODE_EXECUTABLE: ${{ steps.runtime.outputs.node }}
+          PROOF_NODE_SHA256: ${{ steps.runtime.outputs.sha256 }}
+        run: |
+          python experiments/answer-driven-execution/proofs/metrics-delivery-controls.py \
+            --node "$PROOF_NODE_EXECUTABLE" --sha256 "$PROOF_NODE_SHA256"

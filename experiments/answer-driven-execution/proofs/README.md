@@ -271,3 +271,26 @@ before any worker executes. Children have 15-second deadlines and bounded output
 This is real worker and filesystem acceptance for linear notes workflows. It does
 not establish static TypeScript checks, model quality, MCP transport behavior,
 concurrent replacement or crash recovery at every write boundary.
+
+
+## Console preservation
+
+`console-preservation.py` executes the real start and advance core against native
+temporary session, keyring, snapshot and pinned-workflow storage. The valid fixture
+must advance through completion before `ConsoleService.getNodeDetail` reads it.
+Exact multiline Unicode notes and the complete accepted review artifact, including
+nested finding fields, must survive that projection. Hashes of every fixture file
+must remain unchanged. The process uses a temporary HOME and staged source cwd.
+
+Real source mutations remove finding content, trim note whitespace or append to
+the native session manifest during the read. Each reaches the unchanged definition's
+assertions while unrelated dimensions survive; restored source passes. Missing or
+malformed source, runtime mismatch and changed dependency bytes refuse execution.
+The hosted job runs the seven control groups without package installation or models.
+
+The proof uses 188 executed production modules, the real workflow schema and compiler
+options,14 routine definitions and13 existing exact lockfile archives. It covers
+service projection and native durable storage for one accepted review fixture.
+The unchanged legacy HTTP integration test remains separate acceptance. This proof
+does not establish HTTP/MCP transport, daemon/model quality, static TypeScript
+checking or metadata variants not present in its declared fixture.
