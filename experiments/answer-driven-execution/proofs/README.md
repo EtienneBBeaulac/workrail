@@ -219,3 +219,32 @@ Any failed or unavailable control fails the job. This continuously checks the
 normalized safety and artifact-byte primitives; it does not mint a current
 copied-source witness, certify preflight content or authorize a live trial.
 Existing engine and review-harness jobs remain separate.
+
+## Initialized loop decisions
+
+`loop-initializer.py` exercises the actual workflow compiler and interpreter for
+while/until loops seeded by an initializer's continue/stop artifact. It observes
+the selected body or finish step, the complete visited path and final completion.
+Typed domain refusals reach assertion failures; missing imports, malformed output,
+syntax failures and unavailable runtime or dependency bytes are exit 2.
+
+The declared source closure includes the compiler's routine inputs and original
+compiler options. A captured TypeScript package performs syntactic transpilation;
+this is not a static typecheck. Six exact package-lock archives, including the
+compiler and tsyringe's nested tslib, supply dependencies in a fresh temporary
+directory. No installed project packages are used. Source and archive reads refuse
+symlinks and traversal; archive identities and package metadata validate before
+execution. Archives are bounded at 12 MiB compressed, with a 64 MiB expanded
+closure; the child has a 15-second deadline and 8 KiB output bound.
+
+The seven control groups include a mutation that removes only first-entry
+initializer input, leaving body-stop decisions intact; false completion and typed
+compiler refusal mutations; and unavailable source/runtime/archive controls.
+This covers compiler/interpreter semantics on supported POSIX hosts with an
+explicit Node runtime. It does not prove full host/MCP behavior, model quality,
+live-study outcomes or deployment authorization.
+
+```sh
+python3 experiments/answer-driven-execution/proofs/loop-initializer-controls.py \
+  --node /absolute/path/to/node --sha256 <actual-node-sha256>
+```
