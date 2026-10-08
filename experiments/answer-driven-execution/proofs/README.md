@@ -248,3 +248,26 @@ live-study outcomes or deployment authorization.
 python3 experiments/answer-driven-execution/proofs/loop-initializer-controls.py \
   --node /absolute/path/to/node --sha256 <actual-node-sha256>
 ```
+
+
+## Workflow continuity through process restart
+
+`workflow-pinning.py` runs the actual answer worker in three fresh Node processes
+against a temporary filesystem. Original work accepts its first answer, the
+registry is replaced, new work accepts its first answer, and a third process
+recovers both runs and completes them. Recovery must preserve each exact retained
+view and original or replacement instruction, and both final answers must be
+accepted. A surviving process cache cannot satisfy this check.
+
+The source mutation overwrites old pinned snapshots with a newly stored workflow.
+Both runs still complete, but the original instruction becomes the replacement;
+the unchanged assertion rejects that result. Runtime identity, missing or malformed
+source and corrupt dependency archives refuse execution instead of reporting a
+semantic result. The control suite runs in Shared Study Primitives.
+
+Inputs cover 195 production modules, the workflow schema, compiler options and
+14 routine definitions. Thirteen complete project-lock archives are validated
+before any worker executes. Children have 15-second deadlines and bounded output.
+This is real worker and filesystem acceptance for linear notes workflows. It does
+not establish static TypeScript checks, model quality, MCP transport behavior,
+concurrent replacement or crash recovery at every write boundary.
