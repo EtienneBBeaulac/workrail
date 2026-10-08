@@ -175,3 +175,34 @@ corrupt archives and lock drift remain unavailable (exit 2).
 
 This proves rejection and classification of normalized synthetic evidence.
 It does not establish live task correctness, agent benefit or release approval.
+
+## Manifest declaration and artifact bytes
+
+`manifest-bytes.py` exercises the actual manifest verifier using real temporary
+files for complete synthetic Stage A and B declarations. Python independently
+enumerates 29 Stage A paths and 20 Stage B paths. The 100 observations include
+both intact declarations, then a changed-file and an unreadable-file case for
+each artifact. Every case must attempt exactly the independently specified read
+population. Positive cases must verify all artifacts and explicitly grant no
+trial authorization.
+
+Declare the definition, adjacent bridge, `manifest-byte-fixtures.mjs`,
+`gate-verdict.py` and `metrics-outcome.py` helpers, the locked Zod archive,
+`package.json`, `package-lock.json`, and the actual `study-manifest.mts` subject.
+Fixture declarations are synthetic and do not assert real executable or
+preflight identity. The private reader only reads their actual temporary files.
+
+```bash
+python3 experiments/answer-driven-execution/proofs/manifest-bytes-controls.py \
+  --node /absolute/path/to/node --sha256 <sha256>
+```
+
+The primary source mutant accepts mismatched bytes. Supplemental mutants omit
+Stage B's required proof or incorrectly grant trial authorization. Each must
+reach a Python assertion. An actual unreadable artifact is expected product
+rejection; missing source, syntax, undeclared imports, invalid archives and lock
+drift are unavailable evidence (exit 2).
+
+The complete observation population is bounded at 256 KiB and the Node child at
+15 seconds. This proof covers declarations and artifact bytes, not the truth of
+preflight content, live study outcomes or permission to execute a trial.
