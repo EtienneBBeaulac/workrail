@@ -147,3 +147,31 @@ python3 experiments/answer-driven-execution/proofs/assessment-scoping-controls.p
 Scope, guidance and declaration-order mutants must reach Python assertions.
 Missing source, syntax, undeclared imports and malformed observations remain
 unavailable (exit 2). Existing Vitest coverage remains unchanged.
+
+## Normalized comparison safety
+
+`comparison-safety.py` calls the actual Stage A scorer with a complete synthetic
+40-trial cohort. Separate controls lose accepted work, duplicate an obligation,
+record an effect for another run, or add a successful write during finished-work
+recovery. The intact cohort may meet measurement thresholds; all four unsafe
+cohorts must be rejected for safety. Every cohort remains valid normalized input,
+with no unrelated trial-integrity errors.
+
+Declare the definition and bridge, `gate-verdict.py` and `metrics-outcome.py`
+helpers, the locked dependency archive, `package.json`, `package-lock.json`, and
+`experiments/answer-driven-execution/usability-scorer.mts`. Locked Zod bytes are
+materialized by the existing verified helper; ambient packages are not loaded.
+
+```bash
+python3 experiments/answer-driven-execution/proofs/comparison-safety-controls.py \
+  --node /absolute/path/to/node --sha256 <sha256>
+```
+
+The primary source mutant admits every cohort and must reach an assertion
+failure. Supplementary mutants erase individual safety classifications; those
+verify classification and are not claimed as violations of overall admission
+when another rejection remains. Missing source, syntax, undeclared imports,
+corrupt archives and lock drift remain unavailable (exit 2).
+
+This proves rejection and classification of normalized synthetic evidence.
+It does not establish live task correctness, agent benefit or release approval.
