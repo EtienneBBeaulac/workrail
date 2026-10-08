@@ -308,3 +308,25 @@ boundaries, preserving uncertain missing verdicts and valid approval evidence.
 Source/schema mutations must fail semantically; unavailable source, dependency
 or runtime inputs refuse separately. This adds hosted acceptance of existing
 fixtures and assertions, with no live model or external approval-quality claim.
+
+## Native checkpoint and intentional fork continuity
+
+`legacy-continuity.py` exercises the actual legacy handlers and core with native
+session, snapshot, pin, keyring and lock ports in a temporary filesystem. Tokens
+remain opaque. Two sessions verify checkpoint identity, original snapshot/task,
+prior event prefixes, wrong-operation refusal with fixture file bytes unchanged,
+two distinct fork children matching projected tips, and exact recorded domain
+response and history on consumed-token replay.
+
+Three source controls independently break checkpoint deduplication, original
+snapshot selection and recorded sibling selection. Valid wrong observations reach
+the unchanged assertions; restored source passes. Wire, runtime, source and archive
+refusals remain separate. The five control groups run in Shared Study Primitives.
+This proves these native paths, not MCP transport, live model quality, cold recovery,
+static typechecking or absence of directory/syscall writes.
+
+```sh
+python3 experiments/answer-driven-execution/proofs/legacy-continuity-controls.py \
+  --root /absolute/path/to/workrail \
+  --node /absolute/path/to/node --sha256 <actual-node-sha256>
+```
