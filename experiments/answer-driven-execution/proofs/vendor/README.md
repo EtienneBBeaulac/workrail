@@ -21,3 +21,12 @@ neverthrow 8.2.0 (MIT), and tsyringe's nested tslib 1.14.1 (0BSD). Their
 original license files remain inside each complete archive. Package-lock SHA512
 integrity, package identities and dependency metadata are checked before the
 archives are materialized. No npm install or package lifecycle script is run.
+
+
+The workflow continuity proof additionally uses @scure/base 2.2.0 (MIT),
+Ajv 8.20.0 (MIT), fast-deep-equal 3.1.3 (MIT), fast-uri 3.1.8
+(BSD-3-Clause), json-schema-traverse 1.0.0 (MIT), zod-to-json-schema
+3.25.1 (ISC), and require-from-string 2.0.2 (MIT). Each unmodified
+registry archive retains its original license and metadata. The root lockfile
+owns the versions and integrity values; scoped package identity is validated
+with its full name. These archives are proof inputs, not installed dependencies.

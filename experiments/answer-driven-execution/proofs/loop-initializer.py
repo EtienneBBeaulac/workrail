@@ -122,7 +122,7 @@ def archive_files(raw: bytes, name: str, declaration: dict) -> dict[str, bytes] 
                     return Failure('Incomplete dependency archive member')
                 files[member.name] = payload
         package = json.loads(files['package/package.json'], object_pairs_hook=unique)
-        if package['name'] != name.split('/')[-1] or package['version'] != declaration['version']:
+        if package['name'] != name.split('/node_modules/')[-1] or package['version'] != declaration['version']:
             return Failure('Dependency package identity mismatch')
         for field in ('dependencies', 'optionalDependencies', 'peerDependencies'):
             if package.get(field, {}) != declaration.get(field, {}):
