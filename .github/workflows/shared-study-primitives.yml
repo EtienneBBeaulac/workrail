@@ -85,3 +85,11 @@ jobs:
         run: |
           python experiments/answer-driven-execution/proofs/manifest-bytes-controls.py \
             --node "$PROOF_NODE_EXECUTABLE" --sha256 "$PROOF_NODE_SHA256"
+
+      - name: Verify initialized loop decisions
+        env:
+          PROOF_NODE_EXECUTABLE: ${{ steps.runtime.outputs.node }}
+          PROOF_NODE_SHA256: ${{ steps.runtime.outputs.sha256 }}
+        run: |
+          python experiments/answer-driven-execution/proofs/loop-initializer-controls.py \
+            --node "$PROOF_NODE_EXECUTABLE" --sha256 "$PROOF_NODE_SHA256"
