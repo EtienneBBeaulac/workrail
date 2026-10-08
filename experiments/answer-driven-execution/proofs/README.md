@@ -206,3 +206,16 @@ drift are unavailable evidence (exit 2).
 The complete observation population is bounded at 256 KiB and the Node child at
 15 seconds. This proof covers declarations and artifact bytes, not the truth of
 preflight content, live study outcomes or permission to execute a trial.
+
+## Hosted shared primitive acceptance
+
+The Shared Study Primitives workflow runs the comparison-safety and manifest-byte
+control suites for changes to their subjects, proof inputs, package declarations
+or workflow. It also supports manual execution. The job selects Node 24 and
+Python 3.14 explicitly, records the actual Node executable SHA256, and supplies
+that identity to both suites. It installs no project packages and runs no models.
+
+Any failed or unavailable control fails the job. This continuously checks the
+normalized safety and artifact-byte primitives; it does not mint a current
+copied-source witness, certify preflight content or authorize a live trial.
+Existing engine and review-harness jobs remain separate.

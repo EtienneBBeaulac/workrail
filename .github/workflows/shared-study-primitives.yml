@@ -1,0 +1,87 @@
+name: Shared Study Primitives
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/shared-study-primitives.yml'
+      - 'experiments/answer-driven-execution/proofs/**'
+      - 'experiments/answer-driven-execution/usability-scorer.mts'
+      - 'experiments/answer-driven-execution/study-manifest.mts'
+      - 'package.json'
+      - 'package-lock.json'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/shared-study-primitives.yml'
+      - 'experiments/answer-driven-execution/proofs/**'
+      - 'experiments/answer-driven-execution/usability-scorer.mts'
+      - 'experiments/answer-driven-execution/study-manifest.mts'
+      - 'package.json'
+      - 'package-lock.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  verify:
+    name: Verify Shared Study Primitives
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Select proof Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+
+      - name: Select proof Python runtime
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.14'
+
+      - name: Capture actual Node identity
+        id: runtime
+        run: |
+          node --version
+          python --version
+          python - <<'PYTHON'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+
+          proof_node = subprocess.check_output(['node', '-p', 'process.execPath'], text=True).strip()
+          proof_sha256 = hashlib.sha256(Path(proof_node).read_bytes()).hexdigest()
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf8') as output:
+              output.write(f'node={proof_node}\nsha256={proof_sha256}\n')
+          print(json.dumps({'node': proof_node, 'sha256': proof_sha256}))
+          PYTHON
+
+      - name: Verify normalized comparison safety
+        env:
+          PROOF_NODE_EXECUTABLE: ${{ steps.runtime.outputs.node }}
+          PROOF_NODE_SHA256: ${{ steps.runtime.outputs.sha256 }}
+        run: |
+          python experiments/answer-driven-execution/proofs/comparison-safety-controls.py \
+            --node "$PROOF_NODE_EXECUTABLE" --sha256 "$PROOF_NODE_SHA256"
+
+      - name: Verify manifest artifact bytes
+        env:
+          PROOF_NODE_EXECUTABLE: ${{ steps.runtime.outputs.node }}
+          PROOF_NODE_SHA256: ${{ steps.runtime.outputs.sha256 }}
+        run: |
+          python experiments/answer-driven-execution/proofs/manifest-bytes-controls.py \
+            --node "$PROOF_NODE_EXECUTABLE" --sha256 "$PROOF_NODE_SHA256"
