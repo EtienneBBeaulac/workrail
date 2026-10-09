@@ -46,7 +46,10 @@ For a delegated child, its own explicit `parallelDelegation.modelTier` is the
 child request. A parent's main-session override must not automatically override
 the child. Without an explicit delegation tier, leave the child's selection to
 its own workflow/session resolution and the client's default. Do not assume the
-parent tier should cascade through an entire agent tree.
+parent tier should cascade through an entire agent tree. Discovering the child's
+initialModelRequest selects its launch target only. Pass start_workflow.modelTier
+for an explicit delegation override; do not pin an inferred initial step tier
+as a permanent child-session override.
 
 Represent resolved delegations as structured MCP response data, retaining
 workflow ID, goal, mapped inputs, tools, and model intent. Produce the readable

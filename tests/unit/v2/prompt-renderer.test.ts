@@ -77,6 +77,7 @@ describe('renderPendingPrompt', () => {
     if (result.isOk()) {
       expect(result.value.delegations?.[0]?.modelSelection).toEqual({ kind: 'workflow_lookup', workflowId: 'child-with-own-policy' });
       expect(result.value.prompt).toContain('Before spawning, call inspect_workflow');
+      expect(result.value.prompt).toContain('Do not pass an inferred initialModelRequest as start_workflow.modelTier');
     }
   });
 
