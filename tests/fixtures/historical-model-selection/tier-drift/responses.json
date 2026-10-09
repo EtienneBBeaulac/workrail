@@ -1,0 +1,19 @@
+{
+  "started": {
+    "content": [
+      {
+        "type": "text",
+        "text": "---------\nUSER\n---------\n\n# WorkRail Protocol Instructions\n<!-- stepId: wr-system-onboarding -->\n\nThis repository is managed by WorkRail, an advanced workflow automation engine.\nYou are currently executing within a guided workflow. Your actions are constrained and monitored by the engine.\n\nRules of Engagement:\n1. NO PREEMPTIVE WORK: Do not attempt to solve the overarching task right now. You must wait for explicit workflow steps.\n2. ADHERE TO THE DAG: You will be fed prompts one step at a time. Complete only the step requested.\n3. OUTPUT CONTRACTS: Use the `continue_workflow` tool to submit your work when a step is done.\n\nIf you understand these constraints, call `continue_workflow` with no output to receive your first actual assignment.\n\n**Action Required**: Acknowledge these instructions by calling `continue_workflow` (with an empty `output` or simple `notes`). Do NOT attempt the actual task yet.\n\n---------\nSYSTEM\n---------\n\n**Tokens for step `wr-system-onboarding` — use these for your next `continue_workflow` call (not tokens from earlier steps):**\n\n```json\n{\"continueToken\":\"ct_sDBDOGjn3VTQa4UkN1U1fSKi\"}\n```\n\nExecute this step, then call `continue_workflow` to advance.\n\nInclude `output.notesMarkdown` documenting your work — what you did, key decisions, what you produced, and anything notable. (Providing flat top-level `notes` and `artifacts` is also fully supported as a compatibility alias).\n\n**Subagent & Routine Guidance:**\nIf this step instructs you to \"spawn a WorkRail Executor\" or run a parallel routine (e.g. `wr.routine-philosophy-alignment`), delegate it to a subagent using your native client-side tools (e.g. `invoke_subagent` running `start_workflow` for that routine) or execute it inline yourself if client-side subagent tools are unavailable.\n\nPreferences: guided mode, conservative risk."
+      }
+    ]
+  },
+  "pending": {
+    "content": [
+      {
+        "type": "text",
+        "text": "---------\nUSER\n---------\n\n# First\n<!-- stepId: first -->\n\nHistorical first step.\n\n---------\nSYSTEM\n---------\n\n**Tokens for step `first` — use these for your next `continue_workflow` call (not tokens from earlier steps):**\n\n```json\n{\"continueToken\":\"ct_iVtcwZOH94jnahvFdtwABV2Q\"}\n```\n\nExecute this step, then call `continue_workflow` to advance.\n\nInclude `output.notesMarkdown` documenting your work — what you did, key decisions, what you produced, and anything notable. (Providing flat top-level `notes` and `artifacts` is also fully supported as a compatibility alias).\n\n**Subagent & Routine Guidance:**\nIf this step instructs you to \"spawn a WorkRail Executor\" or run a parallel routine (e.g. `wr.routine-philosophy-alignment`), delegate it to a subagent using your native client-side tools (e.g. `invoke_subagent` running `start_workflow` for that routine) or execute it inline yourself if client-side subagent tools are unavailable.\n\nPreferences: guided mode, conservative risk."
+      }
+    ]
+  },
+  "continueToken": "ct_iVtcwZOH94jnahvFdtwABV2Q"
+}

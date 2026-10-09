@@ -19,6 +19,7 @@ case "${1:-}" in
   docs) npx vitest run tests/architecture/model-selection-authoring.test.ts && npm run validate:authoring-spec && npm run validate:feature-coverage && npm run validate:authoring-docs ;;
   native) npx vitest run tests/unit/v2/model-selection-native-evidence.test.ts && node scripts/verify-model-selection-native.mjs ;;
   client) npx vitest run tests/unit/v2/model-selection.test.ts -t 'plans client launches' ;;
+  history) npx vitest run tests/integration/mcp-historical-model-selection.test.ts tests/unit/v2/golden-tokens/golden-tokens.test.ts ;;
   wire) npx vitest run tests/integration/mcp-model-selection.test.ts ;;
   child) npx vitest run tests/unit/v2/prompt-renderer.test.ts -t 'parent override|before launch' ;;
   *) echo 'Expected: handoff, precedence, routing, recovery, observation, child, wire, client, native, docs' >&2; exit 2 ;;

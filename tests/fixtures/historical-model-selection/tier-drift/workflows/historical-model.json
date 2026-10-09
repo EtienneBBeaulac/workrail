@@ -1,0 +1,1 @@
+{"id":"historical-model","name":"Historical model","description":"Prior-version compatibility fixture","version":"1.0.0","steps":[{"id":"first","title":"First","prompt":"Historical first step.","notesOptional":true},{"id":"second","title":"Second","modelTier":"mid","prompt":"Historical second step.","notesOptional":true}]}

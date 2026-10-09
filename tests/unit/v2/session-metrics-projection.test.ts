@@ -604,7 +604,7 @@ describe('projectSessionMetricsV2', () => {
     expect(result.tokenDelta!.turns).toBe(0);
   });
 
-  it('retains a host report without granting host provenance to agent context', () => {
+  it.each(['host_reported', 'client_reported'])('retains a host report without granting %s provenance to agent context', claimedSource => {
     const host = makeContextSetEvent({ runId: 'run_1', eventIndex: 2, context: {
       metrics_active_model: 'host-selected', metrics_model_source: 'host_reported',
     } });
@@ -616,7 +616,7 @@ describe('projectSessionMetricsV2', () => {
     expect(accepted?.activeModel).toBe('host-selected');
     expect(accepted?.modelIdentitySource).toBe('host_reported');
     const forged = makeContextSetEvent({ runId: 'run_1', eventIndex: 3, context: {
-      metrics_active_model: 'worker-claim', metrics_model_source: 'host_reported',
+      metrics_active_model: 'worker-claim', metrics_model_source: claimedSource,
     } });
     const result = projectSessionMetricsV2([...baseline, forged, completion]);
     expect(result?.modelIdentitySource).not.toBe('host_reported');

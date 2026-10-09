@@ -1,0 +1,40 @@
+{
+  "baselineCommit": "fde6133cbfd281e01520fab73b20061d783f4ddd",
+  "generation": "git archive, tsc tsconfig.build.json, actual composeServer over StdioServerTransport",
+  "signingMaterial": "Generated within fixture WORKRAIL_DATA_DIR; test-owned, not production",
+  "variants": {
+    "unchanged": "Default start identity; onboarding advanced",
+    "tier-drift": "modelTier heavy at start; baseline default identity on onboarding advance induces genuine drift refresh"
+  },
+  "tokens": "Original returned opaque continue tokens retained without decoding",
+  "artifactSha256": {
+    "README.md": "e0905e31d2d189b8637afae3b4dac2bf3e43dd2d8daf28dfcc5787b05ac9c398",
+    "tier-drift/keys/keyring.json": "b486b217feb678050bb42b85935641287766884022a8a3e0296115e2e20526f4",
+    "tier-drift/keys/token-index.jsonl": "773d6c2af22dcaaab54f6f299589acdca71a485d506fa5ec2b65537f8c750d89",
+    "tier-drift/perf/tool-calls.jsonl": "73959df1ae34a37defc4105ea6fce6cfee213336a3a1cb42cf18ed6c8ed3b33a",
+    "tier-drift/responses.json": "e4b0880e83407b5a02e3fff64340933bc3dd77ffdc43d1a2fc7673967599dbf1",
+    "tier-drift/sessions/sess_bsxfml3ellajx6nsvipfr2l3si/events/00000000-00000008.jsonl": "9ca314177b47de3ad0f7828ef5b78f5bd0174ab09659b732ba24d62566290190",
+    "tier-drift/sessions/sess_bsxfml3ellajx6nsvipfr2l3si/events/00000009-00000009.jsonl": "0fa72f413df007a751a53fe254a3ef3cbd60b4f6d4221697069ace3680464d01",
+    "tier-drift/sessions/sess_bsxfml3ellajx6nsvipfr2l3si/events/00000010-00000014.jsonl": "4b40a67a7af7de5e4b5d10dd71cf88500571dfd8ce513aa4eef9ef4bef089982",
+    "tier-drift/sessions/sess_bsxfml3ellajx6nsvipfr2l3si/events/00000015-00000015.jsonl": "6021b6b81cf27895020b22c641906b55047745e35e09801d98d02575ea3ea56a",
+    "tier-drift/sessions/sess_bsxfml3ellajx6nsvipfr2l3si/manifest.jsonl": "65cc9468f291ca5f591e488b9d629bff57f0084bb2f845c3a8202f195923d4a9",
+    "tier-drift/snapshots/sha256_0b355f760b2340cfd9231de5c1ea8c0a6179496f1f06424e6c60f2d298736614.json": "0b355f760b2340cfd9231de5c1ea8c0a6179496f1f06424e6c60f2d298736614",
+    "tier-drift/snapshots/sha256_915ffa8ba64260743edd3f74920c578e6f317bd9e00abee1b3255a7382c1fc64.json": "915ffa8ba64260743edd3f74920c578e6f317bd9e00abee1b3255a7382c1fc64",
+    "tier-drift/workflow-sources/remembered-roots.json": "49f05a53b9a6e6b3c3e0fe9f89bb8289c404a84a043d8d6e34f1dd1c034dc02d",
+    "tier-drift/workflows/historical-model.json": "84456ed998d396abef7ba2869af829b5b391208932231e2485151aa4bc4477ee",
+    "tier-drift/workflows/pinned/sha256_c11942f9406717bc3eba8e675b336ce14fda6f38a278749afb54e5f40c6bc094.json": "c11942f9406717bc3eba8e675b336ce14fda6f38a278749afb54e5f40c6bc094",
+    "unchanged/keys/keyring.json": "ea2996a80594875596a843ad92408cbacdee83e2b3e9d0293226170b72077604",
+    "unchanged/keys/token-index.jsonl": "ba86352683cbfa22ac7a2a4d274bf12dae5eb1eaa9604090d6aa0b8a0bd63aa9",
+    "unchanged/perf/tool-calls.jsonl": "acb0e9af215f432c4137a6ca06452dc981b772ad93e1ed0e84d934171ce0f72a",
+    "unchanged/responses.json": "457a7fc616abd44d678cb8e7896852831f5c2f56b7174ef756344ea43bf1c5da",
+    "unchanged/sessions/sess_cfxkpk4aslwtjv46nfzc43vfl4/events/00000000-00000008.jsonl": "8a5c0949e52f17675d201657d57c4079736c0f43fa0a9da258564a82d75c5c8b",
+    "unchanged/sessions/sess_cfxkpk4aslwtjv46nfzc43vfl4/events/00000009-00000013.jsonl": "2dcc5db970a97e0e289c08c9a1c4ead6feaffe109185b85d7d3464cb9c6076c4",
+    "unchanged/sessions/sess_cfxkpk4aslwtjv46nfzc43vfl4/events/00000014-00000014.jsonl": "af8f494aa2bc400f9c7d6591d56f9e6185c74de657393a2b4282d67dfbf4635e",
+    "unchanged/sessions/sess_cfxkpk4aslwtjv46nfzc43vfl4/manifest.jsonl": "48571a35d738843399bfbfe3172df00987fe8488f7e3105f23ab8172f3d5586c",
+    "unchanged/snapshots/sha256_0b355f760b2340cfd9231de5c1ea8c0a6179496f1f06424e6c60f2d298736614.json": "0b355f760b2340cfd9231de5c1ea8c0a6179496f1f06424e6c60f2d298736614",
+    "unchanged/snapshots/sha256_915ffa8ba64260743edd3f74920c578e6f317bd9e00abee1b3255a7382c1fc64.json": "915ffa8ba64260743edd3f74920c578e6f317bd9e00abee1b3255a7382c1fc64",
+    "unchanged/workflow-sources/remembered-roots.json": "70f092ca17caf8bfbd4923c0e3436fbcce2e71719811cc029b04d3d0466437e7",
+    "unchanged/workflows/historical-model.json": "84456ed998d396abef7ba2869af829b5b391208932231e2485151aa4bc4477ee",
+    "unchanged/workflows/pinned/sha256_c11942f9406717bc3eba8e675b336ce14fda6f38a278749afb54e5f40c6bc094.json": "c11942f9406717bc3eba8e675b336ce14fda6f38a278749afb54e5f40c6bc094"
+  }
+}
