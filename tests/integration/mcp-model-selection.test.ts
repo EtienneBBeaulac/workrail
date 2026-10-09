@@ -18,7 +18,8 @@ it.each([true, false])('preserves MCP policy across cold recovery and advance, e
       id: 'model-parent', name: 'Model parent', description: 'Model selection wire fixture', version: '1.0.0',
       steps: [
         { id: 'spawn', title: 'Spawn reviews', type: 'parallel', parallelDelegations: [
-          { workflowId: 'model-child', modelTier: 'lightweight' },
+          { workflowId: 'model-child', modelTier: 'lightweight', args: { deliverableName: 'review.md' }, allowedTools: ['read_file'] },
+          { workflowId: 'model-child', modelTier: 'heavy' },
           { workflowId: 'model-child' },
         ] },
         { id: 'synthesize', title: 'Synthesize', prompt: 'Read child findings.', notesOptional: true },
@@ -76,14 +77,18 @@ it.each([true, false])('preserves MCP policy across cold recovery and advance, e
     const routing = withConfig ? { lightweight: { kind: 'model', modelId: 'gpt-6-luna' } } : undefined;
     const tokenFrom = (response: any) => response.content.map((item: any) => item.text).join('\n').match(/"continueToken":\s*"([^"]+)"/)?.[1];
     let started = await runTool('start_workflow', { workflowId: 'model-parent', workspacePath: root, goal: 'Check model handoffs', ...(withConfig ? { modelTier: 'heavy', modelRouting: routing } : {}) });
-    expect(started.structuredContent.pending.stepId).toBe('wr-system-onboarding');
+    expect(started.content.map((item: any) => item.text).join('\n')).toContain('wr-system-onboarding');
     started = await runTool('continue_workflow', { continueToken: tokenFrom(started), intent: 'advance', workspacePath: root, output: { notesMarkdown: 'Acknowledged the workflow protocol.' } });
     expect(started.structuredContent?.pending).toBeDefined();
     const pending = started.structuredContent.pending;
     expect(pending.stepId).toBe('spawn');
     if (routing) expect(pending.delegations[0].modelSelection.target).toEqual(routing.lightweight);
     else expect(pending.delegations[0].modelSelection.kind).toBe('unresolved');
-    expect(pending.delegations[1].modelSelection).toEqual({ kind: 'workflow_lookup', workflowId: 'model-child' });
+    expect(pending.delegations[0]).toMatchObject({ workflowId: 'model-child', inputs: { deliverableName: 'review.md' }, allowedTools: ['read_file'] });
+    expect(pending.delegations[0].goal).toEqual(expect.any(String));
+    expect(pending.delegations[1].modelSelection.request).toEqual({ kind: 'tier', tier: 'heavy', source: 'delegation' });
+    expect(started.content.map((item: any) => item.text).join('\n')).toContain('heavy');
+    expect(pending.delegations[2].modelSelection).toEqual({ kind: 'workflow_lookup', workflowId: 'model-child' });
     if (withConfig) expect(started.content.map((item: any) => item.text).join('\n')).toContain('gpt-6-luna');
 
     const token = tokenFrom(started);

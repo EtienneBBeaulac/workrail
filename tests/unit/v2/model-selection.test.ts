@@ -33,6 +33,10 @@ describe('model selection boundary', () => {
     expect(resolveModelSelection(request, { lightweight: { kind: 'executor', name: 'workrail-fast' } })).toEqual({
       kind: 'resolved', request, target: { kind: 'executor', name: 'workrail-fast' },
     });
+  });
+
+  it('keeps missing client bindings explicitly unresolved', () => {
+    const request = resolveModelRequest({}, 'lightweight');
     expect(resolveModelSelection(request)).toEqual({ kind: 'unresolved', request, reason: 'binding_missing' });
   });
 

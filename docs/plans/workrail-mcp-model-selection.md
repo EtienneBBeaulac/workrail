@@ -1,6 +1,7 @@
 # WorkRail MCP model selection
 
-Status: proposal awaiting the architecture checkpoint. No implementation started.
+Status: architecture approved by the operator. Partial implementation exists; pipeline
+requirements audits and acceptance remain open.
 Related work: GitHub issue #1152. First acceptance client: Codex.
 
 ## Problem and intended result
@@ -154,9 +155,21 @@ a WorkTrain runner, add provider credentials, or change global client settings.
 Actual main-agent model switching remains client-controlled, with explicit
 guidance when the current client cannot switch in place.
 
-## Decisions requiring confirmation
+## Operator decisions and answer-profile assessment
 
-Confirm the request-plus-client-binding boundary rather than implementing a
-provider runner inside MCP. Confirm that unsupported explicit selections are
-surfaced instead of silently falling back. Confirm whether answer-profile parity
-belongs in this change or should receive its own scoped issue after assessment.
+The operator approved the request-plus-client-binding boundary and explicit
+unsupported outcomes. Codex is the first acceptance client, with gpt-6-luna as
+its per-run lightweight target. Exact responses are retained in
+[operator decisions](workrail-model-selection-operator-decisions.md).
+
+The answer-profile API is composed independently in `src/mcp/answer-profile.ts`.
+Its strict `open_work` input accepts workflowId, workspacePath, and goal, without
+modelTier or modelRouting. Its `TrustedDeliveryModelFactory` in
+`src/answer-v1/contracts/trusted-model-factory.ts` is a privileged host capability,
+invoked after delivery persistence, and deliberately excluded from serialized
+agent inputs. Token-based routing cannot establish answer-profile parity.
+
+The approved scope is the token-based MCP path. Preserve that distinct host
+boundary in this change. Answer-profile policy integration would require a
+separate design connecting authored intent with admission and host binding;
+there is no parity or execution-control claim here.
