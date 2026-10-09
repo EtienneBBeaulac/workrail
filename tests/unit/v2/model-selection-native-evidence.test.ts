@@ -4,11 +4,13 @@ import { verifyReceipt } from '../../../scripts/verify-model-selection-native.mj
 const nonce = 'bounded-test-nonce';
 const target = { kind: 'model', modelId: 'gpt-6-luna' };
 const receipt = { version: 1, implementationHash: 'source-hash', target, runNonce: nonce,
-  nativeTaskName: '/root/acceptance', nativeCallId: 'native-call' };
+  nativeTaskName: '/root/acceptance', nativeCallId: 'native-call', nativeCompletionCallId: 'completion-call' };
 const transcript = [
   { type: 'response_item', payload: { type: 'function_call', call_id: 'native-call', name: 'collaboration.spawn_agent',
     arguments: JSON.stringify({ task_name: 'acceptance', model: target.modelId, fork_turns: 'none', message: nonce }) } },
   { type: 'response_item', payload: { type: 'function_call_output', call_id: 'native-call', output: '/root/acceptance' } },
+  { type: 'response_item', payload: { type: 'function_call', call_id: 'completion-call', name: 'collaboration.list_agents', arguments: '{}' } },
+  { type: 'response_item', payload: { type: 'function_call_output', call_id: 'completion-call', output: JSON.stringify({ agents: [{ agent_name: '/root/acceptance', agent_status: { completed: nonce + ' session-proof' } }] }) } },
 ];
 const fixture = { sessionId: 'session-proof', runId: 'run-proof', runNonce: nonce, kind: 'completed',
   workflowId: 'model-selection-acceptance-child', result: 'model-routing-fixture-complete' };
@@ -28,6 +30,7 @@ it('accepts linked launch and durable completion evidence while leaving provider
 });
 it('rejects a completion JSON without durable child execution evidence', () => {
   expect(verifyReceipt(receipt, transcript, 'source-hash', fixture, handoff, []).ok).toBe(false);
+  expect(verifyReceipt(receipt, transcript.slice(0, 2), 'source-hash', fixture, handoff, events).ok).toBe(false);
 });
 it('rejects absent or mismatched handoffs and incomplete child sessions', () => {
   expect(verifyReceipt(receipt, transcript, 'source-hash', fixture, undefined, events).ok).toBe(false);

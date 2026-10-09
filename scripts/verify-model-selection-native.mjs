@@ -31,6 +31,13 @@ export function verifyReceipt(receipt, transcript, currentHash, fixture, handoff
   if (args.model !== receipt.target.modelId || args.fork_turns !== 'none') return { ok: false, reason: 'Native request did not apply the selected model with fresh context' };
   const response = transcript.find(item => item.type === 'response_item' && item.payload?.type === 'function_call_output' && item.payload.call_id === receipt.nativeCallId);
   if (!response || !String(response.payload.output).includes(receipt.nativeTaskName)) return { ok: false, reason: 'Native launch acceptance was not recorded' };
+  const completionCall = transcript.find(item => item.type === 'response_item' && item.payload?.type === 'function_call' && item.payload.call_id === receipt.nativeCompletionCallId);
+  const completionResponse = transcript.find(item => item.type === 'response_item' && item.payload?.type === 'function_call_output' && item.payload.call_id === receipt.nativeCompletionCallId);
+  if (!completionCall || !['collaboration.list_agents', 'functions.collaboration.list_agents'].includes(completionCall.payload.name) || !completionResponse) return { ok: false, reason: 'Native child completion receipt is absent' };
+  let agents;
+  try { agents = JSON.parse(completionResponse.payload.output).agents; } catch { return { ok: false, reason: 'Native completion receipt is invalid' }; }
+  const completedChild = agents?.find(agent => agent.agent_name === receipt.nativeTaskName)?.agent_status?.completed;
+  if (typeof completedChild !== 'string' || !completedChild.includes(receipt.runNonce) || !fixture?.sessionId || !completedChild.includes(fixture.sessionId)) return { ok: false, reason: 'Native child did not complete with this WorkRail session' };
   const delegation = handoff?.structuredContent?.pending?.delegations?.find(item => item.workflowId === 'model-selection-acceptance-child');
   if (delegation?.modelSelection?.kind !== 'resolved' || delegation.modelSelection.target?.kind !== 'model' || delegation.modelSelection.target.modelId !== receipt.target.modelId || delegation.inputs?.runNonce !== receipt.runNonce) return { ok: false, reason: 'Returned MCP handoff does not match the native launch' };
   if (!Array.isArray(events) || !fixture?.sessionId || !fixture?.runId) return { ok: false, reason: 'Durable child execution evidence is absent' };
