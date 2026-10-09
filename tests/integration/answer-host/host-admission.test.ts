@@ -1475,3 +1475,19 @@ it.skipIf(process.platform === 'win32')('inspects retained admission without ini
     expect(await engine.sessionStore.load(prepared.sessionId)).toEqual(initialized);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+it('accepts closed initial model provenance without accepting worker policy or invented sources', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'host-model-provenance-'));
+  try {
+    const { candidate, expected } = await setup(root);
+    const value = JSON.parse(Buffer.from(candidate.bytes).toString());
+    const initial = value.plan.events.find((event: { kind: string }) => event.kind === 'context_set');
+    expect(initial.data.context.metrics_model_source).toBe('unknown');
+    expect(decodeAdmissionReservation(candidate.bytes, expected).kind).toBe('validated');
+    for (const invalid of [{ metrics_model_source: 'agent_invented' }, { modelRouting: {} }]) {
+      const altered = structuredClone(value);
+      Object.assign(altered.plan.events.find((event: { kind: string }) => event.kind === 'context_set').data.context, invalid);
+      expect(decodeAdmissionReservation(Buffer.from(JSON.stringify(altered)), expected).kind).toBe('refused');
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

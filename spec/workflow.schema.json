@@ -1416,6 +1416,11 @@
         },
         "synthesis": {
           "$ref": "#/$defs/synthesisConfig"
+        },
+        "modelTier": {
+          "type": "string",
+          "enum": ["lightweight", "mid", "heavy"],
+          "description": "Resource preference for the coordinating agent, independent of child delegation tiers."
         }
       },
       "required": [

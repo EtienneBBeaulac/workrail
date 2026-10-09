@@ -62,6 +62,35 @@ No proposed solutions here -- just the problem.]
 
 ---
 
+## WorkRail MCP
+
+### Portable model selection loses intent and execution provenance (October 9, 2026)
+
+**Status:** Implemented and verified locally, unshipped - [#1152](https://github.com/EtienneBBeaulac/workrail/issues/1152).
+**Score: 13** | Cor:3 Cap:2 Eff:2 Lev:3 Con:3 | Blocked: none
+
+Token-based MCP clients need model-tier requests that survive delegation and cold
+recovery, with explicit client bindings and honest unsupported outcomes. A model
+request must remain distinct from evidence of what actually executed. Done means
+matching readable and structured handoffs, independent child policy, verified
+historical recovery, and a branch-built native Codex launch plus durable completion.
+Scope and acceptance: [MCP model-selection plan](../plans/workrail-mcp-model-selection.md).
+This is separate from WorkTrain daemon `agentConfig.model` routing below.
+
+### Parallel synthesis guarantee differs from the compiler (October 9, 2026)
+
+**Status:** Needs decision.
+**Score: 11** | Cor:3 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: authoring policy decision
+
+The repository instructions claim an automatically injected synthesis step after
+any parallel step. `workflow-compiler.ts` currently injects it only when the author
+supplies `synthesis`. Authors can therefore omit a verification phase that the
+instructions describe as guaranteed. This is separate from model selection.
+
+**Things to hash out:**
+- Should synthesis always be required, or should the instructions describe the
+  current opt-in behavior and its verification responsibility?
+
 ## P0 / Critical (blocks WorkTrain from working correctly)
 
 ### Engine hint content fixes: correct misleading guidance on artifact validation failures (May 20, 2026)

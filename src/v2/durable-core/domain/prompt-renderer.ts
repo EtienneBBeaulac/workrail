@@ -548,6 +548,13 @@ export function renderPendingPrompt(args: {
   const modelRequest = resolveModelRequest(modelConfig, step.modelTier, args.workflow.definition.modelTier);
   const modelTier = modelRequest.kind === 'tier' ? modelRequest.tier : undefined;
   const modelSelection = resolveModelSelection(modelRequest, modelConfig.modelRouting);
+  const modelMetadata = {
+    ...(modelSelection.kind !== 'inherit' ? { modelSelection } : {}),
+    ...(modelConfig.modelRouting ? { modelRouting: modelConfig.modelRouting } : {}),
+    ...(modelTier !== undefined ? { modelTier } : {}),
+  };
+  const modelGuidance = modelSelection.kind === 'inherit' ? ''
+    : `## Model selection\n${describeModelSelection(modelSelection)}\nThe client controls the main agent model. If it cannot switch in place, report that limitation or use an authorized client handoff before executing this step.\n\n`;
   const functionReferences = step.functionReferences ?? [];
 
   // Extract output contract requirements (system-injected, not prompt-authored)
@@ -670,7 +677,7 @@ export function renderPendingPrompt(args: {
         `---\n\n` +
         `### Procedure\n` +
         `1. Verify model targets against the native client catalog or configured executors. Preserve client permission and context-inheritance rules. Resolve unsupported selections before spawning; never silently substitute.\n` +
-        `2. Spawn the active subagents listed above in parallel. Pass a child tier as start_workflow.modelTier and pass the client routing map to its session.\n` +
+        `2. Spawn the active subagents listed above in parallel. Pass only an explicit delegation tier as start_workflow.modelTier and pass the client routing map to its session. Do not pass an inferred initialModelRequest as start_workflow.modelTier.\n` +
         `3. Wait for all subagents to complete their runs and write their findings to disk.\n` +
         `4. Once completed, confirm all deliverables exist, then call \`continue_workflow\` to advance to the synthesis phase.`;
     } else {
@@ -678,6 +685,8 @@ export function renderPendingPrompt(args: {
         `All parallel delegations for this step evaluated their conditions to false, meaning no subagents need to be spawned.\n\n` +
         `Please immediately call \`continue_workflow\` to advance to the next step.`;
     }
+
+    finalPrompt = modelGuidance + finalPrompt;
 
     // Append recovery context if in rehydrateOnly mode
     if (args.rehydrateOnly) {
@@ -711,8 +720,7 @@ export function renderPendingPrompt(args: {
       agentRole: step.agentRole,
       delegations: resolvedDelegations,
       requireConfirmation: false,
-      ...(modelSelection.kind !== 'inherit' ? { modelSelection } : {}),
-      ...(modelConfig.modelRouting ? { modelRouting: modelConfig.modelRouting } : {}),      ...(modelTier !== undefined ? { modelTier } : {}),
+      ...modelMetadata,
     });
   }
 
@@ -894,7 +902,7 @@ export function renderPendingPrompt(args: {
 
   // Array join avoids intermediate string allocations from the + chain.
   const enhancedPrompt = [
-    ...(modelSelection.kind !== 'inherit' ? [`## Model selection\n${describeModelSelection(modelSelection)}\nThe client controls the main agent model. If it cannot switch in place, report that limitation or use an authorized client handoff before executing this step.`] : []),
+    modelGuidance,
     loopBanner,
     basePrompt,
     requirementsSection,
@@ -914,8 +922,7 @@ export function renderPendingPrompt(args: {
       agentRole,
       requireConfirmation,
       ...(gateKind !== undefined ? { gateKind } : {}),
-      ...(modelSelection.kind !== 'inherit' ? { modelSelection } : {}),
-      ...(modelConfig.modelRouting ? { modelRouting: modelConfig.modelRouting } : {}),      ...(modelTier !== undefined ? { modelTier } : {}),
+      ...modelMetadata,
     });
   }
 
@@ -929,8 +936,7 @@ export function renderPendingPrompt(args: {
       agentRole,
       requireConfirmation,
       ...(gateKind !== undefined ? { gateKind } : {}),
-      ...(modelSelection.kind !== 'inherit' ? { modelSelection } : {}),
-      ...(modelConfig.modelRouting ? { modelRouting: modelConfig.modelRouting } : {}),      ...(modelTier !== undefined ? { modelTier } : {}),
+      ...modelMetadata,
     });
   }
 
@@ -955,8 +961,7 @@ export function renderPendingPrompt(args: {
       prompt: enhancedPrompt,
       agentRole,
       requireConfirmation,
-      ...(modelSelection.kind !== 'inherit' ? { modelSelection } : {}),
-      ...(modelConfig.modelRouting ? { modelRouting: modelConfig.modelRouting } : {}),      ...(modelTier !== undefined ? { modelTier } : {}),
+      ...modelMetadata,
     });
   }
 
@@ -975,7 +980,6 @@ export function renderPendingPrompt(args: {
     agentRole,
     requireConfirmation,
     ...(gateKind !== undefined ? { gateKind } : {}),
-    modelSelection,
-      ...(modelTier !== undefined ? { modelTier } : {}),
+    ...modelMetadata,
   });
 }

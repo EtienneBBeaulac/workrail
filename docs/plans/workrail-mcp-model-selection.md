@@ -1,7 +1,8 @@
 # WorkRail MCP model selection
 
-Status: architecture approved by the operator. Partial implementation exists; pipeline
-requirements audits and acceptance remain open.
+Status: architecture approved and implementation complete on the isolated local branch.
+Final full-suite and source-bound native acceptance are in progress; no remote publication
+or installed activation is authorized. See the verification record below.
 Related work: GitHub issue #1152. First acceptance client: Codex.
 
 ## Problem and intended result
@@ -109,6 +110,10 @@ the client responsible for actual launch behavior.
 
 ## Implementation slices
 
+One atomic MCP handshake retains separate resolver, durable handoff, client planning
+and provenance/recovery boundaries. The following work packages share one integration
+slice because the public contract must be consistent across all four.
+
 1. Reproduce dropped delegation tiers and the false active-model/default refresh
    with tests. Introduce canonical model request/resolution types.
 2. Persist the explicit run override and optional routing bindings. Resolve and
@@ -176,3 +181,38 @@ The approved scope is the token-based MCP path. Preserve that distinct host
 boundary in this change. Answer-profile policy integration would require a
 separate design connecting authored intent with admission and host binding;
 there is no parity or execution-control claim here.
+
+## Verification record and assessment
+
+The implementation removes guessed provider defaults, preserves caller bindings in
+run-start events, emits matching readable and structured main/child requests, and
+returns explicit live-client unsupported outcomes. Current client availability is
+rechecked independently from the immutable run intent. Trusted host reports remain
+reports; worker labels cannot manufacture that provenance.
+
+Independent reviews found and repaired recovery field-list drift, missing readable
+parallel coordinator guidance, causal receipt ordering and a strict shared-start
+consumer compatibility regression. Focused source checks include RED controls,
+current-source green tests, genuine prior-version sessions and compile-time nested
+immutability proofs. Final acceptance will be recorded in
+[the local verification artifact](../design/workrail-mcp-model-selection-verification.md).
+
+This boundary is a good fit for MCP: the client owns model execution and WorkRail
+owns durable intent. A free-form instruction to use a named model is insufficient
+when the client lacks that model, cannot switch the current agent, or has configured
+executor overrides. The explicit per-run binding makes those constraints visible.
+
+Remaining improvement opportunities are distinct from this implementation:
+
+- Bind tiers from measured task evaluations rather than treating them as capability
+  guarantees. Record cost, latency and quality alongside reported execution evidence.
+- Long-lived sessions may need an explicit audited rebinding operation when a pinned
+  model disappears. Current recovery preserves intent and reports unavailable targets.
+- The schema labels `allowedTools` as a hint; it is not a sandbox or permission fence.
+  Client permissions must enforce actual access.
+- The compiler injects synthesis only when a parallel step supplies `synthesis`.
+  The repository instruction claiming unconditional automatic synthesis overstates
+  current behavior. That authoring/enforcement alignment needs a separate decision.
+
+No Haiku acceptance, provider identity attestation, answer-profile model-selection
+parity, CI result, merge or installed activation is implied by local validation.

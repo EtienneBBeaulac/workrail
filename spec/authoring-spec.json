@@ -3,7 +3,7 @@
   "version": 3,
   "title": "WorkRail Authoring Rules",
   "purpose": "Canonical current rules for authoring good WorkRail workflows. workflow.schema.json remains the source of truth for legal structure.",
-  "lastReviewed": "2026-06-12",
+  "lastReviewed": "2026-10-09",
   "principles": [
     "Schema defines what is valid. These rules define what is good.",
     "Prefer current authoring rules over design rationale or historical notes.",
@@ -1224,25 +1224,34 @@
             "workflow.definition",
             "step.delegation-checkpoint"
           ],
-          "rule": "Declare `modelTier` on workflows, steps, or parallel delegations to specify lightweight, mid, or heavy cognitive resource requirements without hardcoding provider model IDs.",
-          "why": "Abstracting resource requirements via `modelTier` keeps workflows model-agnostic and portable across different providers (direct Anthropic vs Bedrock).",
+          "rule": "Declare modelTier on workflows, steps, or parallel delegations as a portable resource preference. Token-based MCP clients supply explicit per-run modelRouting and own native execution.",
+          "why": "Durable model intent, live client capability and reported execution identity are separate facts; resolving a tier must not invent a provider default or fabricate actual-model evidence.",
           "enforcement": [
             "validator"
           ],
           "sourceRefs": [
             {
               "kind": "runtime",
-              "path": "src/v2/usecases/start-workflow.ts",
-              "note": "Resolves activeModel based on modelTier hierarchy."
+              "path": "src/v2/durable-core/domain/model-selection.ts",
+              "note": "Resolves immutable intent and plans client launch against live capabilities."
             },
             {
               "kind": "runtime",
-              "path": "src/daemon/core/agent-client.ts",
-              "note": "Maps modelTier to provider-specific model IDs."
+              "path": "src/v2/usecases/start-workflow.ts",
+              "note": "Persists run-scoped modelRouting and keeps host-reported identity separate."
+            },
+            {
+              "kind": "runtime",
+              "path": "src/v2/durable-core/domain/prompt-renderer.ts",
+              "note": "Emits portable main-agent and independent child selection handoffs."
             }
           ],
           "checks": [
-            "The modelTier field is set to 'lightweight', 'mid', or 'heavy' when a step or delegation requires a specific resource tier."
+            "modelTier is lightweight, mid, or heavy and describes a resource preference, not guaranteed model capability.",
+            "Token-based MCP modelRouting is supplied per run by the caller and maps each tier to one native-model or configured-executor target without global writes.",
+            "Resolve child initialModelRequest using inspect_workflow before launch; forward modelRouting without the parent override and never pin an inferred initial tier as a session override.",
+            "Check live availability before launch and again after recovery; surface unsupported target or current-agent switching rather than substituting.",
+            "A request or binding is not actual execution evidence; reported model identity requires trusted host or runtime evidence."
           ],
           "antiPatterns": [
             "Hardcoding specific Anthropic or Bedrock model IDs in the workflow definition"

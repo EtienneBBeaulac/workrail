@@ -693,55 +693,41 @@ Prefer patterns that force the agent to confront uncertainty:
 
 The workflow should prove to the agent that it may not know enough yet, instead of asking the agent whether it feels confident.
 
-### Model Tiers (`modelTier`)
+### Model selection (`modelTier`)
 
-WorkRail v2 allows declaring recommended resource/model tiers rather than hardcoding concrete model IDs. This keeps workflows portable and provider-agnostic.
+A tier is a resource preference, not a capability guarantee. Declare `lightweight`,
+`mid`, or `heavy` on a workflow, a step, or a parallel delegation. Choose tiers from
+measured task needs; WorkRail does not promise that one model family satisfies them.
 
-#### Tier Categories
-- **`lightweight`**: Fast, cost-efficient models suitable for simple checks, basic validation, and fast loops (e.g. Claude 3.5 Haiku).
-- **`mid`**: Default tier balancing intelligence and cost. Best for general coding, design reasoning, and standard steps (e.g. Claude 3.5 Sonnet).
-- **`heavy`**: High-intelligence, complex reasoning models suitable for difficult audits, synthesis, or high-risk decision points (e.g. Claude 3 Opus).
+For token-based MCP sessions, the effective main-agent request is the explicit
+`start_workflow.modelTier`, then the current step tier, then the workflow tier,
+then inheritance of the client configuration. `modelRouting` is caller supplied
+and per-run: it binds each requested tier to either `{ "kind": "model", "modelId":
+"client-model-id" }` or `{ "kind": "executor", "name": "configured-executor" }`.
+Bindings are persisted at run start and cannot be replaced by worker context.
+Routing never writes global client configuration. There are no provider defaults;
+a missing tier binding produces `unresolved` with `binding_missing`.
 
-#### Declaring Tiers in Workflow JSON
-You can specify `modelTier` at three levels:
-1. **Workflow Level**: The default model tier for the entire workflow.
-   ```json
-   {
-     "id": "my-workflow",
-     "name": "My Workflow",
-     "modelTier": "mid",
-     "steps": [...]
-   }
-   ```
-2. **Step Level**: Override the workflow-level default for a specific step.
-   ```json
-   {
-     "id": "deep-audit",
-     "title": "Perform Deep Audit",
-     "modelTier": "heavy",
-     "prompt": "..."
-   }
-   ```
-3. **Parallel Delegation Level**: Specify the tier for fanned-out subagents spawned by a parallel step.
-   ```json
-   {
-     "id": "parallel-spawning",
-     "type": "parallel",
-     "parallelDelegations": [
-       {
-         "workflowId": "child-workflow",
-         "modelTier": "lightweight"
-       }
-     ]
-   }
-   ```
+Verify target availability before launching and again after recovery, using the
+client's current catalog and permissions. The main agent may not support changing
+models: if the current agent cannot switch, report unsupported switching. The
+client owns native launch and in-place switching; the MCP server supplies intent.
+`planClientModelLaunch` provides pure ready/unsupported outcomes from supplied
+capabilities; it does not execute a client or configure it.
 
-#### Resolution Hierarchy
-When starting a workflow session or spawning a subagent, the active model ID is resolved using the following priority hierarchy:
-1. Explicit tool parameters or environment overrides (`WORKRAIL_FORCE_MODEL`, `WORKRAIL_ACTIVE_MODEL`, `WORKRAIL_MODEL`, or `input.modelTier`).
-2. Step-level `modelTier` defined on the active step (or first step when starting a session).
-3. Workflow-level `modelTier` defined on the workflow.
-4. Default to `mid` tier model ID (`claude-sonnet-4-6` or `us.anthropic.claude-sonnet-4-6` depending on available credentials).
+A resolved target is not actual execution evidence. The reported model requires
+host or runtime evidence; worker labels and legacy model names remain unverified.
+An accepted native launch is also separate from independent provider attestation.
+
+Resolve an undeclared child's `initialModelRequest` from `inspect_workflow` before
+launching. Pass `modelRouting` to the child without the parent `modelTier` override.
+Only an explicit delegation tier becomes a child session override. An inferred
+initial request selects the launch model but must not be passed as
+`start_workflow.modelTier`: later steps retain their own authored policy.
+
+These MCP bindings do not replace WorkTrain's independent provider execution
+configuration. The answer-profile API has a separate trusted delivery-model
+boundary; the bindings described here belong to token-based workflow sessions.
 
 ### Correcting or stopping work awaiting approval
 

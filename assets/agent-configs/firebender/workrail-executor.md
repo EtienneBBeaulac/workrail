@@ -207,3 +207,47 @@ If any `workrail__*` tool call fails with a connection error or tool-not-found e
 - **Do not improvise.** Do not infer what the next step would be.
 - Retry the failed tool call in a loop until it succeeds.
 - Hold any tokens you have -- report them to the user so the session can be resumed manually.
+
+## Model selection (`modelTier`)
+
+A tier is a resource preference, not a capability guarantee. Declare `lightweight`,
+`mid`, or `heavy` on a workflow, a step, or a parallel delegation. Choose tiers from
+measured task needs; WorkRail does not promise that one model family satisfies them.
+
+For token-based MCP sessions, the effective main-agent request is the explicit
+`start_workflow.modelTier`, then the current step tier, then the workflow tier,
+then inheritance of the client configuration. `modelRouting` is caller supplied
+and per-run: it binds each requested tier to either `{ "kind": "model", "modelId":
+"client-model-id" }` or `{ "kind": "executor", "name": "configured-executor" }`.
+Bindings are persisted at run start and cannot be replaced by worker context.
+Routing never writes global client configuration. There are no provider defaults;
+a missing tier binding produces `unresolved` with `binding_missing`.
+
+Verify target availability before launching and again after recovery, using the
+client's current catalog and permissions. The main agent may not support changing
+models: if the current agent cannot switch, report unsupported switching. The
+client owns native launch and in-place switching; the MCP server supplies intent.
+`planClientModelLaunch` provides pure ready/unsupported outcomes from supplied
+capabilities; it does not execute a client or configure it.
+
+A resolved target is not actual execution evidence. The reported model requires
+host or runtime evidence; worker labels and legacy model names remain unverified.
+An accepted native launch is also separate from independent provider attestation.
+
+Resolve an undeclared child's `initialModelRequest` from `inspect_workflow` before
+launching. Pass `modelRouting` to the child without the parent `modelTier` override.
+Only an explicit delegation tier becomes a child session override. An inferred
+initial request selects the launch model but must not be passed as
+`start_workflow.modelTier`: later steps retain their own authored policy.
+
+These MCP bindings do not replace WorkTrain's independent provider execution
+configuration. The answer-profile API has a separate trusted delivery-model
+boundary; the bindings described here belong to token-based workflow sessions.
+
+Before accepting a delegated packet, verify its workflow ID, mapped inputs,
+allowed tools and selected target. Use a native model override when supported,
+or the named configured executor after checking its availability. A configured
+executor's own model settings can affect launch; verify them rather than trusting
+its name. Execute the registered routine self-sufficiently without child spawns.
+When no delegation tools exist, inheritance can execute inline; an explicit
+selection requires compatible switching or an unsupported result.

@@ -7,9 +7,10 @@ import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { composeServer } from '../../src/mcp/server.js';
 import { resetContainer } from '../../src/di/container.js';
 
-it.each([true, false])('preserves MCP policy across cold recovery and advance, explicit config=%s', async withConfig => {
+it.each([true, false].flatMap(withConfig => [true, false].map(cleanFormat => ({ withConfig, cleanFormat }))))('preserves MCP policy across cold recovery and advance: %j', async ({ withConfig, cleanFormat }) => {
   const root = await mkdtemp(join(tmpdir(), 'workrail-model-wire-'));
   const previous = { ...process.env };
+  process.env.WORKRAIL_CLEAN_RESPONSE_FORMAT = String(cleanFormat);
   let close: (() => Promise<void>) | undefined;
   try {
     const workflows = join(root, 'workflows');
@@ -75,15 +76,17 @@ it.each([true, false])('preserves MCP policy across cold recovery and advance, e
     const inspect = await runTool('inspect_workflow', { workflowId: 'model-child', workspacePath: root, mode: 'metadata' });
     expect(JSON.parse(inspect.content[0].text).initialModelRequest).toEqual({ kind: 'tier', tier: 'heavy', source: 'workflow' });
     const routing = withConfig ? { lightweight: { kind: 'model', modelId: 'gpt-6-luna' } } : undefined;
-    const tokenFrom = (response: any) => response.content.map((item: any) => item.text).join('\n').match(/"continueToken":\s*"([^"]+)"/)?.[1];
+    const tokenFrom = (response: any) => response.content.map((item: any) => item.text).join('\n').match(/(?:"continueToken":\s*"|Token: )(ct_[A-Za-z0-9_-]+)/)?.[1];
     let started = await runTool('start_workflow', { workflowId: 'model-parent', workspacePath: root, goal: 'Check model handoffs', ...(withConfig ? { modelTier: 'heavy', modelRouting: routing } : {}) });
-    expect(started.content.map((item: any) => item.text).join('\n')).toContain('wr-system-onboarding');
+    expect(started.structuredContent?.pending?.stepId).toBe('wr-system-onboarding');
     started = await runTool('continue_workflow', { continueToken: tokenFrom(started), intent: 'advance', workspacePath: root, output: { notesMarkdown: 'Acknowledged the workflow protocol.' } });
     expect(started.structuredContent?.pending).toBeDefined();
     const pending = started.structuredContent.pending;
     expect(pending.stepId).toBe('spawn');
     expect(pending.modelTier).toBe(withConfig ? 'heavy' : 'lightweight');
     expect(pending.modelSelection.request.source).toBe(withConfig ? 'session' : 'workflow');
+    expect(started.content.map((item: any) => item.text).join('\n')).toContain(
+      withConfig ? 'Requested tier: heavy (session)' : 'Requested tier: lightweight (workflow)');
     if (routing) expect(pending.delegations[0].modelSelection.target).toEqual(routing.lightweight);
     else expect(pending.delegations[0].modelSelection.kind).toBe('unresolved');
     expect(pending.delegations[0]).toMatchObject({ workflowId: 'model-child', inputs: { deliverableName: 'review.md' }, allowedTools: ['read_file'] });

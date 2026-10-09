@@ -48,3 +48,34 @@ it('rejects absent or mismatched handoffs and incomplete child sessions', () => 
   expect(verifyReceipt(receipt, transcript, 'source-hash', { ...fixture, resourcesClosed: false }, handoff, events, 'build-hash').ok).toBe(false);
   expect(verifyReceipt(receipt, transcript, 'different-source', fixture, handoff, events, 'build-hash').ok).toBe(false);
 });
+
+it('rejects receipts whose events cannot form a causal execution chain', () => {
+  const completionBeforeLaunch = [...transcript.slice(0, 4), ...transcript.slice(6), ...transcript.slice(4, 6)];
+  for (const reordered of [completionBeforeLaunch, [...transcript].reverse(),
+    [transcript[1], transcript[0], ...transcript.slice(2)],
+    [...transcript, transcript[0]]]) {
+    expect(verifyReceipt(receipt, reordered, 'source-hash', fixture, handoff, events, 'build-hash').ok).toBe(false);
+  }
+});
+
+it('binds encrypted native context through a nonce-bearing task identity', () => {
+  const taskName = 'native_model_' + nonce.replaceAll('-', '_');
+  const task = '/root/' + taskName;
+  const privateTranscript = transcript.map(item => {
+    if (item.payload.call_id === 'native-call' && item.payload.type === 'function_call') return {
+      ...item, payload: { ...item.payload, arguments: JSON.stringify({ task_name: taskName,
+        model: target.modelId, fork_turns: 'none', message: '<encrypted-at-rest>' }) },
+    };
+    if (item.payload.call_id === 'native-call') return { ...item, payload: { ...item.payload, output: task } };
+    if (item.payload.call_id === 'completion-call' && item.payload.type === 'function_call_output') return {
+      ...item, payload: { ...item.payload, output: JSON.stringify({ agents: [{ agent_name: task,
+        agent_status: { completed: nonce + ' session-proof' } }] }) },
+    };
+    return item;
+  });
+  expect(verifyReceipt({ ...receipt, nativeTaskName: task }, privateTranscript, 'source-hash', fixture, handoff, events, 'build-hash').ok).toBe(true);
+  const wrongTask = privateTranscript.map(item => item.payload.call_id === 'native-call' && item.payload.type === 'function_call'
+    ? { ...item, payload: { ...item.payload, arguments: JSON.stringify({ task_name: 'unbound', model: target.modelId,
+      fork_turns: 'none', message: '<encrypted-at-rest>' }) } } : item);
+  expect(verifyReceipt({ ...receipt, nativeTaskName: task }, wrongTask, 'source-hash', fixture, handoff, events, 'build-hash').ok).toBe(false);
+});

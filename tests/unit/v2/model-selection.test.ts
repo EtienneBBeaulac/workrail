@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { ModelRoutingSchema, resolveModelRequest, resolveModelSelection, readRunModelConfig } from '../../../src/v2/durable-core/domain/model-selection.js';
 import { DomainEventV1Schema } from '../../../src/v2/durable-core/schemas/session/events.js';
-import * as selectionBoundary from '../../../src/v2/durable-core/domain/model-selection.js';
+import { planClientModelLaunch } from '../../../src/v2/durable-core/domain/model-selection.js';
 
 describe('model selection boundary', () => {
   it('plans client launches against available targets and explicit switching capability', () => {
-    const plan = Reflect.get(selectionBoundary, 'planClientModelLaunch');
+    const plan = planClientModelLaunch;
     expect(plan).toBeTypeOf('function');
     const request = resolveModelRequest({}, 'lightweight');
     const selection = resolveModelSelection(request, { lightweight: { kind: 'model', modelId: 'client-fast' } });
-    const catalog = { kind: 'model_overrides', modelIds: ['client-fast'] };
+    const catalog = { kind: 'model_overrides' as const, modelIds: ['client-fast'] };
     expect(plan(selection, catalog, { kind: 'child' })).toEqual({ kind: 'ready', target: { kind: 'model', modelId: 'client-fast' } });
     expect(plan(selection, { kind: 'model_overrides', modelIds: ['other'] }, { kind: 'child' })).toMatchObject({ kind: 'unsupported', reason: 'target_unavailable' });
     expect(plan(selection, { kind: 'configured_executors', names: ['workrail-fast'] }, { kind: 'child' })).toMatchObject({ kind: 'unsupported', reason: 'model_override_unavailable' });
@@ -22,6 +22,22 @@ describe('model selection boundary', () => {
     expect(plan(executor, { kind: 'configured_executors', names: ['workrail-fast'] }, { kind: 'child' })).toEqual({ kind: 'ready', target: { kind: 'executor', name: 'workrail-fast' } });
     expect(plan(executor, { kind: 'configured_executors', names: [] }, { kind: 'child' })).toMatchObject({ kind: 'unsupported', reason: 'target_unavailable' });
   });
+  it('preserves nonlaunchable requests and refuses unavailable executor mechanisms', () => {
+    const catalog = { kind: 'model_overrides' as const, modelIds: ['fast'] };
+    for (const selection of [resolveModelSelection({ kind: 'inherit' }),
+      resolveModelSelection({ kind: 'tier', tier: 'heavy', source: 'step' }),
+      { kind: 'workflow_lookup' as const, workflowId: 'child' }]) {
+      expect(planClientModelLaunch(selection, catalog, { kind: 'child' })).toEqual(selection);
+    }
+    const executor = resolveModelSelection({ kind: 'tier', tier: 'mid', source: 'workflow' },
+      { mid: { kind: 'executor', name: 'registered' } });
+    expect(planClientModelLaunch(executor, catalog, { kind: 'child' })).toMatchObject({ kind: 'unsupported', reason: 'executor_unavailable' });
+    expect(planClientModelLaunch(executor, { kind: 'configured_executors', names: ['registered'] },
+      { kind: 'current_agent', switching: 'available' })).toMatchObject({ kind: 'unsupported', reason: 'current_agent_switch_unavailable' });
+    const model = resolveModelSelection({ kind: 'tier', tier: 'mid', source: 'workflow' }, { mid: { kind: 'model', modelId: 'fast' } });
+    expect(planClientModelLaunch(model, catalog, { kind: 'current_agent', switching: 'available' }).kind).toBe('ready');
+  });
+
   it('has explicit precedence without provider defaults', () => {
     expect(resolveModelRequest({ modelTier: 'lightweight' }, 'heavy', 'mid')).toEqual({ kind: 'tier', tier: 'lightweight', source: 'session' });
     expect(resolveModelRequest({}, 'heavy', 'mid')).toEqual({ kind: 'tier', tier: 'heavy', source: 'step' });

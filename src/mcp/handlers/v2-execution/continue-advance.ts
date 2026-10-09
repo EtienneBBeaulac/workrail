@@ -31,7 +31,8 @@ import type { ExecutionSessionGateErrorV2 } from '../../../v2/usecases/execution
 import type { SessionEventLogStoreError } from '../../../v2/ports/session-event-log-store.port.js';
 import { asSortedEventLog } from '../../../v2/durable-core/sorted-event-log.js';
 import { buildSessionIndex } from '../../../v2/durable-core/session-index.js';
-import { parseEAT, signEAT } from '../../../v2/durable-core/tokens/index.js';
+import { signEAT } from '../../../v2/durable-core/tokens/index.js';
+import { parseStoredEnvironmentAttestation } from './stored-environment-attestation.js';
 
 /**
  * Handle advance intent: execute next step and record the outcome.
@@ -220,16 +221,21 @@ export function handleAdvanceIntent(args: {
             }
 
             // Find latest EAT token inside the session
-            let latestEatToken: string | undefined;
+            let latestEatToken: unknown;
             for (let i = truthToUse.events.length - 1; i >= 0; i--) {
               const e = truthToUse.events[i];
-              if (e.kind === EVENT_KIND.CONTEXT_SET && (e.data as any)?.context?.['eat_token']) {
-                latestEatToken = (e.data as any).context['eat_token'];
+              const storedContext = e.kind === EVENT_KIND.CONTEXT_SET && e.scope?.runId === String(runId) ? e.data.context : undefined;
+              if (storedContext && typeof storedContext === 'object' && 'eat_token' in storedContext) {
+                latestEatToken = storedContext.eat_token;
                 break;
               }
             }
 
-            const parsedEat = parseEAT(latestEatToken, tokenCodecPorts, String(sessionId));
+            if (latestEatToken !== undefined && typeof latestEatToken !== 'string') {
+              return neErrorAsync({ kind: 'invariant_violation' as const,
+                message: 'Stored environment attestation is invalid: malformed' });
+            }
+            const parsedEat = parseStoredEnvironmentAttestation(latestEatToken, tokenCodecPorts, String(sessionId));
             if (!parsedEat.ok && parsedEat.error.kind !== 'missing') {
               return neErrorAsync({ kind: 'invariant_violation' as const,
                 message: `Stored environment attestation is invalid: ${parsedEat.error.kind}` });
@@ -238,7 +244,8 @@ export function handleAdvanceIntent(args: {
             // A server restart or a requested tier is not evidence of a client model
             // switch. Preserve lineage and identity until a host actually reports it.
             const currentActiveModel = parsedEatPayload?.activeModel ?? '';
-            const shouldRefreshEat = !parsedEatPayload || parsedEatPayload.harness !== currentHarness;
+            const shouldRefreshEat = !parsedEatPayload || parsedEatPayload.harness !== currentHarness
+              || (parsedEat.ok && parsedEat.value.historicalWrapper);
 
             let preStepCheckRA: RA<void, ContinueWorkflowError> = okAsync<void, ContinueWorkflowError>(undefined);
 

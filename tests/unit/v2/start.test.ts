@@ -161,6 +161,24 @@ describe('v2 startup sniffing & Environment Attestation Tokens', () => {
     }
   });
 
+  it('retains the trusted host model independently of requested tiers', async () => {
+    const root = await mkTempDataDir();
+    process.env.WORKRAIL_DATA_DIR = root;
+    try {
+      const ctx = await mkCtxWithWorkflow(workflowId, workflowDef);
+      const started = await executeStartWorkflow({ workflowId, workspacePath: root, goal: 'host evidence', modelTier: 'heavy' }, ctx,
+        { model: 'host-model', triggerSource: 'mcp' });
+      expect(started.isOk()).toBe(true);
+      if (started.isErr()) return;
+      const loaded = await ctx.v2.sessionStore.load(started.value.sessionId);
+      expect(loaded.isOk()).toBe(true);
+      if (loaded.isErr()) return;
+      const initial = loaded.value.events.find(event => event.kind === 'context_set');
+      expect(initial?.kind === 'context_set' && initial.data.context).toMatchObject({ metrics_active_model: 'host-model', metrics_model_source: 'host_reported' });
+      expect(started.value.response.pending?.modelTier).toBe('heavy');
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+  });
+
   it('verifies parent EAT and increments spawnDepth correctly', async () => {
     const root = await mkTempDataDir();
     process.env.WORKRAIL_DATA_DIR = root;

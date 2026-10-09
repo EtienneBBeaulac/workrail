@@ -5,13 +5,16 @@ import { fileURLToPath } from 'node:url';
 
 // This proves a native launch request was accepted, not provider model attestation.
 const implementationFiles = [
+    'src/answer-v1/admission-reservation.ts',
     'src/mcp/handler-factory.ts', 'src/mcp/handlers/v2-execution/continue-advance.ts',
+    'src/mcp/handlers/v2-execution/stored-environment-attestation.ts', 'src/mcp/response-supplements.ts',
     'src/mcp/handlers/v2-workflow.ts', 'src/mcp/output-schemas.ts',
     'src/mcp/step-content-envelope.ts', 'src/mcp/v2/tools.ts',
     'src/v2/durable-core/domain/model-selection.ts',
     'src/v2/durable-core/domain/prompt-renderer.ts',
     'src/v2/durable-core/schemas/session/events.ts',
     'src/v2/projections/session-metrics.ts', 'src/v2/usecases/start-workflow.ts',
+    'scripts/run-model-selection-acceptance.mjs', 'scripts/verify-model-selection-native.mjs',
   ];
 function hashFiles(root, files) {
   const hash = createHash('sha256');
@@ -44,9 +47,24 @@ function commandResult(transcript, callId) {
 function commandInput(payload) { return String(payload?.input ?? payload?.arguments ?? ''); }
 function supportedCommand(payload) { return payload && ['exec', 'functions.exec', 'functions.exec_command'].includes(toolName(payload)); }
 
+function uniqueReceiptPosition(transcript, callId, kinds) {
+  const positions = transcript.flatMap((item, index) => item.type === 'response_item'
+    && item.payload?.call_id === callId && kinds.includes(item.payload?.type) ? [index] : []);
+  return positions.length === 1 ? positions[0] : -1;
+}
+
 export function verifyReceipt(receipt, transcript, currentHash, fixture, handoff, events, currentBuildHash) {
   if (receipt?.version !== 1 || receipt.implementationHash !== currentHash) return { ok: false, reason: 'Receipt is absent or belongs to a different implementation' };
   if (typeof currentBuildHash !== 'string' || receipt.runtimeBuildHash !== currentBuildHash || handoff?.runtimeBuildHash !== currentBuildHash || fixture?.runtimeBuildHash !== currentBuildHash || handoff?.implementationHash !== currentHash || fixture?.implementationHash !== currentHash) return { ok: false, reason: 'Built runtime identity is absent or inconsistent' };
+  // Matching receipts prove one run only when their ordering is causal.
+  const positions = [receipt.buildCallId, receipt.startupCallId, receipt.nativeCallId, receipt.nativeCompletionCallId]
+    .flatMap(callId => [
+      uniqueReceiptPosition(transcript, callId, ['function_call', 'custom_tool_call']),
+      uniqueReceiptPosition(transcript, callId, ['function_call_output', 'custom_tool_call_output']),
+    ]);
+  if (positions.some((position, index) => position < 0 || (index > 0 && position <= positions[index - 1]))) {
+    return { ok: false, reason: 'Build, handoff, native launch and completion receipts are not causally ordered' };
+  }
   const buildCall = commandCall(transcript, receipt.buildCallId);
   const buildResult = commandResult(transcript, receipt.buildCallId);
   if (!supportedCommand(buildCall) || !commandInput(buildCall).includes('npm run build') || buildResult?.exit_code !== 0 || !buildResult.output.includes(currentHash) || !buildResult.output.includes(currentBuildHash)) return { ok: false, reason: 'Successful build receipt is absent' };
@@ -63,7 +81,12 @@ export function verifyReceipt(receipt, transcript, currentHash, fixture, handoff
   if (!call || !['collaboration.spawn_agent', 'functions.collaboration.spawn_agent'].includes(toolName(call.payload))) return { ok: false, reason: 'Native spawn call not found' };
   let args;
   try { args = JSON.parse(call.payload.arguments); } catch { return { ok: false, reason: 'Native call arguments are invalid' }; }
-  if (typeof receipt.runNonce !== 'string' || receipt.runNonce.length === 0 || !String(args.message).includes(receipt.runNonce)) return { ok: false, reason: 'Native call is not bound to this proof run' };
+  if (typeof receipt.runNonce !== 'string' || receipt.runNonce.length === 0) return { ok: false, reason: 'Proof nonce is absent' };
+  // Codex can encrypt prompt arguments at rest. A nonce-bearing native task name
+  // binds the same call without reading or decrypting its private context packet.
+  const packetBound = String(args.message).includes(receipt.runNonce);
+  const taskBound = String(args.task_name).includes(receipt.runNonce.replaceAll('-', '_'));
+  if (!packetBound && !taskBound) return { ok: false, reason: 'Native call is not bound to this proof run' };
   if (receipt.nativeTaskName !== '/root/' + args.task_name) return { ok: false, reason: 'Native task identity does not match the request' };
   if (args.model !== receipt.target.modelId || args.fork_turns !== 'none') return { ok: false, reason: 'Native request did not apply the selected model with fresh context' };
   const response = transcript.find(item => item.type === 'response_item' && item.payload?.type === 'function_call_output' && item.payload.call_id === receipt.nativeCallId);
