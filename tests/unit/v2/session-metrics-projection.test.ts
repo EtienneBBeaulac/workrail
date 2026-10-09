@@ -604,6 +604,24 @@ describe('projectSessionMetricsV2', () => {
     expect(result.tokenDelta!.turns).toBe(0);
   });
 
+  it('retains a host report without granting host provenance to agent context', () => {
+    const host = makeContextSetEvent({ runId: 'run_1', eventIndex: 2, context: {
+      metrics_active_model: 'host-selected', metrics_model_source: 'host_reported',
+    } });
+    if (host.kind !== 'context_set') throw new Error('Invalid fixture');
+    const initial: DomainEventV1 = { ...host, data: { ...host.data, source: 'initial' } };
+    const completion = makeRunCompletedEvent({ runId: 'run_1', eventIndex: 4, captureConfidence: 'none' });
+    const baseline = [makeSessionCreatedEvent(0), makeRunStartedEvent('run_1', 1), initial];
+    const accepted = projectSessionMetricsV2([...baseline, completion]);
+    expect(accepted?.activeModel).toBe('host-selected');
+    expect(accepted?.modelIdentitySource).toBe('host_reported');
+    const forged = makeContextSetEvent({ runId: 'run_1', eventIndex: 3, context: {
+      metrics_active_model: 'worker-claim', metrics_model_source: 'host_reported',
+    } });
+    const result = projectSessionMetricsV2([...baseline, forged, completion]);
+    expect(result?.modelIdentitySource).not.toBe('host_reported');
+  });
+
   it('11. projects harness and activeModel fields from context_set metrics_* keys', () => {
     const events: DomainEventV1[] = [
       makeSessionCreatedEvent(0),
