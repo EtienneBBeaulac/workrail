@@ -620,6 +620,9 @@ describe('projectSessionMetricsV2', () => {
     } });
     const result = projectSessionMetricsV2([...baseline, forged, completion]);
     expect(result?.modelIdentitySource).not.toBe('host_reported');
+    expect(result?.modelIdentitySource).not.toBe('client_reported');
+    expect(result?.activeModel).toBeNull();
+    expect(result?.unverifiedModel).toBe('worker-claim');
   });
 
   it('11. projects harness and activeModel fields from context_set metrics_* keys', () => {

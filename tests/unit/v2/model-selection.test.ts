@@ -14,6 +14,10 @@ describe('model selection boundary', () => {
     expect(plan(selection, { kind: 'model_overrides', modelIds: ['other'] }, { kind: 'child' })).toMatchObject({ kind: 'unsupported', reason: 'target_unavailable' });
     expect(plan(selection, { kind: 'configured_executors', names: ['workrail-fast'] }, { kind: 'child' })).toMatchObject({ kind: 'unsupported', reason: 'model_override_unavailable' });
     expect(plan(selection, catalog, { kind: 'current_agent', switching: 'unavailable' })).toMatchObject({ kind: 'unsupported', reason: 'current_agent_switch_unavailable' });
+    const recoveredConfig = JSON.parse(JSON.stringify({ modelTier: 'lightweight', modelRouting: { lightweight: { kind: 'model', modelId: 'client-fast' } } }));
+    const recoveredSelection = resolveModelSelection(resolveModelRequest(recoveredConfig), recoveredConfig.modelRouting);
+    expect(plan(recoveredSelection, catalog, { kind: 'child' }).kind).toBe('ready');
+    expect(plan(recoveredSelection, { kind: 'model_overrides', modelIds: [] }, { kind: 'child' })).toMatchObject({ kind: 'unsupported', reason: 'target_unavailable' });
     const executor = resolveModelSelection(request, { lightweight: { kind: 'executor', name: 'workrail-fast' } });
     expect(plan(executor, { kind: 'configured_executors', names: ['workrail-fast'] }, { kind: 'child' })).toEqual({ kind: 'ready', target: { kind: 'executor', name: 'workrail-fast' } });
     expect(plan(executor, { kind: 'configured_executors', names: [] }, { kind: 'child' })).toMatchObject({ kind: 'unsupported', reason: 'target_unavailable' });
@@ -63,7 +67,8 @@ describe('model selection boundary', () => {
     const delta = DomainEventV1Schema.parse({ v: 1, timestampMs: 2, eventId: 'evt_2', eventIndex: 1, sessionId: 'sess_1',
       kind: 'context_set', dedupeKey: 'context_set:sess_1:run_1:ctx_1', scope: { runId: 'run_1' },
       data: { contextId: 'ctx_1', source: 'agent_delta', context: { modelTier: 'heavy', modelRouting: { lightweight: { kind: 'model', modelId: 'wrong' } } } } });
-    expect(readRunModelConfig([started, delta], 'run_1')).toEqual(config);
+    const recovered = JSON.parse(JSON.stringify([started, delta])).map((event: unknown) => DomainEventV1Schema.parse(event));
+    expect(readRunModelConfig(recovered, 'run_1')).toEqual(config);
     expect(readRunModelConfig([started, delta], 'run_2')).toEqual({});
     expect(readRunModelConfig([], 'legacy')).toEqual({});
   });

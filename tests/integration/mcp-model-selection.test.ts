@@ -15,14 +15,14 @@ it.each([true, false])('preserves MCP policy across cold recovery and advance, e
     const workflows = join(root, 'workflows');
     await mkdir(workflows);
     await writeFile(join(workflows, 'model-parent.json'), JSON.stringify({
-      id: 'model-parent', name: 'Model parent', description: 'Model selection wire fixture', version: '1.0.0',
+      id: 'model-parent', name: 'Model parent', description: 'Model selection wire fixture', version: '1.0.0', modelTier: 'lightweight',
       steps: [
         { id: 'spawn', title: 'Spawn reviews', type: 'parallel', parallelDelegations: [
           { workflowId: 'model-child', modelTier: 'lightweight', args: { deliverableName: 'review.md' }, allowedTools: ['read_file'] },
           { workflowId: 'model-child', modelTier: 'heavy' },
           { workflowId: 'model-child' },
         ] },
-        { id: 'synthesize', title: 'Synthesize', prompt: 'Read child findings.', notesOptional: true },
+        { id: 'synthesize', title: 'Synthesize', modelTier: 'mid', prompt: 'Read child findings.', notesOptional: true },
       ],
     }));
     await writeFile(join(workflows, 'model-child.json'), JSON.stringify({
@@ -82,6 +82,8 @@ it.each([true, false])('preserves MCP policy across cold recovery and advance, e
     expect(started.structuredContent?.pending).toBeDefined();
     const pending = started.structuredContent.pending;
     expect(pending.stepId).toBe('spawn');
+    expect(pending.modelTier).toBe(withConfig ? 'heavy' : 'lightweight');
+    expect(pending.modelSelection.request.source).toBe(withConfig ? 'session' : 'workflow');
     if (routing) expect(pending.delegations[0].modelSelection.target).toEqual(routing.lightweight);
     else expect(pending.delegations[0].modelSelection.kind).toBe('unresolved');
     expect(pending.delegations[0]).toMatchObject({ workflowId: 'model-child', inputs: { deliverableName: 'review.md' }, allowedTools: ['read_file'] });
@@ -98,6 +100,7 @@ it.each([true, false])('preserves MCP policy across cold recovery and advance, e
     await call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'model-wire-proof-cold', version: '1' } });
     const rehydrated = await runTool('continue_workflow', { continueToken: token, intent: 'rehydrate', workspacePath: root });
     expect(rehydrated.structuredContent.pending.modelRouting).toEqual(routing);
+    expect(rehydrated.structuredContent.pending.modelTier).toBe(withConfig ? 'heavy' : 'lightweight');
     const advanced = await runTool('continue_workflow', { continueToken: tokenFrom(rehydrated), intent: 'advance', workspacePath: root,
       context: { modelTier: 'lightweight', modelRouting: { heavy: { kind: 'model', modelId: 'wrong' } } },
       output: { notesMarkdown: 'Wire proof only: no agents were launched. Proceed to inspect immutable configuration.' } });
@@ -106,7 +109,8 @@ it.each([true, false])('preserves MCP policy across cold recovery and advance, e
       expect(advanced.structuredContent.pending.modelRouting).toEqual(routing);
     } else {
       expect(advanced.content.map((item: any) => item.text).join('\n')).not.toContain('wrong');
-      expect(advanced.structuredContent?.pending?.modelTier).toBeUndefined();
+      expect(advanced.structuredContent?.pending?.modelTier).toBe('mid');
+      expect(advanced.structuredContent?.pending?.modelSelection.request.source).toBe('step');
     }
   } finally {
     await close?.();
