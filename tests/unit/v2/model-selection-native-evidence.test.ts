@@ -1,15 +1,18 @@
 import { it, expect } from 'vitest';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { verifyReceipt } from '../../../scripts/verify-model-selection-native.mjs';
 
+const proofRoot = join(tmpdir(), 'model-selection-proof-fixture');
 const nonce = 'bounded-test-nonce';
 const target = { kind: 'model', modelId: 'gpt-6-luna' };
-const receipt = { version: 1, implementationHash: 'source-hash', runtimeBuildHash: 'build-hash', buildCallId: 'build-call', startupCallId: 'startup-call', proofDataRoot: '/tmp/proof', target, runNonce: nonce,
+const receipt = { version: 1, implementationHash: 'source-hash', runtimeBuildHash: 'build-hash', buildCallId: 'build-call', startupCallId: 'startup-call', proofDataRoot: proofRoot, target, runNonce: nonce,
   nativeTaskName: '/root/acceptance', nativeCallId: 'native-call', nativeCompletionCallId: 'completion-call' };
-const startup = { kind: 'branch_mcp_started', modulePath: '/repo/dist/mcp/server.js', transport: 'stdio', dataRoot: '/tmp/proof', runNonce: nonce, implementationHash: 'source-hash', runtimeBuildHash: 'build-hash' };
+const startup = { kind: 'branch_mcp_started', modulePath: '/repo/dist/mcp/server.js', transport: 'stdio', dataRoot: proofRoot, runNonce: nonce, implementationHash: 'source-hash', runtimeBuildHash: 'build-hash' };
 const transcript = [
   { type: 'response_item', payload: { type: 'custom_tool_call', call_id: 'build-call', name: 'exec', input: 'npm run build' } },
   { type: 'response_item', payload: { type: 'custom_tool_call_output', call_id: 'build-call', output: [{ type: 'input_text', text: JSON.stringify({ exit_code: 0, output: 'source-hash build-hash' }) }] } },
-  { type: 'response_item', payload: { type: 'custom_tool_call', call_id: 'startup-call', name: 'exec', input: 'node scripts/run-model-selection-acceptance.mjs prepare /tmp/proof' } },
+  { type: 'response_item', payload: { type: 'custom_tool_call', call_id: 'startup-call', name: 'exec', input: `node scripts/run-model-selection-acceptance.mjs prepare ${proofRoot}` } },
   { type: 'response_item', payload: { type: 'custom_tool_call_output', call_id: 'startup-call', output: [{ type: 'input_text', text: JSON.stringify({ exit_code: 0, output: JSON.stringify({ startup }) }) }] } },
   { type: 'response_item', payload: { type: 'function_call', call_id: 'native-call', name: 'spawn_agent', namespace: 'collaboration',
     arguments: JSON.stringify({ task_name: 'acceptance', model: target.modelId, fork_turns: 'none', message: nonce }) } },
