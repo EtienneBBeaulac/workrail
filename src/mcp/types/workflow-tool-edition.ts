@@ -60,6 +60,7 @@ export type V2WorkflowToolName =
 export type McpCallToolResult = {
   readonly content: ReadonlyArray<{ readonly type: 'text'; readonly text: string }>;
   readonly isError?: boolean;
+  readonly structuredContent?: { readonly pending: import('../output-schemas.js').V2PendingStep };
 };
 
 /**

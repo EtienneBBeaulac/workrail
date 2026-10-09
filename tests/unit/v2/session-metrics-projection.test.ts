@@ -624,6 +624,8 @@ describe('projectSessionMetricsV2', () => {
     if (!result) return;
 
     expect(result.harness).toBe('antigravity-harness');
-    expect(result.activeModel).toBe('gemini-active-model');
+    expect(result.activeModel).toBeNull();
+    expect(result.modelIdentitySource).toBe('legacy_unverified');
+    expect(result.unverifiedModel).toBe('gemini-active-model');
   });
 });

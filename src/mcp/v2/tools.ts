@@ -1,3 +1,4 @@
+import { ModelTierSchema, ModelRoutingSchema } from '../../v2/durable-core/domain/model-selection.js';
 import path from 'path';
 import { z } from 'zod';
 import type { ToolAnnotations } from '../tool-factory.js';
@@ -43,7 +44,8 @@ export const V2StartWorkflowInput = z.object({
   workflowId: z.string().min(1).regex(/^([a-z0-9_-]+|[a-z][a-z0-9_-]+\.[a-z][a-z0-9_-]+)$/, 'Workflow ID must be a valid legacy ID (e.g. my-workflow) or namespaced ID (e.g. wr.discovery)').describe('The workflow ID to start'),
   workspacePath: workspacePathField.describe('Required. Absolute path to your current workspace directory (e.g. the "Workspace:" value from your system parameters). WorkRail uses this to resolve the correct project-scoped workflow variant and to anchor the session to the correct repo for future resume_session discovery. Shared MCP servers cannot infer this safely.'),
   goal: z.string().min(1).describe('A short sentence describing what you are trying to accomplish (e.g. "implement OAuth refresh token rotation", "review PR #47 before merge", "investigate why the build fails on CI").'),
-  modelTier: z.enum(['lightweight', 'mid', 'heavy']).optional().describe('Recommended model tier/category for executing this workflow (lightweight, mid, or heavy).'),
+  modelTier: ModelTierSchema.optional().describe('Recommended model tier/category for executing this workflow (lightweight, mid, or heavy).'),
+  modelRouting: ModelRoutingSchema.optional().describe('Per-run client bindings for tiers. Each binding selects a native model override or a configured executor. The client must verify availability; WorkRail does not launch or observe models.'),
 });
 export type V2StartWorkflowInput = z.infer<typeof V2StartWorkflowInput>;
 

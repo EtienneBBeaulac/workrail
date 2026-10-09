@@ -27,6 +27,7 @@ import type { PreValidateResult } from './validation/workflow-next-prevalidate.j
 import type { WrappedToolHandler, McpCallToolResult } from './types/workflow-tool-edition.js';
 import { internalSuggestion } from './handlers/v2-execution-helpers.js';
 import { formatV2ExecutionResponse, formatV2ResumeResponse, type FormattedResponse } from './v2-response-formatter.js';
+import { toPendingStep } from './output-schemas.js';
 import { getV2ExecutionRenderEnvelope } from './render-envelope.js';
 
 // -----------------------------------------------------------------------------
@@ -52,6 +53,10 @@ const jsonResponsesOverride = process.env.WORKRAIL_JSON_RESPONSES === 'true';
 export function toMcpResult<T>(result: ToolResult<T>, ctx?: ToolContext): McpCallToolResult {
   switch (result.type) {
     case 'success': {
+      const stepContent = getV2ExecutionRenderEnvelope(result.data)?.contentEnvelope;
+      const modelHandoff = stepContent && (stepContent.modelSelection || stepContent.delegations)
+        ? toPendingStep({ ...stepContent, prompt: stepContent.authoredPrompt }) : null;
+      const structured = modelHandoff ? { structuredContent: { pending: modelHandoff } } : {};
       const cleanResponseFormat = ctx?.featureFlags.isEnabled('cleanResponseFormat') ?? false;
 
       if (!jsonResponsesOverride) {
@@ -66,7 +71,7 @@ export function toMcpResult<T>(result: ToolResult<T>, ctx?: ToolContext): McpCal
           if (formatted.references != null) {
             content.push({ type: 'text', text: formatted.references.text });
           }
-          return { content };
+          return { content, ...structured };
         }
       }
       // JSON mode: include references alongside the response when present
@@ -77,6 +82,7 @@ export function toMcpResult<T>(result: ToolResult<T>, ctx?: ToolContext): McpCal
         ? { ...responseBody as Record<string, unknown>, references: refs }
         : responseBody;
       return {
+        ...structured,
         content: [{
           type: 'text',
           text: JSON.stringify(jsonPayload),

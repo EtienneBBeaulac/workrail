@@ -96,6 +96,9 @@ export interface SessionMetricsV2 {
    * Null if not reported.
    */
   readonly activeModel: string | null;
+  /** Reported identity is distinct from a request and is not provider attestation. */
+  readonly modelIdentitySource: 'host_reported' | 'client_reported' | 'unknown' | 'legacy_unverified';
+  readonly unverifiedModel: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -354,7 +357,12 @@ export function projectSessionMetricsV2(
   const harness = typeof harnessRaw === 'string' ? harnessRaw : null;
 
   const activeModelRaw = metricsContext['metrics_active_model'];
-  const activeModel = typeof activeModelRaw === 'string' ? activeModelRaw : null;
+  const reportedModel = typeof activeModelRaw === 'string' && activeModelRaw.length > 0 ? activeModelRaw : null;
+  const source = metricsContext['metrics_model_source'];
+  const modelIdentitySource = reportedModel === null ? 'unknown'
+    : source === 'host_reported' || source === 'client_reported' ? source : 'legacy_unverified';
+  const activeModel = modelIdentitySource === 'host_reported' || modelIdentitySource === 'client_reported' ? reportedModel : null;
+  const unverifiedModel = modelIdentitySource === 'legacy_unverified' ? reportedModel : null;
 
   return {
     startGitSha,
@@ -375,5 +383,7 @@ export function projectSessionMetricsV2(
     retriesCount,
     harness,
     activeModel,
+    modelIdentitySource,
+    unverifiedModel,
   };
 }

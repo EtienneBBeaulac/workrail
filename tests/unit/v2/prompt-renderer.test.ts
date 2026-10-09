@@ -18,6 +18,30 @@ const simpleWorkflow = createWorkflow(
 
 describe('renderPendingPrompt', () => {
 
+  it('preserves a child model request in the client handoff', () => {
+    const workflow = createWorkflow({
+      id: 'model-request', name: 'Model request', description: 'Model request', version: '1.0.0',
+      steps: [{ id: 'parallel', title: 'Review', type: 'parallel', parallelDelegations: [
+        { workflowId: 'child-review', modelTier: 'lightweight' },
+      ] }],
+    }, createBundledSource());
+    const result = renderPendingPrompt({ workflow, stepId: 'parallel', loopPath: [],
+      truth: { events: [], manifest: [] }, runId: 'run_1', nodeId: 'node_1', rehydrateOnly: false });
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.prompt).toContain('lightweight');
+      expect(result.value).toHaveProperty('delegations.0.modelSelection.request.tier', 'lightweight');
+    }
+  });
+
+  it('inherits a workflow tier when the current step has no override', () => {
+    const workflow = createWorkflow({ ...simpleWorkflow.definition, modelTier: 'heavy' }, createBundledSource());
+    const result = renderPendingPrompt({ workflow, stepId: 'step1', loopPath: [],
+      truth: { events: [], manifest: [] }, runId: 'run_1', nodeId: 'node_1', rehydrateOnly: false });
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) expect(result.value.modelTier).toBe('heavy');
+  });
+
   describe('base behavior (no recovery)', () => {
     it('returns base prompt when rehydrateOnly=false', () => {
       const result = renderPendingPrompt({

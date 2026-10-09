@@ -1,3 +1,4 @@
+import { RunModelConfigSchema } from '../../domain/model-selection.js';
 import { AnswerHostRecordSchema } from './answer-host.js';
 import { z } from 'zod';
 import { JsonValueSchema } from '../../canonical/json-zod.js';
@@ -65,6 +66,7 @@ export const DomainEventEnvelopeV1Schema = z.object({
 const WorkflowSourceKindSchema = z.enum(['bundled', 'user', 'project', 'remote', 'plugin']);
 
 const RunStartedDataV1Schema = z.object({
+  modelConfig: RunModelConfigSchema.optional(),
   workflowId: z.string().min(1),
   workflowHash: workflowHashSchema,
   workflowSourceKind: WorkflowSourceKindSchema,
