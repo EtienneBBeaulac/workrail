@@ -1,3 +1,4 @@
+import { ModelTierSchema, ModelSelectionSchema, ModelRoutingSchema, ModelRequestSchema } from '../v2/durable-core/domain/model-selection.js';
 import { z } from 'zod';
 import { ExecutionStateSchema } from '../domain/execution/state.js';
 import {
@@ -198,6 +199,7 @@ export const V2WorkflowInspectOutputSchema = z.object({
   workflowHash: z.string().min(1),
   mode: z.enum(['metadata', 'preview']),
   compiled: JsonValueSchema,
+  initialModelRequest: ModelRequestSchema.optional(),
   visibility: V2WorkflowListItemSchema.shape.visibility.optional(),
   staleRoots: z.array(z.string()).optional().describe(
     'Workflow source paths that were inaccessible during discovery (missing remembered roots or missing managed source directories). ' +
@@ -228,7 +230,10 @@ export const V2PendingStepSchema = z.object({
   title: z.string().min(1),
   prompt: z.string().min(1),
   agentRole: z.string().min(1).optional(),
-  modelTier: z.enum(['lightweight', 'mid', 'heavy']).optional(),
+  modelTier: ModelTierSchema.optional(),
+  modelSelection: ModelSelectionSchema.optional(),
+  modelRouting: ModelRoutingSchema.optional(),
+  delegations: z.array(z.object({ workflowId: z.string(), goal: z.string(), inputs: z.record(z.string()), allowedTools: z.array(z.string()).optional(), modelSelection: ModelSelectionSchema }).strict()).optional(),
 });
 
 export type V2PendingStep = z.infer<typeof V2PendingStepSchema>;
@@ -242,7 +247,10 @@ export function toPendingStep(meta: {
   readonly title: string;
   readonly prompt: string;
   readonly agentRole?: string;
-  readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
+  readonly modelTier?: import('../v2/durable-core/domain/model-selection.js').ModelTier;
+  readonly modelRouting?: import('../v2/durable-core/domain/model-selection.js').ModelRouting;
+  readonly modelSelection?: import('../v2/durable-core/domain/model-selection.js').ModelSelection;
+  readonly delegations?: readonly import('../v2/durable-core/domain/prompt-renderer.js').ResolvedDelegation[];
 } | null): V2PendingStep | null {
   if (!meta) return null;
   return {
@@ -251,6 +259,9 @@ export function toPendingStep(meta: {
     prompt: meta.prompt,
     ...(meta.agentRole ? { agentRole: meta.agentRole } : {}),
     ...(meta.modelTier ? { modelTier: meta.modelTier } : {}),
+    ...(meta.modelRouting ? { modelRouting: meta.modelRouting } : {}),
+    ...(meta.modelSelection ? { modelSelection: meta.modelSelection } : {}),
+    ...(meta.delegations ? { delegations: [...meta.delegations].map(d => ({ ...d, inputs: { ...d.inputs }, allowedTools: d.allowedTools ? [...d.allowedTools] : undefined })) } : {}),
   };
 }
 

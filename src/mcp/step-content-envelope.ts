@@ -33,7 +33,10 @@ export interface StepContentEnvelope {
   readonly title: string;
   readonly authoredPrompt: string;
   readonly agentRole?: string;
-  readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
+  readonly modelTier?: import('../v2/durable-core/domain/model-selection.js').ModelTier;
+  readonly modelRouting?: import('../v2/durable-core/domain/model-selection.js').ModelRouting;
+  readonly modelSelection?: import('../v2/durable-core/domain/model-selection.js').ModelSelection;
+  readonly delegations?: readonly import('../v2/durable-core/domain/prompt-renderer.js').ResolvedDelegation[];
   readonly references: readonly ResolvedReference[];
   readonly supplements: readonly FormattedSupplement[];
 }
@@ -55,6 +58,9 @@ export function buildStepContentEnvelope(args: {
     authoredPrompt: args.meta.prompt,
     agentRole: args.meta.agentRole,
     modelTier: args.meta.modelTier,
+    modelSelection: args.meta.modelSelection,
+    modelRouting: args.meta.modelRouting,
+    delegations: args.meta.delegations,
     references: Object.freeze(args.references ?? []),
     supplements: Object.freeze(args.supplements ?? []),
   });

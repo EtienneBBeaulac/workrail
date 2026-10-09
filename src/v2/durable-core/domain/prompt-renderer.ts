@@ -1,3 +1,4 @@
+import { readRunModelConfig, resolveModelRequest, resolveModelSelection, describeModelSelection, type ModelSelection, type ModelTier, type RunModelConfig, type ModelRouting } from './model-selection.js';
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import { getStepById, isParallelStepDefinition, type Workflow } from '../../../types/workflow.js';
@@ -446,12 +447,23 @@ export function assembleFragmentedPrompt(
     .join('\n\n');
 }
 
+export interface ResolvedDelegation {
+  readonly workflowId: string;
+  readonly goal: string;
+  readonly inputs: Readonly<Record<string, string>>;
+  readonly allowedTools?: readonly string[];
+  readonly modelSelection: ModelSelection;
+}
+
 export interface StepMetadata {
   readonly stepId: string;
   readonly title: string;
   readonly prompt: string;
   readonly agentRole?: string;
-  readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
+  readonly modelTier?: ModelTier;
+  readonly modelSelection?: ModelSelection;
+  readonly modelRouting?: ModelRouting;
+  readonly delegations?: readonly ResolvedDelegation[];
   readonly requireConfirmation: boolean;
   /**
    * The kind of gate this step requires. Only present when requireConfirmation is true.
@@ -518,6 +530,7 @@ export function renderPendingPrompt(args: {
   readonly cleanResponseFormat?: boolean;
   /** Defaults to legacy artifact submission for existing callers. */
   readonly outputGuidance?: OutputGuidance;
+  readonly initialModelConfig?: RunModelConfig;
 }): Result<StepMetadata, PromptRenderError> {
   // Extract base step metadata.
   // Fail-fast: a missing step is a structural invariant violation, not a "use a fallback" situation.
@@ -531,7 +544,17 @@ export function renderPendingPrompt(args: {
     });
   }
   const agentRole = step.agentRole;
-  const modelTier = step.modelTier;
+  const modelConfig = args.initialModelConfig ?? readRunModelConfig(args.truth.events, String(args.runId));
+  const modelRequest = resolveModelRequest(modelConfig, step.modelTier, args.workflow.definition.modelTier);
+  const modelTier = modelRequest.kind === 'tier' ? modelRequest.tier : undefined;
+  const modelSelection = resolveModelSelection(modelRequest, modelConfig.modelRouting);
+  const modelMetadata = {
+    ...(modelSelection.kind !== 'inherit' ? { modelSelection } : {}),
+    ...(modelConfig.modelRouting ? { modelRouting: modelConfig.modelRouting } : {}),
+    ...(modelTier !== undefined ? { modelTier } : {}),
+  };
+  const modelGuidance = modelSelection.kind === 'inherit' ? ''
+    : `## Model selection\n${describeModelSelection(modelSelection)}\nThe client controls the main agent model. If a different target is required and it cannot switch in place, report that limitation or use an authorized client handoff before executing this step.\n\n`;
   const functionReferences = step.functionReferences ?? [];
 
   // Extract output contract requirements (system-injected, not prompt-authored)
@@ -591,6 +614,7 @@ export function renderPendingPrompt(args: {
     const baseTitle = resolveContextTemplates(step.title, renderContext);
 
     let finalPrompt = '';
+    const resolvedDelegations: ResolvedDelegation[] = [];
 
     if (activeDelegations.length > 0) {
       const activeBlocks = activeDelegations.map((delegation, idx) => {
@@ -626,9 +650,18 @@ export function renderPendingPrompt(args: {
               ? `Run ${delegation.args['familyName']} review family for workflow ${delegation.workflowId}`
               : `Run ${delegation.workflowId}`);
 
-        return `#### Subagent ${idx + 1}: ${delegation.workflowId}\n` +
+        const childSelection: ModelSelection = delegation.modelTier
+          ? resolveModelSelection({ kind: 'tier', tier: delegation.modelTier, source: 'delegation' }, modelConfig.modelRouting)
+          : { kind: 'workflow_lookup', workflowId: delegation.workflowId };
+        const resolved: ResolvedDelegation = { workflowId: delegation.workflowId, goal: delegationGoal,
+          inputs: resolvedInputs, modelSelection: childSelection,
+          ...(delegation.allowedTools ? { allowedTools: delegation.allowedTools } : {}) };
+        resolvedDelegations.push(resolved);
+        return `#### Subagent ${idx + 1}: ${resolved.workflowId}\n` +
           `*   **Workflow ID to Spawn**: \`${delegation.workflowId}\`\n` +
-          `*   **Goal**: ${delegationGoal}\n` +
+          `*   **Goal**: ${resolved.goal}\n` +
+          `*   **Model selection**: ${describeModelSelection(resolved.modelSelection)}\n` +
+
           (delegation.allowedTools && delegation.allowedTools.length > 0
             ? `*   **Allowed Tools**: ${delegation.allowedTools.join(', ')}\n`
             : '') +
@@ -638,18 +671,22 @@ export function renderPendingPrompt(args: {
 
       finalPrompt = `# Parallel Subagent Spawning Phase\n\n` +
         `You are initiating a parallel execution phase. Please spawn the following subagents simultaneously using your native client-side subagent tools (e.g. \`spawn_agent\` starting a fresh \`start_workflow\` session for each).\n\n` +
+        (modelConfig.modelRouting ? `### Client model routing\n\n${JSON.stringify(modelConfig.modelRouting)}\n\n` : '') +
         `### Active Delegations\n\n` +
         `${activeBlocks}\n\n` +
         `---\n\n` +
         `### Procedure\n` +
-        `1. Spawn the active subagents listed above in parallel.\n` +
-        `2. Wait for all subagents to complete their runs and write their findings to disk.\n` +
-        `3. Once completed, confirm all deliverables exist, then call \`continue_workflow\` to advance to the synthesis phase.`;
+        `1. Verify model targets against the native client catalog or configured executors. Preserve client permission and context-inheritance rules. Resolve unsupported selections before spawning; never silently substitute.\n` +
+        `2. Spawn the active subagents listed above in parallel. Pass only an explicit delegation tier as start_workflow.modelTier and pass the client routing map to its session. Do not pass an inferred initialModelRequest as start_workflow.modelTier.\n` +
+        `3. Wait for all subagents to complete their runs and write their findings to disk.\n` +
+        `4. Once completed, confirm all deliverables exist, then call \`continue_workflow\` to advance to the synthesis phase.`;
     } else {
       finalPrompt = `# Parallel Subagent Spawning Phase (Bypassed)\n\n` +
         `All parallel delegations for this step evaluated their conditions to false, meaning no subagents need to be spawned.\n\n` +
         `Please immediately call \`continue_workflow\` to advance to the next step.`;
     }
+
+    finalPrompt = modelGuidance + finalPrompt;
 
     // Append recovery context if in rehydrateOnly mode
     if (args.rehydrateOnly) {
@@ -681,8 +718,9 @@ export function renderPendingPrompt(args: {
       title: baseTitle,
       prompt: finalPrompt,
       agentRole: step.agentRole,
+      delegations: resolvedDelegations,
       requireConfirmation: false,
-      ...(modelTier !== undefined ? { modelTier } : {}),
+      ...modelMetadata,
     });
   }
 
@@ -864,6 +902,7 @@ export function renderPendingPrompt(args: {
 
   // Array join avoids intermediate string allocations from the + chain.
   const enhancedPrompt = [
+    modelGuidance,
     loopBanner,
     basePrompt,
     requirementsSection,
@@ -883,7 +922,7 @@ export function renderPendingPrompt(args: {
       agentRole,
       requireConfirmation,
       ...(gateKind !== undefined ? { gateKind } : {}),
-      ...(modelTier !== undefined ? { modelTier } : {}),
+      ...modelMetadata,
     });
   }
 
@@ -897,7 +936,7 @@ export function renderPendingPrompt(args: {
       agentRole,
       requireConfirmation,
       ...(gateKind !== undefined ? { gateKind } : {}),
-      ...(modelTier !== undefined ? { modelTier } : {}),
+      ...modelMetadata,
     });
   }
 
@@ -922,7 +961,7 @@ export function renderPendingPrompt(args: {
       prompt: enhancedPrompt,
       agentRole,
       requireConfirmation,
-      ...(modelTier !== undefined ? { modelTier } : {}),
+      ...modelMetadata,
     });
   }
 
@@ -941,6 +980,6 @@ export function renderPendingPrompt(args: {
     agentRole,
     requireConfirmation,
     ...(gateKind !== undefined ? { gateKind } : {}),
-    ...(modelTier !== undefined ? { modelTier } : {}),
+    ...modelMetadata,
   });
 }

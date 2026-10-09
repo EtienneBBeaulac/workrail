@@ -9,6 +9,7 @@
  * It does NOT include runtime metadata like source.
  */
 
+import type { ModelTier } from '../v2/durable-core/domain/model-selection.js';
 import { ValidationCriteria } from './validation';
 import type { ArtifactContractRef } from '../v2/durable-core/schemas/artifacts/index';
 import type { PromptBlocks } from '../application/services/compiler/prompt-blocks.js';
@@ -158,7 +159,7 @@ export interface WorkflowStepDefinition {
    */
   readonly promptBlocks?: PromptBlocks;
   readonly agentRole?: string;
-  readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
+  readonly modelTier?: ModelTier;
   readonly guidance?: readonly string[];
   readonly askForFiles?: boolean;
   readonly requireConfirmation?: boolean | Condition;
@@ -247,7 +248,7 @@ export interface ParallelDelegation {
   readonly runCondition?: Condition;
   readonly contextMapping?: Readonly<Record<string, string>>;
   readonly args?: Readonly<Record<string, string>>;
-  readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
+  readonly modelTier?: ModelTier;
   readonly allowedTools?: readonly string[];
 }
 
@@ -430,7 +431,7 @@ export interface WorkflowDefinition {
   readonly name: string;
   readonly description: string;
   readonly version: string;
-  readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
+  readonly modelTier?: ModelTier;
   readonly steps: readonly (WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition)[];
   readonly preconditions?: readonly string[];
   readonly clarificationPrompts?: readonly string[];

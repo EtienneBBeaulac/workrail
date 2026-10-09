@@ -1,3 +1,4 @@
+import { type ModelTier, type ModelRouting, type RunModelConfig, readRunModelConfig, resolveInitialModelRequest } from '../durable-core/domain/model-selection.js';
 import { ResultAsync as RA, okAsync, errAsync as neErrorAsync } from 'neverthrow';
 import {
   asWorkflowId,
@@ -136,12 +137,16 @@ export function loadAndPinWorkflow(args: {
       let injectedWorkflow = workflow;
 
       if (args.injectOnboarding) {
+        const initialModelRequest = resolveInitialModelRequest(workflow.definition.steps[0]?.modelTier, workflow.definition.modelTier);
         // INJECT VIRTUAL ONBOARDING STEP
         // This injects the protocol instructions into the DAG as the very first step,
         // guaranteeing local models process the rules before receiving real tasks.
         const injectedStep = {
           id: 'wr-system-onboarding',
           title: 'WorkRail Protocol Instructions',
+          // Bootstrap consumes the already selected launch model, without pinning later steps.
+          ...(initialModelRequest.kind === 'tier' && initialModelRequest.source === 'step'
+            ? { modelTier: initialModelRequest.tier } : {}),
           prompt: PROTOCOL_INSTRUCTIONS + '\n\n**Action Required**: Acknowledge these instructions by calling `continue_workflow` (with an empty `output` or simple `notes`). Do NOT attempt the actual task yet.',
           notesOptional: true
         };
@@ -238,6 +243,7 @@ export function buildInitialEvents(args: {
   readonly goal: string;
   readonly extraContext?: Readonly<Record<string, string>>;
   readonly parentSessionId?: string;
+  readonly modelConfig?: RunModelConfig;
 }): readonly DomainEventV1[] {
   const {
     sessionId,
@@ -253,6 +259,7 @@ export function buildInitialEvents(args: {
     goal,
     extraContext,
     parentSessionId,
+    modelConfig,
   } = args;
 
   const evtSessionCreated = idFactory.mintEventId();
@@ -282,6 +289,7 @@ export function buildInitialEvents(args: {
       dedupeKey: `run_started:${sessionId}:${runId}`,
       scope: { runId },
       data: {
+        ...(modelConfig ? { modelConfig } : {}),
         workflowId,
         workflowHash,
         workflowSourceKind,
@@ -409,7 +417,8 @@ export interface StartWorkflowInput {
   readonly workflowId: string;
   readonly workspacePath: string;
   readonly goal: string;
-  readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
+  readonly modelTier?: ModelTier;
+  readonly modelRouting?: ModelRouting;
   readonly injectOnboarding?: boolean;
 }
 
@@ -573,49 +582,9 @@ export function prepareStartWorkflow(
                       ? `${workflow.source.pluginName}@${workflow.source.pluginVersion}`
                       : '(bundled)';
 
-            let activeModel = 'claude-3-5-sonnet';
-            const forceModel = process.env['WORKRAIL_FORCE_MODEL'] || process.env['WORKRAIL_ACTIVE_MODEL'] || process.env['WORKRAIL_MODEL'];
-            if (forceModel) {
-              activeModel = forceModel;
-            } else if (internalContext?.['model']) {
-              activeModel = internalContext['model'];
-            } else {
-              let resolvedModelTier: 'lightweight' | 'mid' | 'heavy' | undefined = undefined;
-              if (input.modelTier) {
-                resolvedModelTier = input.modelTier;
-              } else if (internalContext?.['modelTier']) {
-                resolvedModelTier = internalContext['modelTier'] as 'lightweight' | 'mid' | 'heavy';
-              } else {
-                const firstStepObj = pinnedWorkflow?.definition.steps.find((s) => s.id === firstStep.id);
-                if (firstStepObj && 'modelTier' in firstStepObj && firstStepObj.modelTier) {
-                  resolvedModelTier = firstStepObj.modelTier as 'lightweight' | 'mid' | 'heavy';
-                } else if (pinnedWorkflow?.definition.modelTier) {
-                  resolvedModelTier = pinnedWorkflow.definition.modelTier;
-                }
-              }
-
-              if (resolvedModelTier) {
-                const usesBedrock = !!process.env['AWS_PROFILE'] || !!process.env['AWS_ACCESS_KEY_ID'];
-                if (usesBedrock) {
-                  if (resolvedModelTier === 'lightweight') {
-                    activeModel = 'us.anthropic.claude-3-5-haiku-20241022-v1:0';
-                  } else if (resolvedModelTier === 'mid') {
-                    activeModel = 'us.anthropic.claude-sonnet-4-6';
-                  } else if (resolvedModelTier === 'heavy') {
-                    activeModel = 'us.anthropic.claude-3-opus-20240229-v1:0';
-                  }
-                } else {
-                  if (resolvedModelTier === 'lightweight') {
-                    activeModel = 'claude-3-5-haiku-latest';
-                  } else if (resolvedModelTier === 'mid') {
-                    activeModel = 'claude-sonnet-4-6';
-                  } else if (resolvedModelTier === 'heavy') {
-                    activeModel = 'claude-3-opus-latest';
-                  }
-                }
-              }
-            }
-
+            // The server cannot observe the MCP client's model. Host declarations are
+            // recorded separately from requested tiers and are never inferred from them.
+            const activeModel = internalContext?.['model'] ?? '';
             const childEatPayload = {
               harness,
               activeModel,
@@ -635,6 +604,7 @@ export function prepareStartWorkflow(
               ...internalContext,
               metrics_harness: harness,
               metrics_active_model: activeModel,
+              metrics_model_source: activeModel ? 'host_reported' : 'unknown',
             };
             if (childEat) {
               enrichedContext['eat_token'] = JSON.stringify(childEat);
@@ -653,6 +623,9 @@ export function prepareStartWorkflow(
               idFactory,
               goal: input.goal,
               extraContext: enrichedContext,
+              ...(input.modelTier || input.modelRouting ? { modelConfig: {
+                ...(input.modelTier ? { modelTier: input.modelTier } : {}),
+                ...(input.modelRouting ? { modelRouting: input.modelRouting } : {}) } } : {}),
               parentSessionId,
             });
 
@@ -671,6 +644,7 @@ export function prepareStartWorkflow(
     const rendered = renderPendingPrompt({ workflow: prepared.pinnedWorkflow,
       stepId: prepared.firstStep.id, loopPath: [], truth: { events: [], manifest: [] },
       runId: prepared.runId, nodeId: prepared.nodeId, rehydrateOnly: false,
+      initialModelConfig: readRunModelConfig(prepared.appendPlan.events, String(prepared.runId)),
       cleanResponseFormat: deps.featureFlags?.isEnabled('cleanResponseFormat') ?? false,
     });
     if (rendered.isErr()) return neErrorAsync({ kind: 'prompt_render_failed' as const, message: rendered.error.message });

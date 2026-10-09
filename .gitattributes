@@ -1,0 +1,2 @@
+# Archived session integrity and provenance hashes require byte-exact fixtures.
+tests/fixtures/historical-model-selection/** -text

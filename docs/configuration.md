@@ -503,3 +503,83 @@ chmod 644 ~/.workrail/workflows/*.json
 - [Workflow Authoring Guide](authoring.md) – Create custom workflows
 - [All Workflows](workflows.md) – Full list of included workflows
 - [Advanced Features](advanced.md) – Loops, conditionals, validation
+
+## Model selection (`modelTier`)
+
+A tier is a resource preference, not a capability guarantee. Declare `lightweight`,
+`mid`, or `heavy` on a workflow, a step, or a parallel delegation. Choose tiers from
+measured task needs; WorkRail does not promise that one model family satisfies them.
+
+For token-based MCP sessions, the effective main-agent request is the explicit
+`start_workflow.modelTier`, then the current step tier, then the workflow tier,
+then inheritance of the client configuration. `modelRouting` is caller supplied
+and per-run: it binds each requested tier to either `{ "kind": "model", "modelId":
+"client-model-id" }` or `{ "kind": "executor", "name": "configured-executor" }`.
+Bindings are persisted at run start and cannot be replaced by worker context.
+Routing never writes global client configuration. There are no provider defaults;
+a missing tier binding produces `unresolved` with `binding_missing`.
+
+Verify target availability before launching and again after recovery, using the
+client's current catalog and permissions. The main agent may not support changing
+models: first compare the requested target with live client-reported execution
+state. If already satisfied, continue without switching. If a different target is
+required and the current agent cannot switch, report unsupported switching. The
+client owns native launch and in-place switching; the MCP server supplies intent.
+`planClientModelLaunch` requires an explicit unknown or observed current target
+for an existing agent, and returns `already_satisfied`, `ready`, or `unsupported`
+from supplied live state and capabilities; it does not execute a client or configure it.
+
+A resolved target is not actual execution evidence. The reported model requires
+host or runtime evidence; worker labels and legacy model names remain unverified.
+An accepted native launch is also separate from independent provider attestation.
+
+Resolve an undeclared child's `initialModelRequest` from `inspect_workflow` before
+launching. Pass `modelRouting` to the child without the parent `modelTier` override.
+System onboarding uses the same initial authored policy as inspection, including
+a first-step override of the workflow tier. Only an explicit delegation tier
+becomes a child session override. An inferred
+initial request selects the launch model but must not be passed as
+`start_workflow.modelTier`: later steps retain their own authored policy.
+
+These MCP bindings do not replace WorkTrain's independent provider execution
+configuration. The answer-profile API has a separate trusted delivery-model
+boundary; the bindings described here belong to token-based workflow sessions.
+
+### Codex operator example
+
+The operator supplies model IDs from the current Codex catalog and confirms
+permission to use them for this run. This example uses the bounded-test binding
+selected by the operator, rather than establishing a global default.
+
+Call `start_workflow` with:
+
+```json
+{
+  "workflowId": "wr.routine-feature-implementation",
+  "workspacePath": "/absolute/path/to/project",
+  "goal": "Implement the approved change",
+  "modelRouting": {
+    "lightweight": { "kind": "model", "modelId": "gpt-6-luna" }
+  }
+}
+```
+
+For an undeclared child, `inspect_workflow` can return this fragment:
+
+```json
+{
+  "initialModelRequest": {
+    "kind": "tier",
+    "tier": "lightweight",
+    "source": "workflow"
+  }
+}
+```
+
+Resolve that request against this run's map, check the live catalog, and use the
+native child model parameter. Launch with fresh context when the harness supports
+it, carrying a complete packet of raw requirements, inputs, tools and workflow ID.
+Forward the routing map when starting the child workflow; leave its `modelTier`
+unset unless the delegation explicitly declares one. If launch is refused, report
+unsupported execution rather than substituting a model. Record launch acceptance
+and durable child completion separately from any provider identity evidence.

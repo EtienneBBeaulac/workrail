@@ -99,6 +99,14 @@ describe('Parallel Step validation — JSON Schema & Structural Checks', () => {
     expect(structuralResult.isOk()).toBe(true);
   });
 
+  it.each(['lightweight', 'mid', 'heavy', 'invalid'])('validates coordinator modelTier independently of child tiers: %s', tier => {
+    const workflow = makeWorkflow({ id: 'parallel-tier', name: 'Parallel tiers', description: 'Independent parent and child policy', version: '1.0.0',
+      steps: [{ id: 'spawn', title: 'Coordinate', type: 'parallel', modelTier: tier,
+        parallelDelegations: [{ workflowId: 'wr.routine-context-gathering', modelTier: 'lightweight' }] }],
+    } as WorkflowDefinition);
+    expect(validateWorkflowSchema(workflow).isOk()).toBe(tier !== 'invalid');
+  });
+
   it('rejects a parallel step with missing delegations', () => {
     const wfDef: WorkflowDefinition = {
       id: 'test-parallel-missing-delegations',

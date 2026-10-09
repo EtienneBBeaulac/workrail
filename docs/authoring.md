@@ -628,19 +628,25 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - **Level**: recommended
 - **Status**: active
 - **Scope**: workflow.definition, step.delegation-checkpoint
-- **Rule**: Declare `modelTier` on workflows, steps, or parallel delegations to specify lightweight, mid, or heavy cognitive resource requirements without hardcoding provider model IDs.
-- **Why**: Abstracting resource requirements via `modelTier` keeps workflows model-agnostic and portable across different providers (direct Anthropic vs Bedrock).
+- **Rule**: Declare modelTier on workflows, steps, or parallel delegations as a portable resource preference. Token-based MCP clients supply explicit per-run modelRouting and own native execution.
+- **Why**: Durable model intent, live client capability and reported execution identity are separate facts; resolving a tier must not invent a provider default or fabricate actual-model evidence.
 - **Enforced by**: validator
 
 **Checks**
-- The modelTier field is set to 'lightweight', 'mid', or 'heavy' when a step or delegation requires a specific resource tier.
+- modelTier is lightweight, mid, or heavy and describes a resource preference, not guaranteed model capability.
+- Token-based MCP modelRouting is supplied per run by the caller and maps each tier to one native-model or configured-executor target without global writes.
+- Resolve child initialModelRequest using inspect_workflow before launch; system onboarding uses that initial authored policy. Forward modelRouting without the parent override and never pin an inferred initial tier as a session override.
+- Compare an existing agent target with live client-reported state; already-satisfied requests require no switch.
+- Check live availability before launch and again after recovery; surface unsupported target or current-agent switching rather than substituting.
+- A request or binding is not actual execution evidence; reported model identity requires trusted host or runtime evidence.
 
 **Anti-patterns**
 - Hardcoding specific Anthropic or Bedrock model IDs in the workflow definition
 
 **Source refs**
-- `src/v2/usecases/start-workflow.ts` (runtime) — Resolves activeModel based on modelTier hierarchy.
-- `src/daemon/core/agent-client.ts` (runtime) — Maps modelTier to provider-specific model IDs.
+- `src/v2/durable-core/domain/model-selection.ts` (runtime) — Resolves immutable intent and plans client launch against live capabilities.
+- `src/v2/usecases/start-workflow.ts` (runtime) — Persists run-scoped modelRouting and keeps host-reported identity separate.
+- `src/v2/durable-core/domain/prompt-renderer.ts` (runtime) — Emits portable main-agent and independent child selection handoffs.
 
 
 ## Subagent synthesis and claim adoption

@@ -18,6 +18,106 @@ const simpleWorkflow = createWorkflow(
 
 describe('renderPendingPrompt', () => {
 
+  it.each([false, true])('retains the complete routing map when recovery includes retained functions, clean=%s', cleanResponseFormat => {
+    const workflow = createWorkflow({ ...simpleWorkflow.definition,
+      functionDefinitions: [{ name: 'helper', scope: 'workflow', definition: 'Retained function definition' }],
+      steps: [{ id: 'step1', title: 'Step', prompt: 'Do step', modelTier: 'mid', functionReferences: ['helper'] }],
+    }, createBundledSource());
+    const modelRouting = { mid: { kind: 'model' as const, modelId: 'client-mid' }, heavy: { kind: 'model' as const, modelId: 'client-heavy' } };
+    const hash = `sha256:${'a'.repeat(64)}`;
+    const truth = { events: [{ v: 1 as const, eventId: 'evt_1', eventIndex: 0, sessionId: 'sess_1', timestampMs: 1,
+      kind: 'run_started' as const, dedupeKey: 'run-started', scope: { runId: 'run_1' },
+      data: { workflowId: 'test', workflowHash: hash as any, workflowSourceKind: 'bundled' as const,
+        workflowSourceRef: '(bundled)', modelConfig: { modelRouting } } }], manifest: [] };
+    const result = renderPendingPrompt({ workflow, stepId: 'step1', loopPath: [], truth,
+      runId: 'run_1', nodeId: 'node_1', rehydrateOnly: true, cleanResponseFormat });
+    expect(result.isOk()).toBe(true);
+    if (result.isErr()) return;
+    expect(result.value.prompt).toContain('Retained function definition');
+    expect(result.value.modelRouting).toEqual(modelRouting);
+    expect(result.value.modelSelection).toMatchObject({ kind: 'resolved', target: modelRouting.mid });
+  });
+
+  it.each([false, true])('renders coordinator policy separately from a lightweight child, clean=%s', cleanResponseFormat => {
+    const workflow = createWorkflow({ ...simpleWorkflow.definition,
+      steps: [{ id: 'parallel', title: 'Coordinate', type: 'parallel', modelTier: 'heavy',
+        parallelDelegations: [{ workflowId: 'child', modelTier: 'lightweight' }] }],
+    }, createBundledSource());
+    for (const rehydrateOnly of [false, true]) {
+      const result = renderPendingPrompt({ workflow, stepId: 'parallel', loopPath: [],
+        truth: { events: [], manifest: [] }, runId: 'run_1', nodeId: 'node_1', rehydrateOnly, cleanResponseFormat });
+      expect(result.isOk()).toBe(true);
+      if (result.isErr()) continue;
+      expect(result.value.modelSelection).toMatchObject({ request: { tier: 'heavy', source: 'step' } });
+      expect(result.value.prompt).toContain('Requested tier: heavy (step)');
+      expect(result.value.prompt).toContain('cannot switch in place');
+      expect(result.value.prompt).toContain('Requested tier: lightweight (delegation)');
+    }
+  });
+
+  it('preserves a child model request in the client handoff', () => {
+    const workflow = createWorkflow({
+      id: 'model-request', name: 'Model request', description: 'Model request', version: '1.0.0',
+      steps: [{ id: 'parallel', title: 'Review', type: 'parallel', parallelDelegations: [
+        { workflowId: 'child-review', modelTier: 'lightweight' },
+      ] }],
+    }, createBundledSource());
+    const result = renderPendingPrompt({ workflow, stepId: 'parallel', loopPath: [],
+      truth: { events: [], manifest: [] }, runId: 'run_1', nodeId: 'node_1', rehydrateOnly: false });
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.prompt).toContain('lightweight');
+      expect(result.value).toHaveProperty('delegations.0.modelSelection.request.tier', 'lightweight');
+    }
+  });
+
+  it('inherits a workflow tier when the current step has no override', () => {
+    const workflow = createWorkflow({ ...simpleWorkflow.definition, modelTier: 'heavy' }, createBundledSource());
+    const result = renderPendingPrompt({ workflow, stepId: 'step1', loopPath: [],
+      truth: { events: [], manifest: [] }, runId: 'run_1', nodeId: 'node_1', rehydrateOnly: false });
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) expect(result.value.modelTier).toBe('heavy');
+  });
+
+  it('does not apply the parent override to an explicit child request', () => {
+    const workflow = createWorkflow({
+      id: 'model-request', name: 'Model request', description: 'Model request', version: '1.0.0',
+      steps: [{ id: 'parallel', title: 'Review', type: 'parallel', parallelDelegations: [
+        { workflowId: 'child-review', modelTier: 'lightweight' },
+      ] }],
+    }, createBundledSource());
+    const result = renderPendingPrompt({ workflow, stepId: 'parallel', loopPath: [],
+      truth: { events: [], manifest: [] }, runId: 'run_1', nodeId: 'node_1', rehydrateOnly: false,
+      initialModelConfig: { modelTier: 'heavy', modelRouting: { lightweight: { kind: 'model', modelId: 'client-fast' } } } });
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.modelTier).toBe('heavy');
+      expect(result.value.delegations?.[0]?.modelSelection).toEqual({ kind: 'resolved',
+        request: { kind: 'tier', tier: 'lightweight', source: 'delegation' },
+        target: { kind: 'model', modelId: 'client-fast' } });
+      expect(result.value.prompt).toContain('client-fast');
+      expect(result.value.modelRouting).toEqual({ lightweight: { kind: 'model', modelId: 'client-fast' } });
+    }
+  });
+
+  it('requests a child workflow lookup before launch when no delegation tier is declared', () => {
+    const workflow = createWorkflow({
+      id: 'model-request', name: 'Model request', description: 'Model request', version: '1.0.0',
+      steps: [{ id: 'parallel', title: 'Review', type: 'parallel', parallelDelegations: [
+        { workflowId: 'child-with-own-policy' },
+      ] }],
+    }, createBundledSource());
+    const result = renderPendingPrompt({ workflow, stepId: 'parallel', loopPath: [],
+      truth: { events: [], manifest: [] }, runId: 'run_1', nodeId: 'node_1', rehydrateOnly: false,
+      initialModelConfig: { modelTier: 'heavy' } });
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.delegations?.[0]?.modelSelection).toEqual({ kind: 'workflow_lookup', workflowId: 'child-with-own-policy' });
+      expect(result.value.prompt).toContain('Before spawning, call inspect_workflow');
+      expect(result.value.prompt).toContain('Do not pass an inferred initialModelRequest as start_workflow.modelTier');
+    }
+  });
+
   describe('base behavior (no recovery)', () => {
     it('returns base prompt when rehydrateOnly=false', () => {
       const result = renderPendingPrompt({

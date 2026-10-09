@@ -62,7 +62,8 @@ function coherent(value: z.infer<typeof envelope>): boolean {
       || !isDeepStrictEqual(enrollment.data.request, value.request)) return false;
   // New host reservations carry only initial goal/provenance, never EAT or continuation tokens.
   const initialContext = z.object({ goal: z.string(), triggerSource: z.literal('daemon'),
-    metrics_harness: z.string().optional(), metrics_active_model: z.string().optional() }).strict().safeParse(context.data.context);
+    metrics_harness: z.string().optional(), metrics_active_model: z.string().optional(),
+    metrics_model_source: z.enum(['host_reported', 'client_reported', 'unknown']).optional() }).strict().safeParse(context.data.context);
   if (!initialContext.success || initialContext.data.goal !== value.request.goal) return false;
   const pin = snapshotPins[0]!;
   if (pin.snapshotRef !== node.data.snapshotRef || pin.createdByEventId !== node.eventId) return false;

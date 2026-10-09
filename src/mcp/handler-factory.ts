@@ -27,6 +27,7 @@ import type { PreValidateResult } from './validation/workflow-next-prevalidate.j
 import type { WrappedToolHandler, McpCallToolResult } from './types/workflow-tool-edition.js';
 import { internalSuggestion } from './handlers/v2-execution-helpers.js';
 import { formatV2ExecutionResponse, formatV2ResumeResponse, type FormattedResponse } from './v2-response-formatter.js';
+import { toPendingStep, V2PendingStepSchema } from './output-schemas.js';
 import { getV2ExecutionRenderEnvelope } from './render-envelope.js';
 
 // -----------------------------------------------------------------------------
@@ -52,6 +53,15 @@ const jsonResponsesOverride = process.env.WORKRAIL_JSON_RESPONSES === 'true';
 export function toMcpResult<T>(result: ToolResult<T>, ctx?: ToolContext): McpCallToolResult {
   switch (result.type) {
     case 'success': {
+      const renderEnvelope = getV2ExecutionRenderEnvelope(result.data);
+      const stepContent = renderEnvelope?.contentEnvelope;
+      const response = renderEnvelope?.response ?? result.data;
+      // Advance responses can carry public pending data without render metadata.
+      const parsedPending = V2PendingStepSchema.safeParse(
+        response !== null && typeof response === 'object' && 'pending' in response ? response.pending : null);
+      const pending = stepContent ? toPendingStep({ ...stepContent, prompt: stepContent.authoredPrompt })
+        : parsedPending.success ? parsedPending.data : null;
+      const structured = pending ? { structuredContent: { pending } } : {};
       const cleanResponseFormat = ctx?.featureFlags.isEnabled('cleanResponseFormat') ?? false;
 
       if (!jsonResponsesOverride) {
@@ -66,7 +76,7 @@ export function toMcpResult<T>(result: ToolResult<T>, ctx?: ToolContext): McpCal
           if (formatted.references != null) {
             content.push({ type: 'text', text: formatted.references.text });
           }
-          return { content };
+          return { content, ...structured };
         }
       }
       // JSON mode: include references alongside the response when present
@@ -77,6 +87,7 @@ export function toMcpResult<T>(result: ToolResult<T>, ctx?: ToolContext): McpCal
         ? { ...responseBody as Record<string, unknown>, references: refs }
         : responseBody;
       return {
+        ...structured,
         content: [{
           type: 'text',
           text: JSON.stringify(jsonPayload),

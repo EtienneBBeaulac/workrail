@@ -31,7 +31,8 @@ import type { ExecutionSessionGateErrorV2 } from '../../../v2/usecases/execution
 import type { SessionEventLogStoreError } from '../../../v2/ports/session-event-log-store.port.js';
 import { asSortedEventLog } from '../../../v2/durable-core/sorted-event-log.js';
 import { buildSessionIndex } from '../../../v2/durable-core/session-index.js';
-import { verifyEAT, signEAT } from '../../../v2/durable-core/tokens/index.js';
+import { signEAT } from '../../../v2/durable-core/tokens/index.js';
+import { parseStoredEnvironmentAttestation } from './stored-environment-attestation.js';
 
 /**
  * Handle advance intent: execute next step and record the outcome.
@@ -219,46 +220,32 @@ export function handleAdvanceIntent(args: {
               currentHarness = 'daemon';
             }
 
-            let currentActiveModel = 'claude-3-5-sonnet'; // fallback
-            const forceModel = process.env['WORKRAIL_FORCE_MODEL'] || process.env['WORKRAIL_ACTIVE_MODEL'] || process.env['WORKRAIL_MODEL'];
-            if (forceModel) {
-              currentActiveModel = forceModel;
-            }
-
             // Find latest EAT token inside the session
-            let latestEatToken: string | undefined;
+            let latestEatToken: unknown;
             for (let i = truthToUse.events.length - 1; i >= 0; i--) {
               const e = truthToUse.events[i];
-              if (e.kind === EVENT_KIND.CONTEXT_SET && (e.data as any)?.context?.['eat_token']) {
-                latestEatToken = (e.data as any).context['eat_token'];
+              const storedContext = e.kind === EVENT_KIND.CONTEXT_SET && e.scope?.runId === String(runId) ? e.data.context : undefined;
+              if (storedContext && typeof storedContext === 'object' && 'eat_token' in storedContext) {
+                latestEatToken = storedContext.eat_token;
                 break;
               }
             }
 
-            let shouldRefreshEat = false;
-            let parsedEatPayload: any = null;
-
-            if (latestEatToken) {
-              try {
-                const parsedEat = JSON.parse(latestEatToken);
-                if (parsedEat && parsedEat.payload) {
-                  parsedEatPayload = parsedEat.payload;
-                  const isValid = verifyEAT(parsedEatPayload, parsedEat.signature, tokenCodecPorts, String(sessionId));
-                  if (isValid) {
-                    if (parsedEatPayload.harness !== currentHarness || parsedEatPayload.activeModel !== currentActiveModel) {
-                      shouldRefreshEat = true;
-                    }
-                  } else {
-                    shouldRefreshEat = true;
-                  }
-                }
-              } catch (e) {
-                shouldRefreshEat = true;
-              }
-            } else {
-              // If there was no EAT token, let's refresh/generate EAT token!
-              shouldRefreshEat = true;
+            if (latestEatToken !== undefined && typeof latestEatToken !== 'string') {
+              return neErrorAsync({ kind: 'invariant_violation' as const,
+                message: 'Stored environment attestation is invalid: malformed' });
             }
+            const parsedEat = parseStoredEnvironmentAttestation(latestEatToken, tokenCodecPorts, String(sessionId));
+            if (!parsedEat.ok && parsedEat.error.kind !== 'missing') {
+              return neErrorAsync({ kind: 'invariant_violation' as const,
+                message: `Stored environment attestation is invalid: ${parsedEat.error.kind}` });
+            }
+            const parsedEatPayload = parsedEat.ok ? parsedEat.value.payload : undefined;
+            // A server restart or a requested tier is not evidence of a client model
+            // switch. Preserve lineage and identity until a host actually reports it.
+            const currentActiveModel = parsedEatPayload?.activeModel ?? '';
+            const shouldRefreshEat = !parsedEatPayload || parsedEatPayload.harness !== currentHarness
+              || (parsedEat.ok && (parsedEat.value.historicalWrapper || parsedEat.value.verificationKey === 'previous'));
 
             let preStepCheckRA: RA<void, ContinueWorkflowError> = okAsync<void, ContinueWorkflowError>(undefined);
 
@@ -273,8 +260,8 @@ export function handleAdvanceIntent(args: {
                 sessionId: String(sessionId),
               };
               const newSignature = signEAT(newEatPayload, tokenCodecPorts);
-              if (newSignature) {
-                const newEatToken = JSON.stringify({ payload: newEatPayload, signature: newSignature });
+              if (newSignature.ok) {
+                const newEatToken = JSON.stringify({ payload: newEatPayload, signature: newSignature.value });
                 const runContextObj = indexToUse.runContextByRunId.get(String(runId));
                 const existingContext = runContextObj ?? {};
                 const contextEventId = idFactory.mintEventId();
@@ -295,6 +282,7 @@ export function handleAdvanceIntent(args: {
                       eat_token: newEatToken,
                       metrics_harness: currentHarness,
                       metrics_active_model: currentActiveModel,
+                      metrics_model_source: existingContext['metrics_model_source'] ?? 'unknown',
                     } as Record<string, string>,
                     source: 'agent_delta' as const,
                   },

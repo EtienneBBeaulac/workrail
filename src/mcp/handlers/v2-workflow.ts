@@ -1,3 +1,4 @@
+import { resolveInitialModelRequest } from '../../v2/durable-core/domain/model-selection.js';
 import path from 'path';
 import fs from 'fs';
 import { ResultAsync, okAsync, errAsync } from 'neverthrow';
@@ -512,6 +513,7 @@ export async function handleV2InspectWorkflow(
               workflowId: input.workflowId,
               workflowHash,
               mode: input.mode,
+              initialModelRequest: resolveInitialModelRequest(workflow.definition.steps[0]?.modelTier, workflow.definition.modelTier),
               compiled: body as import('../../v2/durable-core/canonical/json-types.js').JsonValue,
               ...(visibility ? { visibility } : {}),
               ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),

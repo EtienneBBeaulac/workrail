@@ -37,7 +37,7 @@ const NOTES_GUIDANCE = [
 const SUBAGENT_GUIDANCE = [
   'Interactive Session Advancement & Subagent Guidance:',
   '- **Advancement**: When you have completed all work for this step, call `continue_workflow` with the provided `continueToken`. You can pass `notes` and `artifacts` directly at the top level or nested inside `output` — both formats are fully supported.',
-  '- **Spawning Routines / Executors**: If a step instructs you to "spawn a WorkRail Executor" or execute a parallel routine (e.g. `wr.routine-philosophy-alignment`), you should delegate it to a subagent using your native client capabilities (e.g. `invoke_subagent` to start a child agent running the routine with `start_workflow`) or execute it inline if client-side subagent tools are unavailable.',
+  '- **Spawning Routines / Executors**: If a step instructs you to "spawn a WorkRail Executor" or execute a parallel routine (e.g. `wr.routine-philosophy-alignment`), you should delegate it to a subagent using your native client capabilities (e.g. `invoke_subagent` to start a child agent running the routine with `start_workflow`) or execute it inline if client-side subagent tools are unavailable and the selection permits inheritance. An explicit tier or target must be checked first; report unsupported selection instead of silently running it on the current model.',
 ].join('\n');
 
 export type SupplementKind = 'authority_context' | 'notes_guidance' | 'subagent_guidance' | 'executor_directive';

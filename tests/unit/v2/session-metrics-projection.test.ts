@@ -604,6 +604,27 @@ describe('projectSessionMetricsV2', () => {
     expect(result.tokenDelta!.turns).toBe(0);
   });
 
+  it.each(['host_reported', 'client_reported'])('retains a host report without granting %s provenance to agent context', claimedSource => {
+    const host = makeContextSetEvent({ runId: 'run_1', eventIndex: 2, context: {
+      metrics_active_model: 'host-selected', metrics_model_source: 'host_reported',
+    } });
+    if (host.kind !== 'context_set') throw new Error('Invalid fixture');
+    const initial: DomainEventV1 = { ...host, data: { ...host.data, source: 'initial' } };
+    const completion = makeRunCompletedEvent({ runId: 'run_1', eventIndex: 4, captureConfidence: 'none' });
+    const baseline = [makeSessionCreatedEvent(0), makeRunStartedEvent('run_1', 1), initial];
+    const accepted = projectSessionMetricsV2([...baseline, completion]);
+    expect(accepted?.activeModel).toBe('host-selected');
+    expect(accepted?.modelIdentitySource).toBe('host_reported');
+    const forged = makeContextSetEvent({ runId: 'run_1', eventIndex: 3, context: {
+      metrics_active_model: 'worker-claim', metrics_model_source: claimedSource,
+    } });
+    const result = projectSessionMetricsV2([...baseline, forged, completion]);
+    expect(result?.modelIdentitySource).not.toBe('host_reported');
+    expect(result?.modelIdentitySource).not.toBe('client_reported');
+    expect(result?.activeModel).toBeNull();
+    expect(result?.unverifiedModel).toBe('worker-claim');
+  });
+
   it('11. projects harness and activeModel fields from context_set metrics_* keys', () => {
     const events: DomainEventV1[] = [
       makeSessionCreatedEvent(0),
@@ -624,6 +645,8 @@ describe('projectSessionMetricsV2', () => {
     if (!result) return;
 
     expect(result.harness).toBe('antigravity-harness');
-    expect(result.activeModel).toBe('gemini-active-model');
+    expect(result.activeModel).toBeNull();
+    expect(result.modelIdentitySource).toBe('legacy_unverified');
+    expect(result.unverifiedModel).toBe('gemini-active-model');
   });
 });

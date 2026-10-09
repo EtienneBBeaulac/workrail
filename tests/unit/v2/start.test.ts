@@ -148,16 +148,35 @@ describe('v2 startup sniffing & Environment Attestation Tokens', () => {
 
       const contextData = (contextSetEvent as any).data.context;
       expect(contextData.metrics_harness).toBe('cursor');
-      expect(contextData.metrics_active_model).toBe('custom-gpt4');
+      expect(contextData.metrics_active_model).toBe('');
+      expect(contextData.metrics_model_source).toBe('unknown');
       expect(contextData.eat_token).toBeDefined();
 
       const eatObj = JSON.parse(contextData.eat_token);
       expect(eatObj.payload.harness).toBe('cursor');
-      expect(eatObj.payload.activeModel).toBe('custom-gpt4');
+      expect(eatObj.payload.activeModel).toBe('');
       expect(eatObj.payload.spawnDepth).toBe(0);
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
+  });
+
+  it('retains the trusted host model independently of requested tiers', async () => {
+    const root = await mkTempDataDir();
+    process.env.WORKRAIL_DATA_DIR = root;
+    try {
+      const ctx = await mkCtxWithWorkflow(workflowId, workflowDef);
+      const started = await executeStartWorkflow({ workflowId, workspacePath: root, goal: 'host evidence', modelTier: 'heavy' }, ctx,
+        { model: 'host-model', triggerSource: 'mcp' });
+      expect(started.isOk()).toBe(true);
+      if (started.isErr()) return;
+      const loaded = await ctx.v2.sessionStore.load(started.value.sessionId);
+      expect(loaded.isOk()).toBe(true);
+      if (loaded.isErr()) return;
+      const initial = loaded.value.events.find(event => event.kind === 'context_set');
+      expect(initial?.kind === 'context_set' && initial.data.context).toMatchObject({ metrics_active_model: 'host-model', metrics_model_source: 'host_reported' });
+      expect(started.value.response.pending?.modelTier).toBe('heavy');
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
   });
 
   it('verifies parent EAT and increments spawnDepth correctly', async () => {
@@ -345,12 +364,12 @@ describe('v2 startup sniffing & Environment Attestation Tokens', () => {
 
       const refreshedContext = (systemContextEvents[0] as any).data.context;
       expect(refreshedContext.metrics_harness).toBe('claude_code');
-      expect(refreshedContext.metrics_active_model).toBe('claude-3-5-sonnet');
+      expect(refreshedContext.metrics_active_model).toBe('');
       expect(refreshedContext.eat_token).toBeDefined();
 
       const refreshedEat = JSON.parse(refreshedContext.eat_token);
       expect(refreshedEat.payload.harness).toBe('claude_code');
-      expect(refreshedEat.payload.activeModel).toBe('claude-3-5-sonnet');
+      expect(refreshedEat.payload.activeModel).toBe('');
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
@@ -412,12 +431,12 @@ describe('v2 startup sniffing & Environment Attestation Tokens', () => {
 
       const childContext = (childContextSet as any).data.context;
       expect(childContext.metrics_harness).toBe('daemon');
-      expect(childContext.metrics_active_model).toBe('claude-3-5-sonnet'); // custom model override!
+      expect(childContext.metrics_active_model).toBe(''); // No host model identity was reported.
       expect(childContext.eat_token).toBeDefined();
 
       const childEatObj = JSON.parse(childContext.eat_token);
       expect(childEatObj.payload.spawnDepth).toBe(1); // incremented from parent spawn depth (0)
-      expect(childEatObj.payload.activeModel).toBe('claude-3-5-sonnet');
+      expect(childEatObj.payload.activeModel).toBe('');
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
@@ -466,7 +485,7 @@ describe('v2 startup sniffing & Environment Attestation Tokens', () => {
     }
   });
 
-  it('resolves activeModel based on modelTier hierarchy', async () => {
+  it('resolves a workflow request without claiming a concrete active model', async () => {
     const root = await mkTempDataDir();
     process.env.WORKRAIL_DATA_DIR = root;
 
@@ -493,7 +512,8 @@ describe('v2 startup sniffing & Environment Attestation Tokens', () => {
       expect(contextSet).toBeDefined();
 
       const context = (contextSet as any).data.context;
-      expect(context.metrics_active_model).toBe('claude-3-opus-latest');
+      expect(context.metrics_active_model).toBe('');
+      expect(startRes.value.response.pending?.modelSelection).toEqual({ kind: 'unresolved', request: { kind: 'tier', tier: 'heavy', source: 'workflow' }, reason: 'binding_missing' });
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
@@ -526,7 +546,10 @@ describe('v2 startup sniffing & Environment Attestation Tokens', () => {
       expect(contextSet).toBeDefined();
 
       const context = (contextSet as any).data.context;
-      expect(context.metrics_active_model).toBe('claude-3-5-haiku-latest');
+      expect(context.metrics_active_model).toBe('');
+      expect(startRes.value.response.pending?.modelTier).toBe('lightweight');
+      const runStarted = events.find(e => e.kind === 'run_started');
+      expect(runStarted?.kind === 'run_started' && runStarted.data.modelConfig?.modelTier).toBe('lightweight');
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
