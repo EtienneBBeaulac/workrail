@@ -42,6 +42,44 @@ describe('renderPendingPrompt', () => {
     if (result.isOk()) expect(result.value.modelTier).toBe('heavy');
   });
 
+  it('does not apply the parent override to an explicit child request', () => {
+    const workflow = createWorkflow({
+      id: 'model-request', name: 'Model request', description: 'Model request', version: '1.0.0',
+      steps: [{ id: 'parallel', title: 'Review', type: 'parallel', parallelDelegations: [
+        { workflowId: 'child-review', modelTier: 'lightweight' },
+      ] }],
+    }, createBundledSource());
+    const result = renderPendingPrompt({ workflow, stepId: 'parallel', loopPath: [],
+      truth: { events: [], manifest: [] }, runId: 'run_1', nodeId: 'node_1', rehydrateOnly: false,
+      initialModelConfig: { modelTier: 'heavy', modelRouting: { lightweight: { kind: 'model', modelId: 'client-fast' } } } });
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.modelTier).toBe('heavy');
+      expect(result.value.delegations?.[0]?.modelSelection).toEqual({ kind: 'resolved',
+        request: { kind: 'tier', tier: 'lightweight', source: 'delegation' },
+        target: { kind: 'model', modelId: 'client-fast' } });
+      expect(result.value.prompt).toContain('client-fast');
+      expect(result.value.modelRouting).toEqual({ lightweight: { kind: 'model', modelId: 'client-fast' } });
+    }
+  });
+
+  it('requests a child workflow lookup before launch when no delegation tier is declared', () => {
+    const workflow = createWorkflow({
+      id: 'model-request', name: 'Model request', description: 'Model request', version: '1.0.0',
+      steps: [{ id: 'parallel', title: 'Review', type: 'parallel', parallelDelegations: [
+        { workflowId: 'child-with-own-policy' },
+      ] }],
+    }, createBundledSource());
+    const result = renderPendingPrompt({ workflow, stepId: 'parallel', loopPath: [],
+      truth: { events: [], manifest: [] }, runId: 'run_1', nodeId: 'node_1', rehydrateOnly: false,
+      initialModelConfig: { modelTier: 'heavy' } });
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.delegations?.[0]?.modelSelection).toEqual({ kind: 'workflow_lookup', workflowId: 'child-with-own-policy' });
+      expect(result.value.prompt).toContain('Before spawning, call inspect_workflow');
+    }
+  });
+
   describe('base behavior (no recovery)', () => {
     it('returns base prompt when rehydrateOnly=false', () => {
       const result = renderPendingPrompt({
