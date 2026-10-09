@@ -1,8 +1,8 @@
 # WorkRail MCP model selection
 
-Status: architecture approved and implementation complete on the isolated local branch.
-Final full-suite and source-bound native acceptance are in progress; no remote publication
-or installed activation is authorized. See the verification record below.
+Status: local implementation, full verification and source-bound native acceptance passed.
+[PR #1343](https://github.com/EtienneBBeaulac/workrail/pull/1343) is open for CI and
+human review. Installed activation has not occurred.
 Related work: GitHub issue #1152. First acceptance client: Codex.
 
 ## Problem and intended result

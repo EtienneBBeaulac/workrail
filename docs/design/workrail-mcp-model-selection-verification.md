@@ -32,7 +32,10 @@ events, nonce, source/build hashes and resource closure. Codex encrypts prompt
 arguments at rest; the nonce-bearing task name provides a public linkage without
 reading or decrypting the prompt. The original transcript remains untouched.
 
-No push, PR, merge or global client-setting change has been performed.
+After local validation, the operator authorized publication in
+[PR #1343](https://github.com/EtienneBBeaulac/workrail/pull/1343). The native receipt
+above records branch-built execution; remote CI, merge and installed activation
+remain separate evidence.
 
 ## Final local verification
 
