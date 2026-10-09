@@ -10,6 +10,7 @@ export const ClientModelTargetSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('model'), modelId: ClientNameSchema }).strict(),
   z.object({ kind: z.literal('executor'), name: ClientNameSchema }).strict(),
 ]);
+export type ClientModelTarget = Immutable<z.infer<typeof ClientModelTargetSchema>>;
 export const ModelRoutingSchema = z.object({
   lightweight: ClientModelTargetSchema.optional(),
   mid: ClientModelTargetSchema.optional(),
@@ -44,6 +45,11 @@ export function resolveModelRequest(config: RunModelConfig, stepTier?: ModelTier
   return { kind: 'inherit' };
 }
 
+/** Inspection and protocol bootstrap must advertise the same initial authored policy. */
+export function resolveInitialModelRequest(firstStepTier?: ModelTier, workflowTier?: ModelTier): ModelRequest {
+  return resolveModelRequest({}, firstStepTier, workflowTier);
+}
+
 export function resolveModelSelection(request: ModelRequest, routing: ModelRouting = {}): ModelSelection {
   if (request.kind === 'inherit') return request;
   const target = routing[request.tier];
@@ -63,9 +69,9 @@ export function describeModelSelection(selection: ModelSelection): string {
     case 'unresolved': return `Requested tier: ${selection.request.tier} (${selection.request.source}). No client binding was supplied. Resolve this tier against the client model catalog before launching; report an unsupported selection rather than silently substituting another model.`;
     case 'resolved': return `Requested tier: ${selection.request.tier} (${selection.request.source}). ` +
       (selection.target.kind === 'model'
-        ? `Launch with the native model override ${JSON.stringify(selection.target.modelId)}.`
-        : `Launch the configured executor ${JSON.stringify(selection.target.name)}.`) +
-      ' Verify this target is available and allowed in the client. A resolved request is not evidence that the model ran. If unavailable, report it; do not silently substitute.';
+        ? `For a new agent, launch with the native model override ${JSON.stringify(selection.target.modelId)}.`
+        : `For a new agent, launch the configured executor ${JSON.stringify(selection.target.name)}.`) +
+      ' For an existing agent, first compare this target with live client-reported execution state. If already satisfied, continue without switching or relaunching. Otherwise verify this target is available and allowed before launching or switching. A resolved request is not evidence that the model ran. If unavailable, report it; do not silently substitute.';
   }
 }
 
@@ -75,11 +81,14 @@ export type ClientModelCatalog =
   | { readonly kind: 'configured_executors'; readonly names: readonly string[] };
 export type ClientLaunchScope =
   | { readonly kind: 'child' }
-  | { readonly kind: 'current_agent'; readonly switching: 'available' | 'unavailable' };
+  | { readonly kind: 'current_agent'; readonly switching: 'available' | 'unavailable';
+      readonly currentExecution: { readonly kind: 'unknown' }
+        | { readonly kind: 'observed'; readonly target: ClientModelTarget } };
 export type ClientModelLaunchPlan =
   | Exclude<ModelSelection, { readonly kind: 'resolved' }>
-  | { readonly kind: 'ready'; readonly target: Immutable<z.infer<typeof ClientModelTargetSchema>> }
-  | { readonly kind: 'unsupported'; readonly target: Immutable<z.infer<typeof ClientModelTargetSchema>>;
+  | { readonly kind: 'already_satisfied'; readonly target: ClientModelTarget }
+  | { readonly kind: 'ready'; readonly target: ClientModelTarget }
+  | { readonly kind: 'unsupported'; readonly target: ClientModelTarget;
       readonly reason: 'target_unavailable' | 'model_override_unavailable' | 'executor_unavailable' | 'current_agent_switch_unavailable' };
 
 /** Availability belongs to the live client, not the durable routing policy. */
@@ -87,6 +96,13 @@ export function planClientModelLaunch(selection: ModelSelection, catalog: Client
   scope: ClientLaunchScope): ClientModelLaunchPlan {
   if (selection.kind !== 'resolved') return selection;
   const target = selection.target;
+  if (scope.kind === 'current_agent' && scope.currentExecution.kind === 'observed') {
+    const current = scope.currentExecution.target;
+    const matches = target.kind === 'model'
+      ? current.kind === 'model' && current.modelId === target.modelId
+      : current.kind === 'executor' && current.name === target.name;
+    if (matches) return { kind: 'already_satisfied', target };
+  }
   if (scope.kind === 'current_agent' && (scope.switching === 'unavailable' || target.kind === 'executor')) {
     return { kind: 'unsupported', target, reason: 'current_agent_switch_unavailable' };
   }

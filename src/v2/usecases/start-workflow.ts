@@ -1,4 +1,4 @@
-import { type ModelTier, type ModelRouting, type RunModelConfig, readRunModelConfig } from '../durable-core/domain/model-selection.js';
+import { type ModelTier, type ModelRouting, type RunModelConfig, readRunModelConfig, resolveInitialModelRequest } from '../durable-core/domain/model-selection.js';
 import { ResultAsync as RA, okAsync, errAsync as neErrorAsync } from 'neverthrow';
 import {
   asWorkflowId,
@@ -137,12 +137,16 @@ export function loadAndPinWorkflow(args: {
       let injectedWorkflow = workflow;
 
       if (args.injectOnboarding) {
+        const initialModelRequest = resolveInitialModelRequest(workflow.definition.steps[0]?.modelTier, workflow.definition.modelTier);
         // INJECT VIRTUAL ONBOARDING STEP
         // This injects the protocol instructions into the DAG as the very first step,
         // guaranteeing local models process the rules before receiving real tasks.
         const injectedStep = {
           id: 'wr-system-onboarding',
           title: 'WorkRail Protocol Instructions',
+          // Bootstrap consumes the already selected launch model, without pinning later steps.
+          ...(initialModelRequest.kind === 'tier' && initialModelRequest.source === 'step'
+            ? { modelTier: initialModelRequest.tier } : {}),
           prompt: PROTOCOL_INSTRUCTIONS + '\n\n**Action Required**: Acknowledge these instructions by calling `continue_workflow` (with an empty `output` or simple `notes`). Do NOT attempt the actual task yet.',
           notesOptional: true
         };

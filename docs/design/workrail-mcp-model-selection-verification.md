@@ -15,13 +15,33 @@ Independent philosophy/code reviews repaired all reported source findings. Criti
 pass 1 found missing readable coordinator policy on parallel steps; pass 2 returned
 zero new material findings after independent recheck. The final source/build native receipt is now verified. The full repository implementation gate passed all 14 acceptance requirements.
 
+## Astra follow-up review
+
+An independent Astra review without skills reproduced two runtime defects:
+conflicting inspection/onboarding tiers and loss of advancement after two signing
+key rotations. Both regression tests failed before their fixes. Inspection and
+onboarding now derive the same initial authored policy without pinning subsequent
+steps. A previous-key-verified attestation is renewed while its authority remains
+valid; invalid or retired signatures still fail closed, and verified lineage is
+preserved.
+
+The client planner also requires explicit unknown or observed current execution
+state and returns `already_satisfied` for a matching target. This prevents a
+correctly launched agent from requiring an unnecessary switch. Compile-time proofs
+reject omitted observation state and ambiguous model/executor targets.
+
+Astra independently rechecked the fixes and 24 focused tests with retries disabled,
+confirming both runtime findings and the planner gap addressed, with no new material
+findings. The native acceptance below was refreshed against the changed source and
+build. Its earlier receipt remains retained as historical evidence.
+
 ## Native acceptance
 
 - Selected binding: lightweight -> native `gpt-6-luna`, fresh context.
-- Source hash: `7fcd4f7b4ef8eb5b5d0dd1c040b9613e1a429ac634f66f58c3e927294ad38a51`.
-- Runtime build hash: `dfc92ffd0df4e6fd1481efa1019bf1f8db16771f5071703d7f27ff819be01bbb`.
-- Nonce: `712039ba-920a-4e29-9a6b-968c87235c3c`.
-- Durable child: `sess_wfmbctfvrx65pbvyo4tqvktcfy`.
+- Source hash: `2ca97f8438b1630484ecdff9df58faff44403187ca8ffa79e83e3a93d1d152a1`.
+- Runtime build hash: `3eeb0448be5828c45668181ffc7874a6d1443784de033faa35913532f03d5e96`.
+- Nonce: `bfd85ddb-2451-40d3-968d-376620ce8e3e`.
+- Durable child: `sess_vq5dsnmb3xzstqqoy77qwk7g4i`.
 - Receipt: `.workrail/model-selection-proof/native-receipt.json` (local evidence).
 - Result: `native_launch_accepted_and_child_completed`.
 - Provider identity: `not_independently_observed`.

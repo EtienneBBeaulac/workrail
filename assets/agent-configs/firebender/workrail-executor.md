@@ -225,10 +225,13 @@ a missing tier binding produces `unresolved` with `binding_missing`.
 
 Verify target availability before launching and again after recovery, using the
 client's current catalog and permissions. The main agent may not support changing
-models: if the current agent cannot switch, report unsupported switching. The
+models: first compare the requested target with live client-reported execution
+state. If already satisfied, continue without switching. If a different target is
+required and the current agent cannot switch, report unsupported switching. The
 client owns native launch and in-place switching; the MCP server supplies intent.
-`planClientModelLaunch` provides pure ready/unsupported outcomes from supplied
-capabilities; it does not execute a client or configure it.
+`planClientModelLaunch` requires an explicit unknown or observed current target
+for an existing agent, and returns `already_satisfied`, `ready`, or `unsupported`
+from supplied live state and capabilities; it does not execute a client or configure it.
 
 A resolved target is not actual execution evidence. The reported model requires
 host or runtime evidence; worker labels and legacy model names remain unverified.
@@ -236,7 +239,9 @@ An accepted native launch is also separate from independent provider attestation
 
 Resolve an undeclared child's `initialModelRequest` from `inspect_workflow` before
 launching. Pass `modelRouting` to the child without the parent `modelTier` override.
-Only an explicit delegation tier becomes a child session override. An inferred
+System onboarding uses the same initial authored policy as inspection, including
+a first-step override of the workflow tier. Only an explicit delegation tier
+becomes a child session override. An inferred
 initial request selects the launch model but must not be passed as
 `start_workflow.modelTier`: later steps retain their own authored policy.
 
@@ -250,4 +255,5 @@ or the named configured executor after checking its availability. A configured
 executor's own model settings can affect launch; verify them rather than trusting
 its name. Execute the registered routine self-sufficiently without child spawns.
 When no delegation tools exist, inheritance can execute inline; an explicit
-selection requires compatible switching or an unsupported result.
+selection requires a matching observed current target, compatible switching, or
+an unsupported result.

@@ -19,9 +19,9 @@ describe('stored environment attestation compatibility', () => {
     const canonical = JSON.stringify({ payload, signature });
     const historical = JSON.stringify({ payload, signature: { ok: true, value: signature } });
     expect(parseStoredEnvironmentAttestation(canonical, ports, 'sess_fixture')).toEqual({ ok: true,
-      value: { payload, signature, historicalWrapper: false } });
+      value: { payload, signature, historicalWrapper: false, verificationKey: 'current' } });
     expect(parseStoredEnvironmentAttestation(historical, ports, 'sess_fixture')).toEqual({ ok: true,
-      value: { payload, signature, historicalWrapper: true } });
+      value: { payload, signature, historicalWrapper: true, verificationKey: 'current' } });
     expect(parseEAT(historical, ports, 'sess_fixture').ok).toBe(false);
     expect(parseStoredEnvironmentAttestation(historical, ports, 'sess_other')).toEqual({ ok: false,
       error: { kind: 'signature_mismatch' } });
@@ -31,6 +31,16 @@ describe('stored environment attestation compatibility', () => {
     { ok: true, value: signature, extra: 'ambiguous' }, { ok: true },
   ])('rejects malformed signing-result wrappers: %j', wrapper => {
     expect(parseStoredEnvironmentAttestation(JSON.stringify({ payload, signature: wrapper }), ports, 'sess_fixture')).toMatchObject({ ok: false, error: { kind: 'malformed' } });
+  });
+  it('identifies the previous key without granting authority to a retired key', () => {
+    const next = { ...ports.keyring.current, keyBase64Url: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' };
+    const rotated = unsafeTokenCodecPorts({ ...ports, keyring: { v: 1, current: next, previous: ports.keyring.current } });
+    const raw = JSON.stringify({ payload, signature });
+    expect(parseStoredEnvironmentAttestation(raw, rotated, 'sess_fixture')).toMatchObject({ ok: true,
+      value: { payload, verificationKey: 'previous' } });
+    const retired = unsafeTokenCodecPorts({ ...ports, keyring: { v: 1, current: next, previous: null } });
+    expect(parseStoredEnvironmentAttestation(raw, retired, 'sess_fixture')).toEqual({ ok: false,
+      error: { kind: 'signature_mismatch' } });
   });
   it('rejects an invalid inner signature and preserves missing versus malformed', () => {
     expect(parseStoredEnvironmentAttestation(JSON.stringify({ payload, signature: { ok: true, value: 'invalid' } }), ports, 'sess_fixture')).toEqual({ ok: false, error: { kind: 'signature_mismatch' } });

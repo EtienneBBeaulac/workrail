@@ -1249,7 +1249,8 @@
           "checks": [
             "modelTier is lightweight, mid, or heavy and describes a resource preference, not guaranteed model capability.",
             "Token-based MCP modelRouting is supplied per run by the caller and maps each tier to one native-model or configured-executor target without global writes.",
-            "Resolve child initialModelRequest using inspect_workflow before launch; forward modelRouting without the parent override and never pin an inferred initial tier as a session override.",
+            "Resolve child initialModelRequest using inspect_workflow before launch; system onboarding uses that initial authored policy. Forward modelRouting without the parent override and never pin an inferred initial tier as a session override.",
+            "Compare an existing agent target with live client-reported state; already-satisfied requests require no switch.",
             "Check live availability before launch and again after recovery; surface unsupported target or current-agent switching rather than substituting.",
             "A request or binding is not actual execution evidence; reported model identity requires trusted host or runtime evidence."
           ],

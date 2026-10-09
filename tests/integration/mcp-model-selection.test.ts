@@ -28,7 +28,10 @@ it.each([true, false].flatMap(withConfig => [true, false].map(cleanFormat => ({ 
     }));
     await writeFile(join(workflows, 'model-child.json'), JSON.stringify({
       id: 'model-child', name: 'Model child', description: 'Child policy lookup fixture', version: '1.0.0', modelTier: 'heavy',
-      steps: [{ id: 'review', title: 'Review', prompt: 'Return a bounded review.', notesOptional: true }],
+      steps: [
+        { id: 'review', title: 'Review', modelTier: 'lightweight', prompt: 'Return a bounded review.', notesOptional: true },
+        { id: 'finish', title: 'Finish', modelTier: 'mid', prompt: 'Finish the review.', notesOptional: true },
+      ],
     }));
     process.env.WORKRAIL_DATA_DIR = root;
     process.env.WORKFLOW_STORAGE_PATH = workflows;
@@ -74,9 +77,28 @@ it.each([true, false].flatMap(withConfig => [true, false].map(cleanFormat => ({ 
       return response;
     };
     const inspect = await runTool('inspect_workflow', { workflowId: 'model-child', workspacePath: root, mode: 'metadata' });
-    expect(JSON.parse(inspect.content[0].text).initialModelRequest).toEqual({ kind: 'tier', tier: 'heavy', source: 'workflow' });
+    expect(JSON.parse(inspect.content[0].text).initialModelRequest).toEqual({ kind: 'tier', tier: 'lightweight', source: 'step' });
     const routing = withConfig ? { lightweight: { kind: 'model', modelId: 'gpt-6-luna' } } : undefined;
     const tokenFrom = (response: any) => response.content.map((item: any) => item.text).join('\n').match(/(?:"continueToken":\s*"|Token: )(ct_[A-Za-z0-9_-]+)/)?.[1];
+    // An inferred launch preference must agree with bootstrap, without pinning later steps.
+    const child = await runTool('start_workflow', { workflowId: 'model-child', workspacePath: root,
+      goal: 'Verify initial launch policy', modelRouting: { lightweight: { kind: 'model', modelId: 'client-fast' } } });
+    expect(child.structuredContent.pending.stepId).toBe('wr-system-onboarding');
+    expect(child.structuredContent.pending.modelSelection).toEqual({ kind: 'resolved',
+      request: JSON.parse(inspect.content[0].text).initialModelRequest,
+      target: { kind: 'model', modelId: 'client-fast' } });
+    await close?.();
+    call = await boot();
+    await call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'bootstrap-cold-proof', version: '1' } });
+    const restoredChild = await runTool('continue_workflow', { continueToken: tokenFrom(child), intent: 'rehydrate', workspacePath: root });
+    expect(restoredChild.structuredContent.pending.modelSelection).toEqual(child.structuredContent.pending.modelSelection);
+    const firstChildStep = await runTool('continue_workflow', { continueToken: tokenFrom(restoredChild), intent: 'advance',
+      workspacePath: root, output: { notesMarkdown: 'Protocol acknowledged.' } });
+    expect(firstChildStep.structuredContent.pending.modelSelection).toEqual(child.structuredContent.pending.modelSelection);
+    const laterChildStep = await runTool('continue_workflow', { continueToken: tokenFrom(firstChildStep), intent: 'advance',
+      workspacePath: root, output: { notesMarkdown: 'First step finished.' } });
+    expect(laterChildStep.structuredContent.pending.modelSelection).toMatchObject({ kind: 'unresolved',
+      request: { kind: 'tier', tier: 'mid', source: 'step' } });
     let started = await runTool('start_workflow', { workflowId: 'model-parent', workspacePath: root, goal: 'Check model handoffs', ...(withConfig ? { modelTier: 'heavy', modelRouting: routing } : {}) });
     expect(started.structuredContent?.pending?.stepId).toBe('wr-system-onboarding');
     started = await runTool('continue_workflow', { continueToken: tokenFrom(started), intent: 'advance', workspacePath: root, output: { notesMarkdown: 'Acknowledged the workflow protocol.' } });

@@ -245,7 +245,7 @@ export function handleAdvanceIntent(args: {
             // switch. Preserve lineage and identity until a host actually reports it.
             const currentActiveModel = parsedEatPayload?.activeModel ?? '';
             const shouldRefreshEat = !parsedEatPayload || parsedEatPayload.harness !== currentHarness
-              || (parsedEat.ok && parsedEat.value.historicalWrapper);
+              || (parsedEat.ok && (parsedEat.value.historicalWrapper || parsedEat.value.verificationKey === 'previous'));
 
             let preStepCheckRA: RA<void, ContinueWorkflowError> = okAsync<void, ContinueWorkflowError>(undefined);
 

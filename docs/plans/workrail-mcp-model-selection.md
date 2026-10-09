@@ -216,3 +216,15 @@ Remaining improvement opportunities are distinct from this implementation:
 
 No Haiku acceptance, provider identity attestation, answer-profile model-selection
 parity, CI result, merge or installed activation is implied by local validation.
+
+### Astra follow-up review
+
+A skill-free independent review reproduced an onboarding tier mismatch and an
+attestation renewal defect across successive signing-key rotations. Regression
+tests failed before repair and pass after it. Bootstrap now follows the same
+initial authored policy exposed by inspection. Only already verified previous-key
+attestations are renewed, preserving lineage and rejecting tampered or retired
+signatures. The pure client planner now distinguishes an observed matching current
+target (`already_satisfied`) from a required launch or unsupported switch.
+Independent re-review confirmed all three concerns addressed with no new material
+findings. Fresh source/build-bound Codex acceptance passed after these changes.

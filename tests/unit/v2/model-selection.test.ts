@@ -13,7 +13,7 @@ describe('model selection boundary', () => {
     expect(plan(selection, catalog, { kind: 'child' })).toEqual({ kind: 'ready', target: { kind: 'model', modelId: 'client-fast' } });
     expect(plan(selection, { kind: 'model_overrides', modelIds: ['other'] }, { kind: 'child' })).toMatchObject({ kind: 'unsupported', reason: 'target_unavailable' });
     expect(plan(selection, { kind: 'configured_executors', names: ['workrail-fast'] }, { kind: 'child' })).toMatchObject({ kind: 'unsupported', reason: 'model_override_unavailable' });
-    expect(plan(selection, catalog, { kind: 'current_agent', switching: 'unavailable' })).toMatchObject({ kind: 'unsupported', reason: 'current_agent_switch_unavailable' });
+    expect(plan(selection, catalog, { kind: 'current_agent', switching: 'unavailable', currentExecution: { kind: 'unknown' } })).toMatchObject({ kind: 'unsupported', reason: 'current_agent_switch_unavailable' });
     const recoveredConfig = JSON.parse(JSON.stringify({ modelTier: 'lightweight', modelRouting: { lightweight: { kind: 'model', modelId: 'client-fast' } } }));
     const recoveredSelection = resolveModelSelection(resolveModelRequest(recoveredConfig), recoveredConfig.modelRouting);
     expect(plan(recoveredSelection, catalog, { kind: 'child' }).kind).toBe('ready');
@@ -33,9 +33,26 @@ describe('model selection boundary', () => {
       { mid: { kind: 'executor', name: 'registered' } });
     expect(planClientModelLaunch(executor, catalog, { kind: 'child' })).toMatchObject({ kind: 'unsupported', reason: 'executor_unavailable' });
     expect(planClientModelLaunch(executor, { kind: 'configured_executors', names: ['registered'] },
-      { kind: 'current_agent', switching: 'available' })).toMatchObject({ kind: 'unsupported', reason: 'current_agent_switch_unavailable' });
+      { kind: 'current_agent', switching: 'available', currentExecution: { kind: 'unknown' } })).toMatchObject({ kind: 'unsupported', reason: 'current_agent_switch_unavailable' });
     const model = resolveModelSelection({ kind: 'tier', tier: 'mid', source: 'workflow' }, { mid: { kind: 'model', modelId: 'fast' } });
-    expect(planClientModelLaunch(model, catalog, { kind: 'current_agent', switching: 'available' }).kind).toBe('ready');
+    expect(planClientModelLaunch(model, catalog, { kind: 'current_agent', switching: 'available', currentExecution: { kind: 'unknown' } }).kind).toBe('ready');
+  });
+
+  it('keeps a verified current target without demanding launch or switching capability', () => {
+    for (const target of [{ kind: 'model' as const, modelId: 'already-running' },
+      { kind: 'executor' as const, name: 'already-running' }]) {
+      const selection = resolveModelSelection({ kind: 'tier', tier: 'mid', source: 'step' }, { mid: target });
+      const scope = { kind: 'current_agent' as const, switching: 'unavailable' as const,
+        currentExecution: { kind: 'observed' as const, target } };
+      // A current execution report is distinct from permissions to launch it again.
+      expect(planClientModelLaunch(selection, { kind: 'model_overrides', modelIds: [] }, scope))
+        .toEqual({ kind: 'already_satisfied', target });
+      const mismatch = target.kind === 'model' ? { kind: 'model' as const, modelId: 'other' }
+        : { kind: 'executor' as const, name: 'other' };
+      expect(planClientModelLaunch(selection, { kind: 'model_overrides', modelIds: [] },
+        { ...scope, currentExecution: { kind: 'observed', target: mismatch } }))
+        .toMatchObject({ kind: 'unsupported', reason: 'current_agent_switch_unavailable' });
+    }
   });
 
   it('has explicit precedence without provider defaults', () => {

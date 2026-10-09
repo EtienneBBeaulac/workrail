@@ -554,7 +554,7 @@ export function renderPendingPrompt(args: {
     ...(modelTier !== undefined ? { modelTier } : {}),
   };
   const modelGuidance = modelSelection.kind === 'inherit' ? ''
-    : `## Model selection\n${describeModelSelection(modelSelection)}\nThe client controls the main agent model. If it cannot switch in place, report that limitation or use an authorized client handoff before executing this step.\n\n`;
+    : `## Model selection\n${describeModelSelection(modelSelection)}\nThe client controls the main agent model. If a different target is required and it cannot switch in place, report that limitation or use an authorized client handoff before executing this step.\n\n`;
   const functionReferences = step.functionReferences ?? [];
 
   // Extract output contract requirements (system-injected, not prompt-authored)
