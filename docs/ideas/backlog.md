@@ -78,7 +78,7 @@ installed and normal heavy/lightweight acceptance status is recorded in the
 Scope and design: [MCP model-selection plan](../plans/workrail-mcp-model-selection.md).
 This is separate from WorkTrain daemon `agentConfig.model` routing below.
 
-Startup observation follow-up is active in [#1346](https://github.com/EtienneBBeaulac/workrail/issues/1346): share start/recovery classification, stop treating a generic VS Code terminal as Cursor, and measure the production sniff boundary. The approved scope and first-call/warm p99 acceptance are in the [startup detection plan](../plans/workrail-startup-detection.md). Native cross-client and WorkTrain execution parity remain separate work under #1152.
+Startup observation follow-up [#1346](https://github.com/EtienneBBeaulac/workrail/issues/1346) is implemented in [PR #1349](https://github.com/EtienneBBeaulac/workrail/pull/1349): shared start/recovery classification, a generic MCP fallback for VS Code terminals, and measured production sniff latency. The approved scope and first-call/warm p99 acceptance are in the [startup detection plan](../plans/workrail-startup-detection.md). Native cross-client and WorkTrain execution parity remain separate work under #1152.
 
 ### Parallel synthesis guarantee differs from the compiler (October 9, 2026)
 
