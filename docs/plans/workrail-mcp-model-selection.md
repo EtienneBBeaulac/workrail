@@ -1,9 +1,14 @@
 # WorkRail MCP model selection
 
-Status: local implementation, full verification and source-bound native acceptance passed.
-[PR #1343](https://github.com/EtienneBBeaulac/workrail/pull/1343) is open for CI and
-human review. Installed activation has not occurred.
-Related work: GitHub issue #1152. First acceptance client: Codex.
+Status: token-based MCP implementation shipped in WorkRail 3.127.0 via
+[PR #1343](https://github.com/EtienneBBeaulac/workrail/pull/1343), merged at
+`d362c7a6b7964f580c61b59b08cb86801c419c35`. Installed 3.127.0 and Codex
+configuration are in place. The root MCP was reconnected and its current
+inspection exposes `initialModelRequest`. Normal heavy/lightweight routine
+acceptance passed; provider identity remains unobserved. See the
+[verification record](../design/workrail-mcp-model-selection-verification.md).
+Broader [GitHub issue #1152](https://github.com/EtienneBBeaulac/workrail/issues/1152)
+remains open. First acceptance client: Codex.
 
 ## Problem and intended result
 
@@ -194,8 +199,9 @@ Independent reviews found and repaired recovery field-list drift, missing readab
 parallel coordinator guidance, causal receipt ordering and a strict shared-start
 consumer compatibility regression. Focused source checks include RED controls,
 current-source green tests, genuine prior-version sessions and compile-time nested
-immutability proofs. Final acceptance will be recorded in
-[the local verification artifact](../design/workrail-mcp-model-selection-verification.md).
+immutability proofs. Publication, installed package identity, and native
+acceptance checkpoints are recorded in the
+[verification artifact](../design/workrail-mcp-model-selection-verification.md).
 
 This boundary is a good fit for MCP: the client owns model execution and WorkRail
 owns durable intent. A free-form instruction to use a named model is insufficient

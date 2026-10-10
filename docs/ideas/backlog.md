@@ -66,15 +66,16 @@ No proposed solutions here -- just the problem.]
 
 ### Portable model selection loses intent and execution provenance (October 9, 2026)
 
-**Status:** Implemented and verified locally, unshipped - [#1152](https://github.com/EtienneBBeaulac/workrail/issues/1152).
+**Status:** Token-based MCP request/routing shipped in WorkRail 3.127.0 via [PR #1343](https://github.com/EtienneBBeaulac/workrail/pull/1343). Broader [#1152](https://github.com/EtienneBBeaulac/workrail/issues/1152) remains open for work outside this scope.
 **Score: 13** | Cor:3 Cap:2 Eff:2 Lev:3 Con:3 | Blocked: none
 
 Token-based MCP clients need model-tier requests that survive delegation and cold
 recovery, with explicit client bindings and honest unsupported outcomes. A model
-request must remain distinct from evidence of what actually executed. Done means
-matching readable and structured handoffs, independent child policy, verified
-historical recovery, and a branch-built native Codex launch plus durable completion.
-Scope and acceptance: [MCP model-selection plan](../plans/workrail-mcp-model-selection.md).
+request remains distinct from evidence of what actually executed. The scoped token-
+based implementation is merged at `d362c7a6b7964f580c61b59b08cb86801c419c35`;
+installed and normal heavy/lightweight acceptance status is recorded in the
+[verification record](../design/workrail-mcp-model-selection-verification.md).
+Scope and design: [MCP model-selection plan](../plans/workrail-mcp-model-selection.md).
 This is separate from WorkTrain daemon `agentConfig.model` routing below.
 
 ### Parallel synthesis guarantee differs from the compiler (October 9, 2026)
