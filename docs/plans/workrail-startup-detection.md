@@ -1,6 +1,6 @@
 # WorkRail startup detection and measured acceptance
 
-Status: proposed boundary, awaiting owner decision. Parent: issue #1152, SC-2 and the harness portion of SC-4. This follows the delivered portable MCP model-selection boundary.
+Status: shared sniff and p99 boundary approved by the owner; implementation tracked in #1346. Parent: issue #1152, SC-2 and the harness portion of SC-4. This follows the delivered portable MCP model-selection boundary.
 
 ## Current mechanism
 

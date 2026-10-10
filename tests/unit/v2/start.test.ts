@@ -121,6 +121,24 @@ describe('v2 startup sniffing & Environment Attestation Tokens', () => {
     process.env = { ...oldEnv };
   });
 
+  it('does not identify a generic VS Code terminal as Cursor', async () => {
+    const root = await mkTempDataDir();
+    for (const key of ['WORKRAIL_FORCE_HARNESS', 'CLAUDE_CODE', 'CLAUDE_CLI', 'CURSOR_APP', 'WORKRAIL_IS_DAEMON']) delete process.env[key];
+    process.env.TERM_PROGRAM = 'vscode';
+    process.env.WORKRAIL_DATA_DIR = root;
+    try {
+      const ctx = await mkCtxWithWorkflow(workflowId, workflowDef);
+      const started = await executeStartWorkflow({ workflowId, workspacePath: root, goal: 'generic terminal' }, ctx);
+      expect(started.isOk()).toBe(true);
+      if (started.isErr()) return;
+      const loaded = await ctx.v2.sessionStore.load(started.value.sessionId);
+      expect(loaded.isOk()).toBe(true);
+      if (loaded.isErr()) return;
+      const initial = loaded.value.events.find(event => event.kind === 'context_set');
+      expect(initial?.kind === 'context_set' && initial.data.context.metrics_harness).toBe('mcp');
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+  });
+
   it('sniffs Cursor environment via WORKRAIL_FORCE_HARNESS', async () => {
     const root = await mkTempDataDir();
     process.env.WORKRAIL_DATA_DIR = root;
