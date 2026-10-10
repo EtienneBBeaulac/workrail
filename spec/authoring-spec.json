@@ -3,7 +3,7 @@
   "version": 3,
   "title": "WorkRail Authoring Rules",
   "purpose": "Canonical current rules for authoring good WorkRail workflows. workflow.schema.json remains the source of truth for legal structure.",
-  "lastReviewed": "2026-10-09",
+  "lastReviewed": "2026-10-10",
   "principles": [
     "Schema defines what is valid. These rules define what is good.",
     "Prefer current authoring rules over design rationale or historical notes.",
@@ -1242,6 +1242,26 @@
             },
             {
               "kind": "runtime",
+              "path": "src/v2/durable-core/domain/harness-detection.ts",
+              "note": "Resolves the closed harness observation using explicit precedence."
+            },
+            {
+              "kind": "runtime",
+              "path": "src/v2/infra/local/harness-sniff.ts",
+              "note": "Captures supported current process indicators without inferring capabilities."
+            },
+            {
+              "kind": "runtime",
+              "path": "src/v2/usecases/harness-observation.ts",
+              "note": "Composes capture and pure resolution behind the MCP use-case boundary."
+            },
+            {
+              "kind": "runtime",
+              "path": "src/mcp/handlers/v2-execution/continue-advance.ts",
+              "note": "Refreshes observations on new advance after returning recorded replays."
+            },
+            {
+              "kind": "runtime",
               "path": "src/v2/durable-core/domain/prompt-renderer.ts",
               "note": "Emits portable main-agent and independent child selection handoffs."
             }
@@ -1252,7 +1272,9 @@
             "Resolve child initialModelRequest using inspect_workflow before launch; system onboarding uses that initial authored policy. Forward modelRouting without the parent override and never pin an inferred initial tier as a session override.",
             "Compare an existing agent target with live client-reported state; already-satisfied requests require no switch.",
             "Check live availability before launch and again after recovery; surface unsupported target or current-agent switching rather than substituting.",
-            "A request or binding is not actual execution evidence; reported model identity requires trusted host or runtime evidence."
+            "A request or binding is not actual execution evidence; reported model identity requires trusted host or runtime evidence.",
+            "metrics_harness describes the server process, not each connected HTTP client or its capabilities. Supported overrides precede Claude, explicit Cursor and daemon indicators; TERM_PROGRAM=vscode alone is generic MCP.",
+            "Start and new advance capture current harness observations; rehydrate and idempotent replay preserve signed stored observations. Stored host context is not current host evidence."
           ],
           "antiPatterns": [
             "Hardcoding specific Anthropic or Bedrock model IDs in the workflow definition"

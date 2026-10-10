@@ -6,7 +6,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 
 import { executeStartWorkflow } from '../../../src/mcp/handlers/v2-execution/start.js';
-import { signEAT } from '../../../src/v2/durable-core/tokens/index.js';
+import { signEAT, parseEAT } from '../../../src/v2/durable-core/tokens/index.js';
 import { parseContinueTokenOrFail } from '../../../src/mcp/handlers/v2-token-ops.js';
 import { NullGitSnapshotV2 } from '../../../src/v2/ports/git-snapshot.port.js';
 import type { ToolContext } from '../../../src/mcp/types.js';
@@ -35,6 +35,8 @@ import { NodeTimeClockV2 } from '../../../src/v2/infra/local/time-clock/index.js
 import { IdFactoryV2 } from '../../../src/v2/infra/local/id-factory/index.js';
 import { Bech32mAdapterV2 } from '../../../src/v2/infra/local/bech32m/index.js';
 import { Base32AdapterV2 } from '../../../src/v2/infra/local/base32/index.js';
+// @ts-expect-error The standalone acceptance scripts do not require a TS loader.
+import { SCENARIOS } from '../../../scripts/measure-harness-sniff.mjs';
 
 async function mkTempDataDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'workrail-v2-start-'));
@@ -121,6 +123,51 @@ describe('v2 startup sniffing & Environment Attestation Tokens', () => {
     process.env = { ...oldEnv };
   });
 
+  it.each(SCENARIOS as readonly { id: string; env: Readonly<Record<string, string>>; expected: string; currentHost?: 'daemon' | 'mcp' }[])('records supported precedence at MCP start: $id', async (scenario) => {
+    const root = await mkTempDataDir();
+    for (const key of ['WORKRAIL_FORCE_HARNESS', 'CLAUDE_CODE', 'CLAUDE_CLI', 'CURSOR_APP', 'WORKRAIL_IS_DAEMON', 'TERM_PROGRAM']) delete process.env[key];
+    Object.assign(process.env, scenario.env);
+    process.env.WORKRAIL_DATA_DIR = root;
+    try {
+      const ctx = await mkCtxWithWorkflow(workflowId, workflowDef);
+      const started = await executeStartWorkflow({ workflowId, workspacePath: root, goal: 'precedence' }, ctx,
+        scenario.currentHost ? { triggerSource: scenario.currentHost } : undefined);
+      expect(started.isOk()).toBe(true);
+      if (started.isErr()) return;
+      const loaded = await ctx.v2.sessionStore.load(started.value.sessionId);
+      expect(loaded.isOk()).toBe(true);
+      if (loaded.isErr()) return;
+      const context = loaded.value.events.find(event => event.kind === 'context_set');
+      expect(context?.kind).toBe('context_set');
+      if (context?.kind !== 'context_set') return;
+      expect(context.data.context).toMatchObject({ metrics_harness: scenario.expected, metrics_active_model: '', metrics_model_source: 'unknown' });
+      const eat = JSON.parse(String(context.data.context.eat_token));
+      expect(parseEAT(String(context.data.context.eat_token), ctx.v2.tokenCodecPorts, started.value.sessionId).ok).toBe(true);
+      expect(eat.payload.harness).toBe(scenario.expected);
+      expect(eat.payload.activeModel).toBe('');
+      expect(eat.signature).toBeTruthy();
+      expect(started.value.response.pending).toBeDefined();
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+  });
+
+  it('does not identify a generic VS Code terminal as Cursor', async () => {
+    const root = await mkTempDataDir();
+    for (const key of ['WORKRAIL_FORCE_HARNESS', 'CLAUDE_CODE', 'CLAUDE_CLI', 'CURSOR_APP', 'WORKRAIL_IS_DAEMON']) delete process.env[key];
+    process.env.TERM_PROGRAM = 'vscode';
+    process.env.WORKRAIL_DATA_DIR = root;
+    try {
+      const ctx = await mkCtxWithWorkflow(workflowId, workflowDef);
+      const started = await executeStartWorkflow({ workflowId, workspacePath: root, goal: 'generic terminal' }, ctx);
+      expect(started.isOk()).toBe(true);
+      if (started.isErr()) return;
+      const loaded = await ctx.v2.sessionStore.load(started.value.sessionId);
+      expect(loaded.isOk()).toBe(true);
+      if (loaded.isErr()) return;
+      const initial = loaded.value.events.find(event => event.kind === 'context_set');
+      expect(initial?.kind === 'context_set' && initial.data.context.metrics_harness).toBe('mcp');
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+  });
+
   it('sniffs Cursor environment via WORKRAIL_FORCE_HARNESS', async () => {
     const root = await mkTempDataDir();
     process.env.WORKRAIL_DATA_DIR = root;
@@ -153,6 +200,7 @@ describe('v2 startup sniffing & Environment Attestation Tokens', () => {
       expect(contextData.eat_token).toBeDefined();
 
       const eatObj = JSON.parse(contextData.eat_token);
+      expect(parseEAT(contextData.eat_token, ctx.v2.tokenCodecPorts, sessionId).ok).toBe(true);
       expect(eatObj.payload.harness).toBe('cursor');
       expect(eatObj.payload.activeModel).toBe('');
       expect(eatObj.payload.spawnDepth).toBe(0);

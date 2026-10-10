@@ -1,4 +1,5 @@
 import { type ModelTier, type ModelRouting, type RunModelConfig, readRunModelConfig, resolveInitialModelRequest } from '../durable-core/domain/model-selection.js';
+import { sniffHarness } from './harness-observation.js';
 import { ResultAsync as RA, okAsync, errAsync as neErrorAsync } from 'neverthrow';
 import {
   asWorkflowId,
@@ -485,19 +486,8 @@ export function prepareStartWorkflow(
     }
   }
 
-  let harness: 'cursor' | 'claude_code' | 'daemon' | 'mcp' = 'mcp';
-  const forceHarness = process.env['WORKRAIL_FORCE_HARNESS'];
-  if (forceHarness === 'cursor' || forceHarness === 'claude_code' || forceHarness === 'daemon' || forceHarness === 'mcp') {
-    harness = forceHarness;
-  } else if (process.env['CLAUDE_CODE'] === 'true' || process.env['CLAUDE_CLI'] === 'true') {
-    harness = 'claude_code';
-  } else if (process.env['CURSOR_APP'] === 'true' || process.env['TERM_PROGRAM'] === 'vscode') {
-    harness = 'cursor';
-  } else if (internalContext?.['triggerSource'] === 'daemon' || process.env['WORKRAIL_IS_DAEMON'] === 'true') {
-    harness = 'daemon';
-  } else if (internalContext?.['triggerSource'] === 'mcp') {
-    harness = 'mcp';
-  }
+  const triggerSource = internalContext?.['triggerSource'];
+  const harness = sniffHarness(triggerSource === 'daemon' || triggerSource === 'mcp' ? triggerSource : undefined);
 
   const shouldUseRequestReader =
     deps.featureFlags != null && hasRequestWorkspaceSignal({
