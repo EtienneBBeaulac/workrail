@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ROOT, COUNTS, SCENARIOS, THRESHOLD_MS, SOURCE_FILES, BUILD_FILES, bindings, summarize } from './measure-harness-sniff.mjs';
+import { verifyCompilation } from './harness-sniff-build-binding.mjs';
 
 const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 function invalid(reason) { return { kind: 'invalid_receipt', reason }; }
@@ -10,7 +11,8 @@ export function verifyReceipt(receipt, mode, current) {
   if (!receipt || receipt.version !== 1 || receipt.mode !== mode || receipt.execution !== 'successful') return invalid('Successful typed execution receipt required');
   if (!equal(receipt.counts, COUNTS) || receipt.thresholdMs !== THRESHOLD_MS) return invalid('Fixed counts or threshold mismatch');
   const provenance = receipt.provenance;
-  if (!provenance || provenance.root !== ROOT || !equal(provenance.source, current.source) || !equal(provenance.build, current.build)) return invalid('Current source/build binding mismatch');
+  // An identical checkout may verify this host's receipt; paths are provenance, hashes bind the measured code.
+  if (!provenance || typeof provenance.root !== 'string' || !path.isAbsolute(provenance.root) || !equal(provenance.source, current.source) || !equal(provenance.build, current.build)) return invalid('Current source/build binding mismatch');
   if (provenance.node !== process.version || provenance.execPath !== process.execPath || provenance.platform !== process.platform || provenance.arch !== process.arch || provenance.hostname !== os.hostname() || provenance.release !== os.release() || provenance.cpu !== os.cpus()[0]?.model) return invalid('Host/runtime provenance missing or changed');
   const start = Date.parse(receipt.startedAt), end = Date.parse(receipt.endedAt);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start || end - start > 600000) return invalid('Invalid or out-of-timebox execution');
@@ -43,7 +45,7 @@ export function verifyPair(baseline, control, current) {
 export async function verifyCurrentFunctionalCases() {
   const keys = ['WORKRAIL_FORCE_HARNESS', 'CLAUDE_CODE', 'CLAUDE_CLI', 'CURSOR_APP', 'WORKRAIL_IS_DAEMON', 'TERM_PROGRAM'];
   const saved = Object.fromEntries(keys.map(key => [key, process.env[key]]));
-  const { sniffHarness } = await import(pathToFileURL(path.join(ROOT, 'dist/v2/infra/local/harness-sniff.js')).href);
+  const { sniffHarness } = await import(pathToFileURL(path.join(ROOT, 'dist/v2/usecases/harness-observation.js')).href);
   try {
     for (const scenario of SCENARIOS) {
       for (const key of keys) delete process.env[key];
@@ -76,8 +78,13 @@ async function main() {
   const current = { source: await bindings(SOURCE_FILES), build: await bindings(BUILD_FILES) };
   const result = verifyPair(baseline, control, current);
   if (result.kind === 'verified_assay') {
+    const compilation = await verifyCompilation(ROOT, current.build);
+    if (compilation.kind !== 'verified_compilation') { console.log(JSON.stringify(compilation)); process.exitCode = 2; return; }
     const functional = await verifyCurrentFunctionalCases();
     if (functional.kind !== 'verified_functional_cases') { console.log(JSON.stringify(functional)); process.exitCode = 2; return; }
+    if (!equal(current.source, await bindings(SOURCE_FILES)) || !equal(current.build, await bindings(BUILD_FILES))) {
+      console.log(JSON.stringify(invalid('Source/build changed during verification'))); process.exitCode = 2; return;
+    }
   }
   console.log(JSON.stringify(result));
   process.exitCode = result.kind === 'verified_assay' ? (result.outcome === 'threshold_met' ? 0 : 1) : 2;

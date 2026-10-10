@@ -734,6 +734,24 @@ These MCP bindings do not replace WorkTrain's independent provider execution
 configuration. The answer-profile API has a separate trusted delivery-model
 boundary; the bindings described here belong to token-based workflow sessions.
 
+### Harness observations at startup and recovery
+
+`metrics_harness` describes the MCP server's current process environment. It does
+not identify each connected HTTP client, grant delegation capabilities, or attest
+which provider model executed. Supported `WORKRAIL_FORCE_HARNESS` values (`mcp`,
+`cursor`, `claude_code`, `daemon`) take precedence, followed by `CLAUDE_CODE=true`
+or `CLAUDE_CLI=true`, `CURSOR_APP=true`, and `WORKRAIL_IS_DAEMON=true` or a trusted
+current daemon trigger. Other inputs fall back to generic MCP. An invalid override
+falls through to the remaining indicators. `TERM_PROGRAM=vscode` alone does not
+establish Cursor identity.
+
+Start records a signed observation. A new advance captures the current environment
+again; rehydration and idempotent replay preserve stored observations. A session
+started by a daemon and later advanced in a generic MCP process therefore records
+generic MCP when no current daemon evidence exists. Stored context cannot supply
+that evidence. Check live client capabilities separately before delegation; simple
+workflows need no capability handshake beyond ordinary protocol acknowledgment.
+
 ### Correcting or stopping work awaiting approval
 
 A trusted supervisor can correct a pending, uncertain or rejected gate submission.

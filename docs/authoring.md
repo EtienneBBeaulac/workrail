@@ -639,6 +639,8 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - Compare an existing agent target with live client-reported state; already-satisfied requests require no switch.
 - Check live availability before launch and again after recovery; surface unsupported target or current-agent switching rather than substituting.
 - A request or binding is not actual execution evidence; reported model identity requires trusted host or runtime evidence.
+- metrics_harness describes the server process, not each connected HTTP client or its capabilities. Supported overrides precede Claude, explicit Cursor and daemon indicators; TERM_PROGRAM=vscode alone is generic MCP.
+- Start and new advance capture current harness observations; rehydrate and idempotent replay preserve signed stored observations. Stored host context is not current host evidence.
 
 **Anti-patterns**
 - Hardcoding specific Anthropic or Bedrock model IDs in the workflow definition
@@ -646,6 +648,10 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 **Source refs**
 - `src/v2/durable-core/domain/model-selection.ts` (runtime) — Resolves immutable intent and plans client launch against live capabilities.
 - `src/v2/usecases/start-workflow.ts` (runtime) — Persists run-scoped modelRouting and keeps host-reported identity separate.
+- `src/v2/durable-core/domain/harness-detection.ts` (runtime) — Resolves the closed harness observation using explicit precedence.
+- `src/v2/infra/local/harness-sniff.ts` (runtime) — Captures supported current process indicators without inferring capabilities.
+- `src/v2/usecases/harness-observation.ts` (runtime) — Composes capture and pure resolution behind the MCP use-case boundary.
+- `src/mcp/handlers/v2-execution/continue-advance.ts` (runtime) — Refreshes observations on new advance after returning recorded replays.
 - `src/v2/durable-core/domain/prompt-renderer.ts` (runtime) — Emits portable main-agent and independent child selection handoffs.
 
 

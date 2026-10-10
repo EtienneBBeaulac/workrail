@@ -1,4 +1,5 @@
 import { projectRunLifecycle } from '../../../v2/durable-core/projections/run-lifecycle.js';
+import { sniffHarness } from '../../../v2/usecases/harness-observation.js';
 import type { V2ContinueWorkflowInput } from '../../v2/tools.js';
 import { V2ContinueWorkflowOutputSchema } from '../../output-schemas.js';
 import { getCachedWorkflow } from './workflow-object-cache.js';
@@ -207,18 +208,8 @@ export function handleAdvanceIntent(args: {
             let truthToUse = truthLocked;
             let indexToUse = lockedIndex;
 
-            // Sniff current environment
-            let currentHarness: 'cursor' | 'claude_code' | 'daemon' | 'mcp' = 'mcp';
-            const forceHarness = process.env['WORKRAIL_FORCE_HARNESS'];
-            if (forceHarness === 'cursor' || forceHarness === 'claude_code' || forceHarness === 'daemon' || forceHarness === 'mcp') {
-              currentHarness = forceHarness;
-            } else if (process.env['CLAUDE_CODE'] === 'true' || process.env['CLAUDE_CLI'] === 'true') {
-              currentHarness = 'claude_code';
-            } else if (process.env['CURSOR_APP'] === 'true' || process.env['TERM_PROGRAM'] === 'vscode') {
-              currentHarness = 'cursor';
-            } else if (process.env['WORKRAIL_IS_DAEMON'] === 'true') {
-              currentHarness = 'daemon';
-            }
+            // Replay returns above; a new advance observes this process, never stored host context.
+            const currentHarness = sniffHarness();
 
             // Find latest EAT token inside the session
             let latestEatToken: unknown;

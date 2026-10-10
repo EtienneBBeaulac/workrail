@@ -7,6 +7,8 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { execFile } from 'node:child_process';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { verifyCompilation } from './harness-sniff-build-binding.mjs';
+import { SOURCE_FILES, BUILD_FILES, bindings } from './measure-harness-sniff.mjs';
 
 // Fresh Node processes exercise composition, stdio dispatch and durable recovery.
 // No LLM handshake, model request or client context is supplied by this fixture.
@@ -45,6 +47,10 @@ function semanticResponse(value) {
 }
 
 if (!phase) {
+  const sourceFiles = [...SOURCE_FILES, 'scripts/run-startup-detection-acceptance.mjs'];
+  const source = await bindings(sourceFiles);
+  const build = await bindings(BUILD_FILES);
+  assert.equal((await verifyCompilation(root, build)).kind, 'verified_compilation', 'Acceptance must run the current source build');
   const temporaryRoot = await mkdtemp(resolve(tmpdir(), 'workrail-startup-acceptance-'));
   const receipts = [];
   try {
@@ -69,8 +75,10 @@ if (!phase) {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
   const failures = receipts.flatMap(receipt => receipt.failures);
+  assert.deepEqual(await bindings(sourceFiles), source, 'Acceptance source must remain unchanged');
+  assert.deepEqual(await bindings(BUILD_FILES), build, 'Acceptance build must remain unchanged');
   process.stdout.write(JSON.stringify({ transport: 'composed MCP stdio', freshProcesses: receipts.length,
-    temporaryDataRemoved: true, receipts }) + '\n');
+    temporaryDataRemoved: true, source, build, receipts }) + '\n');
   if (failures.length) {
     process.stderr.write('RED: ' + failures.join('; ') + '\n');
     process.exitCode = 1;

@@ -5,6 +5,7 @@ import { performance } from 'node:perf_hooks';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { verifyCompilation } from './harness-sniff-build-binding.mjs';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const COUNTS = Object.freeze({ first: 200, warm: 10000 });
@@ -30,10 +31,13 @@ const ENV_KEYS = ['WORKRAIL_FORCE_HARNESS', 'CLAUDE_CODE', 'CLAUDE_CLI', 'CURSOR
 export const SOURCE_FILES = [
   'src/v2/durable-core/domain/harness-detection.ts',
   'src/v2/infra/local/harness-sniff.ts',
+  'src/v2/usecases/harness-observation.ts',
   'src/v2/usecases/start-workflow.ts',
   'src/mcp/handlers/v2-execution/continue-advance.ts',
   'scripts/measure-harness-sniff.mjs',
   'scripts/verify-harness-sniff-receipt.mjs',
+  'scripts/harness-sniff-build-binding.mjs',
+  'tsconfig.json', 'tsconfig.base.json', 'tsconfig.build.json', 'package-lock.json',
 ];
 export const BUILD_FILES = SOURCE_FILES.filter(p => p.endsWith('.ts')).map(p => p.replace(/^src\//, 'dist/').replace(/\.ts$/, '.js'));
 export async function bindings(files) {
@@ -50,7 +54,8 @@ function setEnvironment(values) {
 async function worker(scenario, mode, count) {
   setEnvironment(scenario.env);
   const importStart = performance.now();
-  const { sniffHarness, captureProcessHarnessIndicators } = await import(pathToFileURL(path.join(ROOT, 'dist/v2/infra/local/harness-sniff.js')).href);
+  const { sniffHarness } = await import(pathToFileURL(path.join(ROOT, 'dist/v2/usecases/harness-observation.js')).href);
+  const { captureProcessHarnessIndicators } = await import(pathToFileURL(path.join(ROOT, 'dist/v2/infra/local/harness-sniff.js')).href);
   const importMs = performance.now() - importStart;
   const capture = mode === 'slow-control' ? () => {
     const start = performance.now();
@@ -105,6 +110,8 @@ async function main() {
   const out = args[args.indexOf('--out') + 1];
   if (!args.includes('--mode') || !args.includes('--out') || !['baseline', 'slow-control'].includes(mode) || !out || !path.isAbsolute(out)) throw new Error('Usage: --mode baseline|slow-control --out absolutePath');
   const source = await bindings(SOURCE_FILES), build = await bindings(BUILD_FILES);
+  const compilation = await verifyCompilation(ROOT, build);
+  if (compilation.kind !== 'verified_compilation') throw new Error(JSON.stringify(compilation));
   const startedAt = new Date().toISOString();
   const deadline = performance.now() + 600000;
   const results = [];
