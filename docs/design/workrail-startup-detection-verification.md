@@ -1,6 +1,6 @@
 # Startup observation verification
 
-Local implementation for [#1346](https://github.com/EtienneBBeaulac/workrail/issues/1346), under parent #1152. Production code is committed at `fdf70e029ca8aeaa9a837de23fb5416336844501`. The pipeline G5 implementation gate passed all six requirements. This branch has not been pushed, published, merged or installed into the connected MCP server.
+Local verification snapshot for [#1346](https://github.com/EtienneBBeaulac/workrail/issues/1346), under parent #1152. Production code is committed at `fdf70e029ca8aeaa9a837de23fb5416336844501`. The pipeline G5 implementation gate passed all six requirements. At the time of this local verification, the branch had not been pushed, published, merged or installed into the connected MCP server. Current delivery status is tracked on the issue and its linked pull request.
 
 ## Behavior and review
 
