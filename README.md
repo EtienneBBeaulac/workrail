@@ -213,6 +213,45 @@ chmod +x $(npm root -g)/@exaudeus/workrail/dist/mcp-server.js
 
 ---
 
+## Reporting and Metrics
+
+WorkRail captures rich session metrics automatically -- every workflow run records token usage,
+git diffs, step counts, language breakdowns, code churn, and agent-reported outcomes. The
+`workrail report` command surfaces all of this as structured data.
+
+```bash
+workrail report --days 30               # NDJSON to stdout (default, streamable)
+workrail report --days 30 --format html --out report.html  # open in browser
+workrail report --days 30 --format csv  # spreadsheet-ready
+workrail report --days 30 --format summary  # aggregates only
+workrail report --days 30 | jq '.summary'   # pipe to jq
+```
+
+**Available formats:** `ndjson` (default), `json`, `summary`, `csv`, `html`
+
+**What is captured per session:**
+- Token delta (input, output, cache) via Claude Code JSONL scanning
+- Git diff: lines added/removed, files changed, language breakdown, commit SHAs, PR refs
+- Code churn: files re-modified within 7 days of session end
+- Agent-reported outcome (success/partial/abandoned/error)
+- Step count and retry count from the DAG
+- Duration, workflow ID, goal, project
+
+The full schema is documented in
+[`docs/reference/session-metrics-reference.md`](docs/reference/session-metrics-reference.md).
+
+**Automatic generation:**
+
+```bash
+workrail report --schedule daily    # macOS: installs launchd plist
+workrail report --schedule weekly   # Linux: adds crontab entry
+```
+
+This writes `~/.workrail/data/reports/latest.json` nightly, which tools like
+[common-ground](https://github.com/EtienneBBeaulac/workrail) can read for team-level reporting.
+
+---
+
 ## CI & Releases
 
 - **Lockfile is enforced**: `package-lock.json` is canonical and CI will fail if `npm ci` would modify it. Commit lockfile changes intentionally.
