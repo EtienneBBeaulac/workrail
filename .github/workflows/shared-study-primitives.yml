@@ -7,6 +7,7 @@ on:
       - 'experiments/answer-driven-execution/proofs/**'
       - 'experiments/answer-driven-execution/usability-scorer.mts'
       - 'experiments/answer-driven-execution/study-manifest.mts'
+      - 'src/**'
       - 'package.json'
       - 'package-lock.json'
   push:
@@ -16,6 +17,7 @@ on:
       - 'experiments/answer-driven-execution/proofs/**'
       - 'experiments/answer-driven-execution/usability-scorer.mts'
       - 'experiments/answer-driven-execution/study-manifest.mts'
+      - 'src/**'
       - 'package.json'
       - 'package-lock.json'
   workflow_dispatch:

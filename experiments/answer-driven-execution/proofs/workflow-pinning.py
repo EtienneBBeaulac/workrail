@@ -143,7 +143,8 @@ def observe(root: Path, node: Path, digest: str) -> Observation | Failure:
                     stdout.seek(0); stderr.seek(0)
                     raw, errors = stdout.read(MAXIMUM_OUTPUT + 1), stderr.read(MAXIMUM_OUTPUT + 1)
                 if completed.returncode != 0 or len(raw) > MAXIMUM_OUTPUT or len(errors) > MAXIMUM_OUTPUT:
-                    return Failure('Worker process unavailable or exceeded bounds')
+                    return Failure(f'Worker process unavailable or exceeded bounds: mode={mode}, '
+                        f'exit={completed.returncode}, stderr={errors[:4096].decode("utf8", errors="replace")}')
                 if mode != 'recover':
                     prepared = json.loads(raw, object_pairs_hook=unique)
                     if prepared != {'kind': 'prepared', 'mode': mode, 'instruction': prompt + ' second'}:
