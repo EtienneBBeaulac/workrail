@@ -3,6 +3,7 @@ import { success, requireV2Context } from '../../types.js';
 import { NullGitSnapshotV2 } from '../../../v2/ports/git-snapshot.port.js';
 import type { V2ContinueWorkflowInput, V2StartWorkflowInput } from '../../v2/tools.js';
 import { V2ContinueWorkflowOutputSchema } from '../../output-schemas.js';
+import type { V2StartWorkflowOutput, V2ContinueWorkflowOutput } from '../../output-schemas.js';
 import {
   asAttemptId,
 } from '../../../v2/durable-core/tokens/index.js';
@@ -86,7 +87,7 @@ export function buildNextCall(args: {
 export async function handleV2StartWorkflow(
   input: V2StartWorkflowInput,
   ctx: ToolContext
-): Promise<ToolResult<unknown>> {
+): Promise<ToolResult<V2StartWorkflowOutput>> {
   const guard = requireV2Context(ctx);
   if (!guard.ok) return guard.error;
   const rememberedRootFailure = await rememberExplicitWorkspaceRoot(input.workspacePath, guard.ctx.v2.rememberedRootsStore);
@@ -117,7 +118,7 @@ export async function handleV2StartWorkflow(
 export async function handleV2ContinueWorkflow(
   input: V2ContinueWorkflowInput,
   ctx: ToolContext
-): Promise<ToolResult<unknown>> {
+): Promise<ToolResult<V2ContinueWorkflowOutput>> {
   const guard = requireV2Context(ctx);
   if (!guard.ok) return guard.error;
 

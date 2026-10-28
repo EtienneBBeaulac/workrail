@@ -7,6 +7,9 @@ import {
   CONTINUE_TOKEN_PATTERN,
 } from '../v2/durable-core/tokens/token-patterns.js';
 import { MAX_RESUME_PREVIEW_BYTES } from '../v2/durable-core/constants.js';
+import type { ResolvedReference } from '../v2/usecases/reference-types.js';
+import { blockerSortKey } from '../v2/durable-core/domain/reason-model.js';
+import { SUPPLEMENT_KINDS } from './response-supplements.js';
 
 // -----------------------------------------------------------------------------
 // JSON-safe value schema (prevents undefined / functions leaking across boundary)
@@ -358,38 +361,8 @@ export const V2BlockerReportSchema = z
     blockers: z.array(V2BlockerSchema).min(1).max(MAX_BLOCKERS).readonly(),
   })
   .superRefine((v, ctx) => {
-    const keyFor = (b: z.infer<typeof V2BlockerSchema>): string => {
-      const p = b.pointer;
-      let ptrStable: string;
-      switch (p.kind) {
-        case 'context_key':
-          ptrStable = p.key;
-          break;
-        case 'output_contract':
-          ptrStable = p.contractRef;
-          break;
-        case 'capability':
-          ptrStable = p.capability;
-          break;
-        case 'assessment_dimension':
-          ptrStable = `${p.assessmentId}|${p.dimensionId}`;
-          break;
-        case 'workflow_step':
-          ptrStable = p.stepId;
-          break;
-        case 'context_budget':
-          ptrStable = '';
-          break;
-        default: {
-          const _exhaustive: never = p;
-          ptrStable = _exhaustive;
-        }
-      }
-      return `${b.code}|${p.kind}|${String(ptrStable)}`;
-    };
-
     for (let i = 1; i < v.blockers.length; i++) {
-      if (keyFor(v.blockers[i - 1]!) > keyFor(v.blockers[i]!)) {
+      if (blockerSortKey(v.blockers[i - 1]!).localeCompare(blockerSortKey(v.blockers[i]!), 'en-US') > 0) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'blockers must be deterministically sorted', path: ['blockers'] });
         break;
       }
@@ -451,7 +424,26 @@ export const V2StepContextSchema = z.object({
   assessments: z.array(V2StepContextAssessmentSchema).optional(),
 });
 
+const referenceFields = {
+  id: z.string(), title: z.string(), source: z.string(), purpose: z.string(),
+  authoritative: z.boolean(), resolveFrom: z.enum(['workspace', 'package']),
+};
+
+export const V2ResolvedReferenceSchema = z.discriminatedUnion('status', [
+  z.object({ ...referenceFields, status: z.literal('resolved'), resolvedPath: z.string() }),
+  z.object({ ...referenceFields, status: z.literal('unresolved') }),
+  z.object({ ...referenceFields, status: z.literal('pinned') }),
+]) satisfies z.ZodType<ResolvedReference>;
+
+const executionDeliveryFields = {
+  references: z.array(V2ResolvedReferenceSchema).readonly().optional(),
+  supplements: z.array(z.object({
+    kind: z.enum(SUPPLEMENT_KINDS), order: z.number(), text: z.string(),
+  })).readonly().optional(),
+};
+
 const V2ContinueWorkflowOkSchema = z.object({
+  ...executionDeliveryFields,
   kind: z.literal('ok'),
   continueToken: continueTokenSchema,
   checkpointToken: checkpointTokenSchema,
@@ -475,6 +467,7 @@ const V2ContinueWorkflowOkSchema = z.object({
 });
 
 const V2ContinueWorkflowBlockedSchema = z.object({
+  ...executionDeliveryFields,
   kind: z.literal('blocked'),
   continueToken: continueTokenSchema,
   checkpointToken: checkpointTokenSchema,
@@ -498,6 +491,7 @@ const V2ContinueWorkflowBlockedSchema = z.object({
       guidance: z.string().min(1),
     })
     .optional(),
+  warnings: z.array(V2BindingDriftWarningSchema).optional(),
 });
 
 /**
@@ -513,6 +507,7 @@ const V2ContinueWorkflowBlockedSchema = z.object({
  *   value from before GateKind was a discriminated union; treat as 'coordinator_eval'.
  */
 const V2ContinueWorkflowGateCheckpointSchema = z.object({
+  ...executionDeliveryFields,
   kind: z.literal('gate_checkpoint'),
   gateToken: z.string().min(1),
   stepId: z.string().min(1),
@@ -613,6 +608,7 @@ export const V2CheckpointWorkflowOutputSchema = z.object({
 });
 
 export const V2StartWorkflowOutputSchema = z.object({
+  ...executionDeliveryFields,
   continueToken: continueTokenSchema,
   checkpointToken: checkpointTokenSchema,
   isComplete: z.boolean(),
@@ -633,6 +629,10 @@ export const V2StartWorkflowOutputSchema = z.object({
   (data) => (data.pending ? data.continueToken != null : true),
   { message: 'continueToken is required when a pending step exists' }
 );
+
+export type V2StartWorkflowOutput = Readonly<z.infer<typeof V2StartWorkflowOutputSchema>>;
+export type V2ContinueWorkflowOutput = Readonly<z.infer<typeof V2ContinueWorkflowOutputSchema>>;
+export type V2ExecutionOutput = V2StartWorkflowOutput | V2ContinueWorkflowOutput;
 
 // -----------------------------------------------------------------------------
 // Session tool outputs

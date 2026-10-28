@@ -79,7 +79,7 @@ it.each([true, false].flatMap(withConfig => [true, false].map(cleanFormat => ({ 
     const inspect = await runTool('inspect_workflow', { workflowId: 'model-child', workspacePath: root, mode: 'metadata' });
     expect(JSON.parse(inspect.content[0].text).initialModelRequest).toEqual({ kind: 'tier', tier: 'lightweight', source: 'step' });
     const routing = withConfig ? { lightweight: { kind: 'model', modelId: 'gpt-6-luna' } } : undefined;
-    const tokenFrom = (response: any) => response.content.map((item: any) => item.text).join('\n').match(/(?:"continueToken":\s*"|Token: )(ct_[A-Za-z0-9_-]+)/)?.[1];
+    const tokenFrom = (response: any) => response.structuredContent?.nextCall?.params.continueToken;
     // An inferred launch preference must agree with bootstrap, without pinning later steps.
     const child = await runTool('start_workflow', { workflowId: 'model-child', workspacePath: root,
       goal: 'Verify initial launch policy', modelRouting: { lightweight: { kind: 'model', modelId: 'client-fast' } } });

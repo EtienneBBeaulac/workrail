@@ -307,11 +307,17 @@ If a workflow prefers `delegation`, it should not require an upfront probe. Inst
 
 ## Response content structure (normative)
 
-Execution tool responses (`start_workflow`, `continue_workflow`) are delivered as multiple MCP content items, each with `type: "text"`. The items are ordered:
+Successful execution tool responses (`start_workflow`, `continue_workflow`) include a complete `structuredContent` object matching the tool's advertised `outputSchema`. It carries the public execution state: pending work, continuation and checkpoint authority when available, preferences, next intent and call, warnings, model policy, and outcome-specific fields such as blockers, retry authority, validation, or gate checkpoints. Completed responses retain their complete outcome with `nextCall: null`.
 
-1. **Primary content**: the authored prompt (or system message for completed/blocked states). Always present.
-2. **Workflow references** (when present): a dedicated content item listing external documents the workflow points at. Only emitted when the workflow declares `references` and the lifecycle warrants it.
-3. **Response supplements** (when present): system-level guidance items (e.g., boundary-owned delivery guidance, one-time supplements).
+Clients can drive the entire execution lifecycle from `structuredContent` without extracting tokens from text. Treat every token as opaque. Tool errors use `isError: true` and the existing error envelope in text; they do not publish execution `structuredContent`.
+
+References and response supplements augment this same object as separate optional arrays. They do not replace or rewrite `pending.prompt`. The JSON response mode serializes this complete object into its text content too.
+
+Formatted text is rendered from the same object as multiple MCP content items, each with `type: "text"`. The items are ordered:
+
+1. **Response supplements** (when present): system-level guidance in ascending `order`.
+2. **Primary content**: the authored prompt or system message for completed/blocked states. Always present.
+3. **Workflow references** (when present): a dedicated content item listing external documents the workflow points at.
 
 ### Reference delivery by lifecycle
 
@@ -325,7 +331,7 @@ References with unresolved paths (file not found at start time) are surfaced wit
 
 ### Content envelope (internal)
 
-Internally, WorkRail assembles a `StepContentEnvelope` that carries typed content categories (authored prompt, resolved references, supplements). The formatter consumes this envelope to produce the MCP content items above. This is an implementation detail not exposed in the public tool output schema.
+Internally, a `StepContentEnvelope` carries authored content and delivery metadata. At the MCP boundary, `buildExecutionResponse` combines the public execution response with eligible references and supplements once. Both structured delivery and text rendering consume that canonical response. The internal envelope itself is not part of the public contract. Rehydration preserves full structured reference metadata even when its text reminder is compact.
 
 ## Durable outputs (`output` envelope)
 

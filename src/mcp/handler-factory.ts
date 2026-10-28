@@ -26,9 +26,9 @@ import { toBoundedJsonValue } from './validation/bounded-json.js';
 import type { PreValidateResult } from './validation/workflow-next-prevalidate.js';
 import type { WrappedToolHandler, McpCallToolResult } from './types/workflow-tool-edition.js';
 import { internalSuggestion } from './handlers/v2-execution-helpers.js';
-import { formatV2ExecutionResponse, formatV2ResumeResponse, type FormattedResponse } from './v2-response-formatter.js';
-import { toPendingStep, V2PendingStepSchema } from './output-schemas.js';
+import { formatExecutionResponse, formatV2ExecutionResponse, formatV2ResumeResponse, type FormattedResponse } from './v2-response-formatter.js';
 import { getV2ExecutionRenderEnvelope } from './render-envelope.js';
+import { buildExecutionResponse, validateExecutionResponse } from './execution-response.js';
 
 // -----------------------------------------------------------------------------
 // Result Conversion
@@ -54,19 +54,22 @@ export function toMcpResult<T>(result: ToolResult<T>, ctx?: ToolContext): McpCal
   switch (result.type) {
     case 'success': {
       const renderEnvelope = getV2ExecutionRenderEnvelope(result.data);
-      const stepContent = renderEnvelope?.contentEnvelope;
-      const response = renderEnvelope?.response ?? result.data;
-      // Advance responses can carry public pending data without render metadata.
-      const parsedPending = V2PendingStepSchema.safeParse(
-        response !== null && typeof response === 'object' && 'pending' in response ? response.pending : null);
-      const pending = stepContent ? toPendingStep({ ...stepContent, prompt: stepContent.authoredPrompt })
-        : parsedPending.success ? parsedPending.data : null;
-      const structured = pending ? { structuredContent: { pending } } : {};
       const cleanResponseFormat = ctx?.featureFlags.isEnabled('cleanResponseFormat') ?? false;
+      const validated = renderEnvelope
+        ? validateExecutionResponse(buildExecutionResponse(renderEnvelope, cleanResponseFormat))
+        : null;
+      if (validated?.isErr()) {
+        return toMcpResult(errNotRetryable('INTERNAL_ERROR', 'WorkRail could not produce a valid execution response.'));
+      }
+      const execution = validated?.isOk() ? validated.value : null;
+      const response = execution ?? result.data;
+      const structured = execution ? { structuredContent: execution } : {};
 
       if (!jsonResponsesOverride) {
         const formatted: FormattedResponse | null =
-          formatV2ExecutionResponse(result.data, cleanResponseFormat) ?? formatV2ResumeResponse(result.data);
+          (execution && renderEnvelope
+            ? formatExecutionResponse(execution, renderEnvelope.lifecycle, cleanResponseFormat)
+            : formatV2ExecutionResponse(response, cleanResponseFormat)) ?? formatV2ResumeResponse(response);
         if (formatted !== null) {
           const content: { type: 'text'; text: string }[] = [];
           for (const supplement of formatted.supplements ?? []) {
@@ -79,18 +82,11 @@ export function toMcpResult<T>(result: ToolResult<T>, ctx?: ToolContext): McpCal
           return { content, ...structured };
         }
       }
-      // JSON mode: include references alongside the response when present
-      const envelope = getV2ExecutionRenderEnvelope(result.data);
-      const responseBody = envelope != null ? envelope.response : result.data;
-      const refs = envelope?.contentEnvelope?.references;
-      const jsonPayload = (refs != null && refs.length > 0)
-        ? { ...responseBody as Record<string, unknown>, references: refs }
-        : responseBody;
       return {
         ...structured,
         content: [{
           type: 'text',
-          text: JSON.stringify(jsonPayload),
+          text: JSON.stringify(response),
         }],
       };
     }

@@ -21,6 +21,7 @@ import { BackgroundWork } from './background-work.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { zodToJsonSchema } from './zod-to-json-schema.js';
+import { zodToJsonSchema as outputJsonSchema } from 'zod-to-json-schema';
 import { bootstrap, container } from '../di/container.js';
 import { DI } from '../di/tokens.js';
 import type { WorkflowService } from '../application/services/workflow-service.js';
@@ -79,6 +80,7 @@ interface Tool {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  outputSchema?: Readonly<Record<string, unknown>>;
   annotations?: ToolAnnotations;
 }
 
@@ -220,6 +222,7 @@ function toMcpTool<TInput extends z.ZodType>(tool: ToolDefinition<TInput>): Tool
     name: tool.name,
     description: tool.description,
     inputSchema: zodToJsonSchema(tool.inputSchema),
+    ...(tool.outputSchema ? { outputSchema: { ...outputJsonSchema(tool.outputSchema, { $refStrategy: 'none' }), type: 'object' } } : {}),
     annotations: tool.annotations,
   };
 }

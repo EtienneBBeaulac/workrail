@@ -3,7 +3,6 @@
  * references in the output payload.
  */
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { toMcpResult } from '../../../src/mcp/handler-factory.js';
 import { createV2ExecutionRenderEnvelope } from '../../../src/mcp/render-envelope.js';
 import { buildStepContentEnvelope, type ResolvedReference } from '../../../src/mcp/step-content-envelope.js';
 import type { StepMetadata } from '../../../src/v2/durable-core/domain/prompt-renderer.js';
@@ -30,20 +29,25 @@ const RESOLVED_REF: ResolvedReference = {
 describe('toMcpResult — JSON mode with references', () => {
   beforeEach(() => {
     vi.stubEnv('WORKRAIL_JSON_RESPONSES', 'true');
+    vi.resetModules();
   });
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  it('includes references array in JSON payload when present', () => {
+  it('includes references array in JSON payload when present', async () => {
+    const { toMcpResult } = await import('../../../src/mcp/handler-factory.js');
     const contentEnvelope = buildStepContentEnvelope({
       meta: SAMPLE_META,
       references: [RESOLVED_REF],
     });
     const response = {
-      continueToken: 'ct_test',
+      continueToken: 'ct_aaaaaaaaaaaaaaaaaaaaaaaa',
       isComplete: false,
       pending: { stepId: 'step1', title: 'Step 1', prompt: 'Do the thing.' },
+      preferences: { autonomy: 'guided' as const, riskPolicy: 'conservative' as const },
+      nextIntent: 'perform_pending_then_continue' as const,
+      nextCall: { tool: 'continue_workflow' as const, params: { continueToken: 'ct_aaaaaaaaaaaaaaaaaaaaaaaa' } },
     };
     const envelope = createV2ExecutionRenderEnvelope({
       response,
@@ -63,12 +67,16 @@ describe('toMcpResult — JSON mode with references', () => {
     expect(parsed.references[0].resolvedPath).toBe('/pkg/spec.md');
   });
 
-  it('omits references from JSON payload when none exist', () => {
+  it('omits references from JSON payload when none exist', async () => {
+    const { toMcpResult } = await import('../../../src/mcp/handler-factory.js');
     const contentEnvelope = buildStepContentEnvelope({ meta: SAMPLE_META });
     const response = {
-      continueToken: 'ct_test',
+      continueToken: 'ct_aaaaaaaaaaaaaaaaaaaaaaaa',
       isComplete: false,
       pending: { stepId: 'step1', title: 'Step 1', prompt: 'Do the thing.' },
+      preferences: { autonomy: 'guided' as const, riskPolicy: 'conservative' as const },
+      nextIntent: 'perform_pending_then_continue' as const,
+      nextCall: { tool: 'continue_workflow' as const, params: { continueToken: 'ct_aaaaaaaaaaaaaaaaaaaaaaaa' } },
     };
     const envelope = createV2ExecutionRenderEnvelope({
       response,

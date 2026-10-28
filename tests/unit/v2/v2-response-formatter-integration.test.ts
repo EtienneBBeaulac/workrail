@@ -12,8 +12,8 @@ import { toMcpResult } from '../../../src/mcp/handler-factory.js';
 import { createV2ExecutionRenderEnvelope } from '../../../src/mcp/render-envelope.js';
 
 const EXECUTION_RESPONSE = {
-  continueToken: 'ct_test123',
-  checkpointToken: 'chk1testtoken',
+  continueToken: 'ct_aaaaaaaaaaaaaaaaaaaaaaaa',
+  checkpointToken: 'ck_cccccccccccccccccccccccc',
   isComplete: false,
   pending: {
     stepId: 'step-1',
@@ -24,7 +24,7 @@ const EXECUTION_RESPONSE = {
   nextIntent: 'perform_pending_then_continue',
   nextCall: {
     tool: 'continue_workflow' as const,
-    params: { intent: 'advance' as const, continueToken: 'ct_test123' },
+    params: { intent: 'advance' as const, continueToken: 'ct_aaaaaaaaaaaaaaaaaaaaaaaa' },
   },
 };
 

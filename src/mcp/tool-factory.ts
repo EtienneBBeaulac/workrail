@@ -28,6 +28,7 @@ export interface ToolDefinition<TInput extends z.ZodType> {
   readonly title: string;
   readonly description: string;
   readonly inputSchema: TInput;
+  readonly outputSchema?: z.ZodType;
   readonly annotations: ToolAnnotations;
 }
 
@@ -41,6 +42,7 @@ export interface ToolConfig<TInput extends z.ZodType> {
   readonly name: WorkflowToolName;
   readonly title: string;
   readonly inputSchema: TInput;
+  readonly outputSchema?: z.ZodType;
   readonly annotations: ToolAnnotations;
 }
 
@@ -84,6 +86,7 @@ export function createToolFactory(
       title: config.title,
       description: descriptionProvider.getDescription(config.name),
       inputSchema: config.inputSchema,
+      ...(config.outputSchema ? { outputSchema: config.outputSchema } : {}),
       annotations: config.annotations,
     };
   };

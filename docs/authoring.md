@@ -355,6 +355,7 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - If the text is system-owned or delivery-owned rather than part of the workflow author's actual step instruction, prefer a response supplement.
 - If the text should appear only at start or resume, prefer a response supplement over repeating it in every authored prompt.
 - Keep the main step prompt readable as a direct user ask even without the supplement.
+- Preserve the complete public execution response in structuredContent; deliver references and supplements separately from pending.prompt and render text from the same canonical response.
 
 **Anti-patterns**
 - Inlining notes onboarding into every step prompt
@@ -363,6 +364,8 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 
 **Source refs**
 - `src/mcp/response-supplements.ts` (runtime) — Canonical supplement policy lives here.
+- `src/mcp/execution-response.ts` (runtime) — Combines complete execution state with delivery metadata for structuredContent and text.
+- `src/mcp/output-schemas.ts` (runtime) — Defines the complete public execution response contract.
 - `src/mcp/v2-response-formatter.ts` (runtime) — Supplements are rendered as separate MCP content items here.
 
 ### one-time-supplements-are-policy-not-durable-state

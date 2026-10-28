@@ -64,6 +64,16 @@ No proposed solutions here -- just the problem.]
 
 ## WorkRail MCP
 
+### Structured execution responses omit continuation authority (Oct 28, 2026)
+
+**Status: bug (active, #1364)** | Priority: high
+
+**Score: 13** | Cor:3 Cap:2 Eff:3 Lev:2 Con:3 | Blocked: no
+
+Execution responses expose continuation tokens in text but only the pending step in structured content. Clients that prefer the structured representation cannot advance past onboarding, even for fresh sessions or with JSON responses enabled. The structured contract also omits blockers and completed outcomes when no pending step exists.
+
+Execution scope and verification: `docs/plans/mcp-structured-execution-contract.md`.
+
 ### Portable model selection loses intent and execution provenance (October 9, 2026)
 
 **Status:** Token-based MCP request/routing shipped in WorkRail 3.127.0 via [PR #1343](https://github.com/EtienneBBeaulac/workrail/pull/1343). Broader [#1152](https://github.com/EtienneBBeaulac/workrail/issues/1152) remains open for work outside this scope.
