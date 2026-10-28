@@ -40,7 +40,8 @@ const SUBAGENT_GUIDANCE = [
   '- **Spawning Routines / Executors**: If a step instructs you to "spawn a WorkRail Executor" or execute a parallel routine (e.g. `wr.routine-philosophy-alignment`), you should delegate it to a subagent using your native client capabilities (e.g. `invoke_subagent` to start a child agent running the routine with `start_workflow`) or execute it inline if client-side subagent tools are unavailable and the selection permits inheritance. An explicit tier or target must be checked first; report unsupported selection instead of silently running it on the current model.',
 ].join('\n');
 
-export type SupplementKind = 'authority_context' | 'notes_guidance' | 'subagent_guidance' | 'executor_directive';
+export const SUPPLEMENT_KINDS = ['authority_context', 'notes_guidance', 'subagent_guidance', 'executor_directive'] as const;
+export type SupplementKind = typeof SUPPLEMENT_KINDS[number];
 
 export interface FormattedSupplement {
   readonly kind: SupplementKind;

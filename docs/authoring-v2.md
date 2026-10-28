@@ -551,7 +551,7 @@ Some instructions should **not** be mixed into the workflow-authored step prompt
 
 For these, use **response supplements** at the MCP response boundary rather than editing workflow JSON prompts directly.
 
-Current implementation lives in `src/mcp/response-supplements.ts`.
+Current policy lives in `src/mcp/response-supplements.ts`. The MCP boundary includes eligible supplements and references alongside the complete public execution state in `structuredContent`, then renders text from that same response. Authors should keep guidance separate from `pending.prompt`; clients can use structured continuation authority without parsing prose. See [Response content structure](reference/workflow-execution-contract.md#response-content-structure-normative) for the protocol contract.
 
 #### When to use a response supplement
 

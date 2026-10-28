@@ -3,7 +3,7 @@
   "version": 3,
   "title": "WorkRail Authoring Rules",
   "purpose": "Canonical current rules for authoring good WorkRail workflows. workflow.schema.json remains the source of truth for legal structure.",
-  "lastReviewed": "2026-10-10",
+  "lastReviewed": "2026-10-28",
   "principles": [
     "Schema defines what is valid. These rules define what is good.",
     "Prefer current authoring rules over design rationale or historical notes.",
@@ -795,6 +795,16 @@
             },
             {
               "kind": "runtime",
+              "path": "src/mcp/execution-response.ts",
+              "note": "Combines complete execution state with delivery metadata for structuredContent and text."
+            },
+            {
+              "kind": "runtime",
+              "path": "src/mcp/output-schemas.ts",
+              "note": "Defines the complete public execution response contract."
+            },
+            {
+              "kind": "runtime",
               "path": "src/mcp/v2-response-formatter.ts",
               "note": "Supplements are rendered as separate MCP content items here."
             }
@@ -802,7 +812,8 @@
           "checks": [
             "If the text is system-owned or delivery-owned rather than part of the workflow author's actual step instruction, prefer a response supplement.",
             "If the text should appear only at start or resume, prefer a response supplement over repeating it in every authored prompt.",
-            "Keep the main step prompt readable as a direct user ask even without the supplement."
+            "Keep the main step prompt readable as a direct user ask even without the supplement.",
+            "Preserve the complete public execution response in structuredContent; deliver references and supplements separately from pending.prompt and render text from the same canonical response."
           ],
           "antiPatterns": [
             "Inlining notes onboarding into every step prompt",

@@ -4,6 +4,7 @@ import {
   createV2ExecutionRenderEnvelope,
   isV2ExecutionRenderEnvelope,
 } from '../../../src/mcp/render-envelope.js';
+import type { V2StartWorkflowOutput } from '../../../src/mcp/output-schemas.js';
 import type { StepMetadata } from '../../../src/v2/durable-core/domain/prompt-renderer.js';
 import type { FormattedSupplement } from '../../../src/mcp/response-supplements.js';
 
@@ -75,11 +76,20 @@ describe('buildStepContentEnvelope', () => {
   });
 });
 
+const execution: V2StartWorkflowOutput = {
+  isComplete: false,
+  continueToken: `ct_${'a'.repeat(24)}`,
+  pending: { stepId: SAMPLE_META.stepId, title: SAMPLE_META.title, prompt: SAMPLE_META.prompt },
+  preferences: { autonomy: 'guided', riskPolicy: 'conservative' },
+  nextIntent: 'perform_pending_then_continue',
+  nextCall: { tool: 'continue_workflow', params: { continueToken: `ct_${'a'.repeat(24)}` } },
+};
+
 describe('V2ExecutionRenderEnvelope with contentEnvelope', () => {
   it('creates render envelope with contentEnvelope', () => {
     const contentEnvelope = buildStepContentEnvelope({ meta: SAMPLE_META });
     const renderEnvelope = createV2ExecutionRenderEnvelope({
-      response: { some: 'data' },
+      response: execution,
       lifecycle: 'start',
       contentEnvelope,
     });
@@ -89,9 +99,9 @@ describe('V2ExecutionRenderEnvelope with contentEnvelope', () => {
     expect(isV2ExecutionRenderEnvelope(renderEnvelope)).toBe(true);
   });
 
-  it('creates render envelope without contentEnvelope (backward compat)', () => {
+  it('creates render envelope without optional delivery metadata', () => {
     const renderEnvelope = createV2ExecutionRenderEnvelope({
-      response: { some: 'data' },
+      response: execution,
       lifecycle: 'advance',
     });
 
@@ -117,14 +127,14 @@ describe('V2ExecutionRenderEnvelope with contentEnvelope', () => {
       references: refs,
     });
     const renderEnvelope = createV2ExecutionRenderEnvelope({
-      response: { pending: { prompt: SAMPLE_META.prompt } },
+      response: execution,
       lifecycle: 'start',
       contentEnvelope,
     });
 
     // Verify the envelope's authoredPrompt matches what would be in pending.prompt
     expect(renderEnvelope.contentEnvelope!.authoredPrompt).toBe(
-      (renderEnvelope.response as any).pending.prompt,
+      renderEnvelope.response.pending!.prompt,
     );
     expect(renderEnvelope.contentEnvelope!.references).toHaveLength(1);
   });

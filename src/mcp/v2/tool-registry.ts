@@ -31,6 +31,7 @@ import { handleV2InspectWorkflow, handleV2ListWorkflows } from '../handlers/v2-w
 import { handleV2CheckpointWorkflow } from '../handlers/v2-checkpoint.js';
 import { handleV2ResumeSession } from '../handlers/v2-resume.js';
 import { CONTINUE_WORKFLOW_PROTOCOL } from '../workflow-protocol-contracts.js';
+import { V2StartWorkflowOutputSchema, V2ContinueWorkflowOutputSchema } from '../output-schemas.js';
 
 // -----------------------------------------------------------------------------
 // V2 Tool Registration
@@ -70,12 +71,14 @@ export function buildV2ToolRegistry(buildTool: ToolBuilder): V2ToolRegistration 
       name: 'start_workflow',
       title: V2_TOOL_TITLES.start_workflow,
       inputSchema: V2StartWorkflowInput,
+      outputSchema: V2StartWorkflowOutputSchema,
       annotations: V2_TOOL_ANNOTATIONS.start_workflow,
     }),
     buildTool({
       name: 'continue_workflow',
       title: V2_TOOL_TITLES.continue_workflow,
       inputSchema: V2ContinueWorkflowInput,
+      outputSchema: V2ContinueWorkflowOutputSchema,
       annotations: V2_TOOL_ANNOTATIONS.continue_workflow,
     }),
     buildTool({

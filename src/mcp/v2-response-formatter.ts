@@ -6,11 +6,11 @@
  * opaque tokens.
  *
  * Non-execution tools (list_workflows, inspect_workflow, resume_session,
- * checkpoint_workflow) continue returning JSON — they are not matched by the
+ * checkpoint_workflow) continue returning JSON; they are not matched by the
  * shape detector.
  *
- * Output schemas and handler logic are unchanged; this only affects the MCP
- * text serialization at the toMcpResult boundary.
+ * Renders the canonical public execution response without deriving a second
+ * copy of execution state.
  *
  * @module mcp/v2-response-formatter
  */
@@ -19,81 +19,13 @@ import {
   getV2ExecutionRenderEnvelope,
   type V2ExecutionResponseLifecycle,
 } from './render-envelope.js';
-import {
-  buildResponseSupplements,
-  type FormattedSupplement,
-} from './response-supplements.js';
+import type { FormattedSupplement } from './response-supplements.js';
+import type { V2ExecutionOutput } from './output-schemas.js';
+import { buildExecutionResponse } from './execution-response.js';
 
-// ---------------------------------------------------------------------------
-// Response shape types (mirrors output schemas without importing them)
-// ---------------------------------------------------------------------------
-
-interface V2PendingStep {
-  readonly stepId: string;
-  readonly title: string;
-  readonly prompt: string;
-  readonly agentRole?: string;
-}
-
-interface V2Preferences {
-  readonly autonomy: string;
-  readonly riskPolicy: string;
-}
-
-interface V2NextCallParams {
-  readonly continueToken: string;
-}
-
-interface V2NextCall {
-  readonly tool: 'continue_workflow';
-  readonly params: V2NextCallParams;
-}
-
-interface V2Blocker {
-  readonly code: string;
-  readonly pointer: Record<string, unknown>;
-  readonly message: string;
-  readonly suggestedFix?: string;
-}
-
-interface V2Validation {
-  readonly issues: readonly string[];
-  readonly suggestions: readonly string[];
-}
-
-interface V2AssessmentFollowupSupplement {
-  readonly title: string;
-  readonly guidance: string;
-}
-
-interface V2BindingDriftWarning {
-  readonly code: 'BINDING_DRIFT';
-  readonly slotId: string;
-  readonly pinnedValue: string;
-  readonly currentValue: string;
-}
-
-interface V2ExecutionBase {
-  readonly continueToken?: string;
-  readonly checkpointToken?: string;
-  readonly isComplete: boolean;
-  readonly pending: V2PendingStep | null;
-  readonly preferences: V2Preferences;
-  readonly nextIntent: string;
-  readonly nextCall: V2NextCall | null;
-  readonly warnings?: readonly V2BindingDriftWarning[];
-}
-
-interface V2Blocked extends V2ExecutionBase {
-  readonly kind: 'blocked';
-  readonly blockers: { readonly blockers: readonly V2Blocker[] };
-  readonly retryable?: boolean;
-  readonly retryContinueToken?: string;
-  readonly validation?: V2Validation;
-  readonly assessmentFollowup?: V2AssessmentFollowupSupplement;
-}
-
-type V2ExecutionResponse = V2ExecutionBase | (V2ExecutionBase & { readonly kind: 'ok' }) | V2Blocked;
+type V2ExecutionResponse = Exclude<V2ExecutionOutput, { readonly kind: 'gate_checkpoint' }>;
+type V2Blocked = Extract<V2ExecutionResponse, { readonly kind: 'blocked' }>;
+type V2Preferences = V2ExecutionResponse['preferences'];
 
 // ---------------------------------------------------------------------------
 // Shape detection
@@ -219,6 +151,9 @@ function formatTokenBlock(data: V2ExecutionResponse): string {
  */
 function formatBindingDriftWarnings(data: V2ExecutionResponse): string {
   if (!data.warnings || data.warnings.length === 0) return '';
+  if (!('kind' in data)) {
+    return data.warnings.map(warning => `> ${warning}`).join('\n');
+  }
   const lines: string[] = [
     '',
     '> **⚠ Binding Drift Detected**',
@@ -519,20 +454,16 @@ function formatCleanSuccess(data: V2ExecutionResponse): string {
   return lines.join('\n');
 }
 
-function deriveRenderInput(data: unknown): {
-  readonly response: V2ExecutionResponse;
+function deriveRenderInput(data: unknown, cleanFormat: boolean): {
+  readonly response: V2ExecutionOutput;
   readonly lifecycle: V2ExecutionResponseLifecycle;
-  readonly contentEnvelope?: import('./step-content-envelope.js').StepContentEnvelope;
 } | null {
   const envelope = getV2ExecutionRenderEnvelope(data);
   if (envelope != null) {
-    return isV2ExecutionResponse(envelope.response)
-      ? { response: envelope.response, lifecycle: envelope.lifecycle, contentEnvelope: envelope.contentEnvelope }
-      : null;
+    return { response: buildExecutionResponse(envelope, cleanFormat), lifecycle: envelope.lifecycle };
   }
-
   return isV2ExecutionResponse(data)
-    ? { response: data, lifecycle: 'advance' }
+    ? { response: buildExecutionResponse({ kind: 'v2_execution_render_envelope', response: data, lifecycle: 'advance' }, cleanFormat), lifecycle: 'advance' }
     : null;
 }
 
@@ -549,12 +480,10 @@ function deriveRenderInput(data: unknown): {
  * On 'advance' lifecycle: no references emitted.
  */
 function renderReferencesSection(
-  contentEnvelope: import('./step-content-envelope.js').StepContentEnvelope | undefined,
+  refs: V2ExecutionOutput['references'],
   lifecycle: V2ExecutionResponseLifecycle,
 ): FormattedReferences | null {
-  if (contentEnvelope == null) return null;
-  const refs = contentEnvelope.references;
-  if (refs.length === 0) return null;
+  if (refs == null || refs.length === 0) return null;
 
   switch (lifecycle) {
     case 'start': {
@@ -624,26 +553,22 @@ export interface FormattedResponse {
  * @param cleanResponseFormat - Whether to use the clean response format (from feature flags)
  */
 export function formatV2ExecutionResponse(data: unknown, cleanResponseFormat: boolean): FormattedResponse | null {
-  const renderInput = deriveRenderInput(data);
-  if (!renderInput) return null;
-  const cleanFormat = cleanResponseFormat;
-  const { response, lifecycle, contentEnvelope } = renderInput;
+  const renderInput = deriveRenderInput(data, cleanResponseFormat);
+  return renderInput ? formatExecutionResponse(renderInput.response, renderInput.lifecycle, cleanResponseFormat) : null;
+}
 
-  // Render references from content envelope (if present and non-empty)
-  const references = renderReferencesSection(contentEnvelope, lifecycle);
-
-  if (cleanFormat) {
-    return {
-      ...formatV2Clean(response),
-      ...(references != null ? { references } : {}),
-      supplements: buildResponseSupplements({ lifecycle, cleanFormat }),
-    };
-  }
-
-  // Classic format: single content item, no separate guidance
+/** Formatted text consumes the same public payload as structured and JSON delivery. */
+export function formatExecutionResponse(
+  response: V2ExecutionOutput,
+  lifecycle: V2ExecutionResponseLifecycle,
+  cleanFormat: boolean,
+): FormattedResponse | null {
+  if ('kind' in response && response.kind === 'gate_checkpoint') return null;
+  const references = renderReferencesSection(response.references, lifecycle);
   return {
-    primary: formatV2Classic(response),
+    ...(cleanFormat ? formatV2Clean(response) : { primary: formatV2Classic(response) }),
     ...(references != null ? { references } : {}),
+    ...(response.supplements != null ? { supplements: response.supplements } : {}),
   };
 }
 

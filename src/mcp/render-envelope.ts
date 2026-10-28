@@ -8,20 +8,20 @@
  */
 
 import type { StepContentEnvelope } from './step-content-envelope.js';
+import type { V2ExecutionOutput } from './output-schemas.js';
 
 /** Valid lifecycle phases for v2 execution responses. */
 export const V2_EXECUTION_LIFECYCLES = ['start', 'advance', 'rehydrate'] as const;
 
 export type V2ExecutionResponseLifecycle = (typeof V2_EXECUTION_LIFECYCLES)[number];
 
-export interface V2ExecutionRenderEnvelope<TResponse> {
+export interface V2ExecutionRenderEnvelope<TResponse extends V2ExecutionOutput = V2ExecutionOutput> {
   readonly kind: 'v2_execution_render_envelope';
   readonly response: TResponse;
   readonly lifecycle: V2ExecutionResponseLifecycle;
   /**
    * Typed content envelope for the pending step.
-   * When present, the formatter can use it for structured content rendering.
-   * When absent, the formatter falls back to current behavior (incremental adoption).
+   * Supplies references and delivery guidance without replacing public pending state.
    */
   readonly contentEnvelope?: StepContentEnvelope;
 }
@@ -33,7 +33,7 @@ interface V2ExecutionRenderMetadata {
 
 const V2_EXECUTION_RENDER_META = Symbol.for('workrail.v2ExecutionRenderMeta');
 
-export function createV2ExecutionRenderEnvelope<TResponse>(args: {
+export function createV2ExecutionRenderEnvelope<TResponse extends V2ExecutionOutput>(args: {
   readonly response: TResponse;
   readonly lifecycle: V2ExecutionResponseLifecycle;
   readonly contentEnvelope?: StepContentEnvelope;
@@ -48,7 +48,7 @@ export function createV2ExecutionRenderEnvelope<TResponse>(args: {
 
 const VALID_LIFECYCLES: ReadonlySet<string> = new Set(V2_EXECUTION_LIFECYCLES);
 
-export function attachV2ExecutionRenderMetadata<TResponse extends object>(args: {
+export function attachV2ExecutionRenderMetadata<TResponse extends V2ExecutionOutput>(args: {
   readonly response: TResponse;
   readonly lifecycle: V2ExecutionResponseLifecycle;
   readonly contentEnvelope?: StepContentEnvelope;
@@ -68,7 +68,7 @@ export function attachV2ExecutionRenderMetadata<TResponse extends object>(args: 
 
 export function getV2ExecutionRenderEnvelope(
   value: unknown,
-): V2ExecutionRenderEnvelope<unknown> | null {
+): V2ExecutionRenderEnvelope | null {
   if (typeof value !== 'object' || value === null) return null;
 
   const candidate = value as Record<string, unknown>;
@@ -78,7 +78,7 @@ export function getV2ExecutionRenderEnvelope(
     typeof candidate.lifecycle === 'string' &&
     VALID_LIFECYCLES.has(candidate.lifecycle)
   ) {
-    return candidate as unknown as V2ExecutionRenderEnvelope<unknown>;
+    return candidate as unknown as V2ExecutionRenderEnvelope;
   }
 
   const metadata = Reflect.get(candidate, V2_EXECUTION_RENDER_META) as V2ExecutionRenderMetadata | undefined;
@@ -87,7 +87,7 @@ export function getV2ExecutionRenderEnvelope(
   }
 
   return createV2ExecutionRenderEnvelope({
-    response: value,
+    response: value as V2ExecutionOutput,
     lifecycle: metadata.lifecycle,
     contentEnvelope: metadata.contentEnvelope,
   });
@@ -95,7 +95,7 @@ export function getV2ExecutionRenderEnvelope(
 
 export function isV2ExecutionRenderEnvelope(
   value: unknown,
-): value is V2ExecutionRenderEnvelope<unknown> {
+): value is V2ExecutionRenderEnvelope {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Record<string, unknown>;
   return (
