@@ -145,7 +145,7 @@
     "@vitest/ui": "^3.2.4",
     "conventional-changelog-conventionalcommits": "^9.1.0",
     "fast-check": "^4.6.0",
-    "happy-dom": "^20.0.11",
+    "happy-dom": "^21.0.4",
     "jsdom": "^29.0.2",
     "lit": "^3.3.1",
     "node-fetch": "^3.3.2",
